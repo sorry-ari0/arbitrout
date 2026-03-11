@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 150" shape-rendering="crispEdges">
+  <!-- Background -->
+  <rect width="200" height="150" fill="#0a0a14"/>
+
+  <!-- === DESK === -->
+  <rect x="30" y="110" width="140" height="6" fill="#555566"/>
+  <!-- Desk legs -->
+  <rect x="38" y="116" width="6" height="18" fill="#444455"/>
+  <rect x="156" y="116" width="6" height="18" fill="#444455"/>
+
+  <!-- === LEFT MONITOR === -->
+  <!-- Monitor frame -->
+  <rect x="36" y="58" width="50" height="38" fill="#222233" stroke="#444466" stroke-width="2"/>
+  <!-- Screen -->
+  <rect x="40" y="62" width="42" height="30" fill="#0d1117"/>
+  <!-- Monitor stand -->
+  <rect x="56" y="96" width="10" height="14" fill="#333344"/>
+  <!-- Candlestick bars on left monitor -->
+  <!-- Bar 1 - red (down) -->
+  <rect x="45" y="72" width="1" height="14" fill="#ff4444"/>
+  <rect x="44" y="76" width="3" height="6" fill="#ff4444"/>
+  <!-- Bar 2 - green (up) -->
+  <rect x="51" y="70" width="1" height="16" fill="#00cc66"/>
+  <rect x="50" y="72" width="3" height="8" fill="#00cc66"/>
+  <!-- Bar 3 - red -->
+  <rect x="57" y="74" width="1" height="12" fill="#ff4444"/>
+  <rect x="56" y="78" width="3" height="5" fill="#ff4444"/>
+  <!-- Bar 4 - green -->
+  <rect x="63" y="68" width="1" height="18" fill="#00cc66"/>
+  <rect x="62" y="70" width="3" height="10" fill="#00cc66"/>
+  <!-- Bar 5 - green -->
+  <rect x="69" y="66" width="1" height="16" fill="#00cc66"/>
+  <rect x="68" y="68" width="3" height="8" fill="#00cc66"/>
+  <!-- Bar 6 - red -->
+  <rect x="75" y="70" width="1" height="14" fill="#ff4444"/>
+  <rect x="74" y="74" width="3" height="7" fill="#ff4444"/>
+
+  <!-- === RIGHT MONITOR === -->
+  <!-- Monitor frame -->
+  <rect x="114" y="58" width="50" height="38" fill="#222233" stroke="#444466" stroke-width="2"/>
+  <!-- Screen -->
+  <rect x="118" y="62" width="42" height="30" fill="#0d1117"/>
+  <!-- Monitor stand -->
+  <rect x="134" y="96" width="10" height="14" fill="#333344"/>
+  <!-- Candlestick bars on right monitor -->
+  <!-- Bar 1 - green -->
+  <rect x="123" y="70" width="1" height="16" fill="#00cc66"/>
+  <rect x="122" y="72" width="3" height="8" fill="#00cc66"/>
+  <!-- Bar 2 - green -->
+  <rect x="129" y="68" width="1" height="14" fill="#00cc66"/>
+  <rect x="128" y="69" width="3" height="9" fill="#00cc66"/>
+  <!-- Bar 3 - red -->
+  <rect x="135" y="72" width="1" height="14" fill="#ff4444"/>
+  <rect x="134" y="76" width="3" height="7" fill="#ff4444"/>
+  <!-- Bar 4 - red -->
+  <rect x="141" y="74" width="1" height="12" fill="#ff4444"/>
+  <rect x="140" y="78" width="3" height="5" fill="#ff4444"/>
+  <!-- Bar 5 - green -->
+  <rect x="147" y="66" width="1" height="20" fill="#00cc66"/>
+  <rect x="146" y="68" width="3" height="10" fill="#00cc66"/>
+  <!-- Bar 6 - green -->
+  <rect x="153" y="64" width="1" height="18" fill="#00cc66"/>
+  <rect x="152" y="66" width="3" height="9" fill="#00cc66"/>
+
+  <!-- === LOBSTER BODY === -->
+  <!-- Tail (left side, curving down) -->
+  <rect x="72" y="106" width="4" height="4" fill="#cc3322"/>
+  <rect x="76" y="104" width="4" height="4" fill="#cc3322"/>
+  <rect x="80" y="102" width="4" height="4" fill="#dd3b2a"/>
+  <!-- Tail fan -->
+  <rect x="66" y="104" width="6" height="3" fill="#cc3322"/>
+  <rect x="64" y="107" width="4" height="3" fill="#bb2211"/>
+  <rect x="68" y="107" width="4" height="3" fill="#bb2211"/>
+
+  <!-- Main body / torso -->
+  <rect x="84" y="96" width="8" height="14" fill="#ee4433"/>
+  <rect x="92" y="94" width="8" height="14" fill="#ff4444"/>
+  <rect x="88" y="98" width="4" height="10" fill="#ee4433"/>
+
+  <!-- Head -->
+  <rect x="100" y="90" width="10" height="12" fill="#ff4444"/>
+  <rect x="96" y="92" width="4" height="8" fill="#ff4444"/>
+  <rect x="110" y="92" width="4" height="8" fill="#ee3333"/>
+
+  <!-- Eyes (two small beady eyes) -->
+  <rect x="104" y="92" width="3" height="3" fill="#ffff66"/>
+  <rect x="104" y="93" width="1" height="1" fill="#111111"/>
+
+  <rect x="108" y="91" width="3" height="3" fill="#ffff66"/>
+  <rect x="109" y="92" width="1" height="1" fill="#111111"/>
+
+  <!-- Antennae -->
+  <rect x="106" y="86" width="1" height="6" fill="#ff6655"/>
+  <rect x="105" y="84" width="1" height="3" fill="#ff6655"/>
+  <rect x="104" y="82" width="1" height="3" fill="#ff6655"/>
+
+  <rect x="110" y="86" width="1" height="6" fill="#ff6655"/>
+  <rect x="111" y="84" width="1" height="3" fill="#ff6655"/>
+  <rect x="112" y="82" width="1" height="3" fill="#ff6655"/>
+
+  <!-- === CLAWS (reaching toward monitors) === -->
+  <!-- Left claw arm -->
+  <rect x="82" y="96" width="4" height="3" fill="#ee4433"/>
+  <rect x="78" y="94" width="4" height="3" fill="#ee4433"/>
+  <rect x="74" y="92" width="4" height="3" fill="#ee4433"/>
+  <rect x="70" y="94" width="4" height="3" fill="#dd3b2a"/>
+  <!-- Left claw pincer -->
+  <rect x="66" y="92" width="5" height="3" fill="#ff5544"/>
+  <rect x="64" y="90" width="3" height="3" fill="#ff5544"/>
+  <rect x="64" y="95" width="3" height="3" fill="#ff5544"/>
+
+  <!-- Right claw arm -->
+  <rect x="114" y="96" width="4" height="3" fill="#ee4433"/>
+  <rect x="118" y="94" width="4" height="3" fill="#ee4433"/>
+  <rect x="122" y="92" width="4" height="3" fill="#ee4433"/>
+  <rect x="126" y="94" width="4" height="3" fill="#dd3b2a"/>
+  <!-- Right claw pincer -->
+  <rect x="130" y="92" width="5" height="3" fill="#ff5544"/>
+  <rect x="134" y="90" width="3" height="3" fill="#ff5544"/>
+  <rect x="134" y="95" width="3" height="3" fill="#ff5544"/>
+
+  <!-- === SMALL LEGS (under body) === -->
+  <rect x="86" y="108" width="2" height="4" fill="#cc3322"/>
+  <rect x="90" y="108" width="2" height="4" fill="#cc3322"/>
+  <rect x="94" y="108" width="2" height="4" fill="#cc3322"/>
+  <rect x="98" y="108" width="2" height="4" fill="#cc3322"/>
+
+  <!-- === MONITOR GLOW (subtle) === -->
+  <rect x="40" y="92" width="42" height="1" fill="#00cc66" opacity="0.15"/>
+  <rect x="118" y="92" width="42" height="1" fill="#00cc66" opacity="0.15"/>
+
+  <!-- === TITLE TEXT === -->
+  <text x="100" y="145" text-anchor="middle" fill="#667788" font-family="monospace" font-size="7" letter-spacing="2">LOBSTERMINAL</text>
+</svg>

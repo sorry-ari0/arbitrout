@@ -1,0 +1,13 @@
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+websockets==15.0.1
+yfinance==0.2.54
+httpx==0.28.1
+APScheduler==3.10.4
+numpy>=1.26.0
+pandas>=2.2.0
+pydantic>=2.0.0,<3.0.0
+feedparser>=6.0.0
+lxml>=5.0.0
+beautifulsoup4>=4.12.0
+scrapling>=0.4.0

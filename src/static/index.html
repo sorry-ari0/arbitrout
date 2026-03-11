@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lobsterminal</title>
+    <link rel="stylesheet" href="/static/css/terminal.css">
+    <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+    <!-- Splash Screen -->
+    <div id="splash-screen" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #0a0a14; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 9999; transition: opacity 0.5s ease-out;">
+        <img src="/static/img/lobster.svg" alt="Lobsterminal" style="height: 300px; width: auto; image-rendering: pixelated; animation: pulse-glow 2s ease-in-out infinite;">
+        <div style="font-family: 'Courier New', monospace; font-size: 36px; font-weight: bold; color: #ff8c00; margin-top: 20px; letter-spacing: 4px;">LOBSTERMINAL</div>
+        <div style="font-family: 'Courier New', monospace; font-size: 12px; color: #666; margin-top: 8px;">Financial Intelligence Terminal</div>
+    </div>
+    <style>
+        @keyframes pulse-glow {
+            0%, 100% { filter: drop-shadow(0 0 8px rgba(255, 140, 0, 0.3)); opacity: 0.9; }
+            50% { filter: drop-shadow(0 0 24px rgba(255, 140, 0, 0.6)); opacity: 1; }
+        }
+    </style>
+
+    <!-- Header Bar -->
+    <header id="header">
+        <div class="header-left">
+            <img src="/static/img/lobster.svg" alt="Lobsterminal" style="height: 28px; vertical-align: middle; margin-right: 6px;"><span class="logo">LOBSTERMINAL</span>
+            <span class="separator">|</span>
+            <span id="clock"></span>
+        </div>
+        <div class="header-center">
+            <input type="text" id="command-bar" placeholder="Enter ticker or command... (ESC to focus)" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="header-right">
+            <span id="ws-status" class="status-dot disconnected" title="WebSocket disconnected"></span>
+            <span class="header-label">TERMINAL</span>
+        </div>
+    </header>
+
+    <!-- Main Grid -->
+    <main id="terminal-grid">
+        <!-- Pane 1: Market Data -->
+        <section class="pane" id="pane-market" data-pane="1">
+            <div class="pane-header">
+                <span class="pane-title">MARKET DATA</span>
+                <span class="pane-number">1</span>
+            </div>
+            <div class="pane-body">
+                <table id="market-table">
+                    <thead>
+                        <tr>
+                            <th>SYMBOL</th>
+                            <th>LAST</th>
+                            <th>CHG</th>
+                            <th>CHG%</th>
+                            <th>VOLUME</th>
+                            <th>HIGH</th>
+                            <th>LOW</th>
+                        </tr>
+                    </thead>
+                    <tbody id="market-tbody"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Pane 2: Chart -->
+        <section class="pane" id="pane-chart" data-pane="2">
+            <div class="pane-header">
+                <span class="pane-title" id="chart-title">CHART — SPY</span>
+                <div class="period-buttons">
+                    <button class="period-btn" data-period="1d" data-interval="5m">1D</button>
+                    <button class="period-btn" data-period="5d" data-interval="1h">1W</button>
+                    <button class="period-btn" data-period="1mo" data-interval="1d">1M</button>
+                    <button class="period-btn" data-period="3mo" data-interval="1d">3M</button>
+                    <button class="period-btn active" data-period="6mo" data-interval="1d">6M</button>
+                    <button class="period-btn" data-period="1y" data-interval="1d">1Y</button>
+                    <button class="period-btn" id="backtest-btn" style="margin-left:8px;background:var(--blue);color:#fff;">BACKTEST</button>
+                </div>
+                <span class="pane-number">2</span>
+            </div>
+            <div class="pane-body" id="chart-container"></div>
+            <div id="backtest-results" class="hidden" style="position:absolute;bottom:0;left:0;right:0;background:rgba(10,10,20,0.95);border-top:1px solid var(--border);padding:8px 12px;font-size:11px;z-index:10;"></div>
+        </section>
+
+        <!-- Pane 3: Watchlist -->
+        <section class="pane" id="pane-watchlist" data-pane="3">
+            <div class="pane-header">
+                <span class="pane-title">WATCHLIST</span>
+                <span class="pane-number">3</span>
+            </div>
+            <div class="pane-body">
+                <div id="watchlist-controls">
+                    <input type="text" id="watchlist-input" placeholder="Add symbol..." maxlength="10">
+                    <button id="watchlist-add-btn">+</button>
+                </div>
+                <ul id="watchlist-items"></ul>
+            </div>
+        </section>
+
+        <!-- Pane 4: News / Intel Feed -->
+        <section class="pane" id="pane-news" data-pane="4">
+            <div class="pane-header">
+                <span class="pane-title">NEWS</span>
+                <div class="intel-tabs" style="display:inline-flex;gap:2px;margin-left:8px;">
+                    <button class="intel-tab active" data-tab="news" style="background:none;border:1px solid var(--border);color:var(--accent);padding:1px 6px;font-family:var(--mono);font-size:8px;cursor:pointer;">NEWS</button>
+                    <button class="intel-tab" data-tab="insiders" style="background:none;border:1px solid var(--border);color:var(--text-secondary);padding:1px 6px;font-family:var(--mono);font-size:8px;cursor:pointer;">INSIDERS</button>
+                    <button class="intel-tab" data-tab="estimates" style="background:none;border:1px solid var(--border);color:var(--text-secondary);padding:1px 6px;font-family:var(--mono);font-size:8px;cursor:pointer;">ESTIMATES</button>
+                    <button class="intel-tab" data-tab="filings" style="background:none;border:1px solid var(--border);color:var(--text-secondary);padding:1px 6px;font-family:var(--mono);font-size:8px;cursor:pointer;">FILINGS</button>
+                    <button class="intel-tab" data-tab="financials" style="background:none;border:1px solid var(--border);color:var(--text-secondary);padding:1px 6px;font-family:var(--mono);font-size:8px;cursor:pointer;">FINANCIALS</button>
+                    <button class="intel-tab" data-tab="segments" style="background:none;border:1px solid var(--border);color:var(--text-secondary);padding:1px 6px;font-family:var(--mono);font-size:8px;cursor:pointer;">SEGMENTS</button>
+                </div>
+                <span class="pane-number">4</span>
+            </div>
+            <div class="pane-body">
+                <div id="dexter-ratios-bar" style="display:none;background:var(--bg-secondary);border-bottom:1px solid var(--border);padding:4px 8px;font-size:9px;overflow-x:auto;white-space:nowrap;"></div>
+                <ul id="news-list"></ul>
+                <div id="insider-trades-list" style="display:none;overflow-y:auto;"></div>
+                <div id="analyst-estimates-list" style="display:none;overflow-y:auto;"></div>
+                <div id="sec-filings-list" style="display:none;overflow-y:auto;"></div>
+                <div id="financials-list" style="display:none;overflow-y:auto;"></div>
+                <div id="segments-list" style="display:none;overflow-y:auto;"></div>
+            </div>
+        </section>
+
+        <!-- Pane 5: Screener -->
+        <section class="pane" id="pane-screener" data-pane="5">
+            <div class="pane-header">
+                <span class="pane-title">STOCK SCREENER</span>
+                <span class="pane-number">5</span>
+            </div>
+            <div class="pane-body">
+                <div id="screener-controls">
+                    <input type="text" id="screener-input" placeholder="Describe stocks you want (e.g., tech stocks with high growth)..." style="width: calc(100% - 50px); background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-primary); padding: 6px 8px; font-family: var(--mono); font-size: 11px;">
+                    <button id="screener-btn" style="background: var(--accent); color: #000; border: none; padding: 6px 12px; cursor: pointer; font-family: var(--mono); font-weight: bold;">GO</button>
+                </div>
+                <div id="strategy-controls" style="margin-top: 4px; display: flex; gap: 4px; align-items: center; flex-wrap: wrap;">
+                    <button id="strategy-btn" style="background: #00c853; color: #000; border: none; padding: 6px 12px; cursor: pointer; font-family: var(--mono); font-weight: bold; font-size: 10px;">STRATEGY</button>
+                    <input id="strategy-amount" type="number" value="10000" placeholder="$" style="width: 80px; background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-primary); padding: 4px 6px; font-family: var(--mono); font-size: 10px;">
+                    <select id="strategy-period" style="background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-primary); padding: 4px 4px; font-family: var(--mono); font-size: 10px;">
+                        <option value="6mo">6M</option>
+                        <option value="1y" selected>1Y</option>
+                        <option value="2y">2Y</option>
+                        <option value="5y">5Y</option>
+                    </select>
+                    <button id="ratio-guide-btn" style="background: var(--bg-secondary); color: var(--text-secondary); border: 1px solid var(--border); padding: 4px 6px; cursor: pointer; font-family: var(--mono); font-size: 9px;" title="Show available metrics">METRICS</button>
+                </div>
+                <div id="strategy-templates" style="margin-top: 4px; display: flex; gap: 3px; flex-wrap: wrap;"></div>
+                <div id="ratio-guide" style="margin-top: 4px; display: none; background: var(--bg-secondary); border: 1px solid var(--border); padding: 6px; font-size: 9px; max-height: 150px; overflow-y: auto;"></div>
+                <div id="metric-picker" style="margin-top:4px;display:none;background:var(--bg-secondary);border:1px solid var(--border);padding:6px;max-height:200px;overflow-y:auto;"></div>
+                <div id="active-filters" style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px;"></div>
+                <div id="screener-results" style="margin-top: 8px; overflow-y: auto; max-height: calc(100% - 100px);"></div>
+            </div>
+        </section>
+
+        <!-- Pane 6: Portfolio -->
+        <section class="pane" id="pane-portfolio" data-pane="6">
+            <div class="pane-header">
+                <span class="pane-title">PORTFOLIO</span>
+                <span class="pane-number">6</span>
+            </div>
+            <div class="pane-body">
+                <div id="portfolio-controls" style="display: flex; gap: 4px; margin-bottom: 6px; align-items: center; flex-wrap: wrap;">
+                    <select id="portfolio-selector" style="flex: 1; background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-primary); padding: 4px 6px; font-family: var(--mono); font-size: 10px;">
+                        <option value="">— No Portfolios —</option>
+                    </select>
+                    <button id="portfolio-new-btn" style="background: var(--accent); color: #000; border: none; padding: 4px 8px; cursor: pointer; font-family: var(--mono); font-weight: bold; font-size: 10px;" title="New Portfolio">+ NEW</button>
+                    <button id="portfolio-delete-btn" style="background: #ff4444; color: #fff; border: none; padding: 4px 8px; cursor: pointer; font-family: var(--mono); font-weight: bold; font-size: 10px;" title="Delete Portfolio">DEL</button>
+                </div>
+                <div id="portfolio-ticker-controls" style="display: flex; gap: 4px; margin-bottom: 6px; align-items: center;">
+                    <input type="text" id="portfolio-tickers" placeholder="Tickers (AAPL,MSFT,NVDA)" style="flex: 1; background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-primary); padding: 4px 6px; font-family: var(--mono); font-size: 10px;">
+                    <input type="number" id="portfolio-capital" placeholder="$" value="10000" style="width: 80px; background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-primary); padding: 4px 6px; font-family: var(--mono); font-size: 10px;">
+                    <button id="portfolio-deploy-btn" style="background: var(--green); color: #000; border: none; padding: 4px 8px; cursor: pointer; font-family: var(--mono); font-weight: bold; font-size: 10px;">DEPLOY</button>
+                    <button id="portfolio-harvest-btn" style="background: var(--yellow, #FFD700); color: #000; border: none; padding: 4px 8px; cursor: pointer; font-family: var(--mono); font-weight: bold; font-size: 10px;">HARVEST</button>
+                </div>
+                <div id="portfolio-display" style="overflow-y: auto; max-height: calc(100% - 70px);"></div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer id="footer">
+        <span id="footer-symbol">SPY</span>
+        <span class="separator">|</span>
+        <span id="footer-price">--</span>
+        <span id="footer-change">--</span>
+        <span class="separator">|</span>
+        <span id="footer-help">Press ? for shortcuts</span>
+    </footer>
+
+    <!-- Shortcuts Overlay -->
+    <div id="shortcuts-overlay" class="overlay hidden">
+        <div class="overlay-content">
+            <h2>Keyboard Shortcuts</h2>
+            <div class="shortcut-grid">
+                <div><kbd>1</kbd>-<kbd>6</kbd> Focus pane</div>
+                <div><kbd>Esc</kbd> Command bar</div>
+                <div><kbd>j</kbd>/<kbd>k</kbd> Navigate list</div>
+                <div><kbd>Enter</kbd> Select / Load chart</div>
+                <div><kbd>?</kbd> Toggle shortcuts</div>
+                <div><kbd>/</kbd> Command mode</div>
+            </div>
+            <p class="overlay-dismiss">Press any key to close</p>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

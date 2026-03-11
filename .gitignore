@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.env
+src/data/*.json
+*.lock
+.dispatcher.lock
+_section_*.tmp
+*.bak
+file_snapshots.json
+.aider*
+node_modules/
