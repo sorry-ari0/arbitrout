@@ -42,7 +42,10 @@ class LimitlessAdapter(BaseAdapter):
         events: list[NormalizedEvent] = []
 
         # Step 1: get active market list
-        resp = await client.get(f"{self.BASE_URL}/markets/browse-active")
+        resp = await client.get(
+            f"{self.BASE_URL}/markets",
+            params={"status": "active", "limit": 200},
+        )
         resp.raise_for_status()
         markets = resp.json()
 

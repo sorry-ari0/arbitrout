@@ -58,8 +58,9 @@ class RobinhoodAdapter(BaseAdapter):
             fetcher = Fetcher(auto_match=True)
             page = fetcher.get(self.BASE_URL)
 
-            if not page or not page.status_code or page.status_code != 200:
-                logger.warning("Robinhood scrape returned status %s", getattr(page, 'status_code', 'N/A'))
+            status = getattr(page, 'status', None) or getattr(page, 'status_code', None)
+            if not page or (status and status != 200):
+                logger.warning("Robinhood scrape returned status %s", status)
                 return []
 
             # Look for market cards — Robinhood renders markets as cards/rows

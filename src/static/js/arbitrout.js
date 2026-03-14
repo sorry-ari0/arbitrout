@@ -166,7 +166,7 @@ function stopArbPolling() {
 // === WEBSOCKET ===
 function connectArbWs() {
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    arbWs = new WebSocket(proto + '//' + location.host + '/ws/arbitrage');
+    arbWs = new WebSocket(proto + '//' + location.host + '/api/arbitrage/ws');
 
     arbWs.onmessage = function(e) {
         var data = JSON.parse(e.data);
@@ -329,7 +329,7 @@ function showEventDetail(opp) {
     saveBtn.style.cssText = 'margin:8px;padding:6px 12px;background:var(--arb-accent);color:var(--arb-bg);border:none;border-radius:3px;cursor:pointer;font-family:monospace;font-size:11px;font-weight:700;';
     saveBtn.textContent = 'BOOKMARK';
     saveBtn.addEventListener('click', function() {
-        saveMarket(event.canonical_title || opp.canonical_title);
+        saveMarket(event.match_id || '', event.canonical_title || opp.canonical_title || '', event.category || '');
     });
     container.appendChild(saveBtn);
 }
@@ -417,7 +417,7 @@ function renderSaved(items) {
 
         var titleEl = document.createElement('div');
         titleEl.className = 'saved-title';
-        titleEl.textContent = item.title || item;
+        titleEl.textContent = item.canonical_title || item.title || item;
         row.appendChild(titleEl);
 
         var removeBtn = document.createElement('button');
@@ -425,7 +425,7 @@ function renderSaved(items) {
         removeBtn.textContent = '\u00D7';
         removeBtn.addEventListener('click', function(e) {
             e.stopPropagation();
-            removeSaved(item.title || item);
+            removeSaved(item.match_id || '');
         });
         row.appendChild(removeBtn);
 
@@ -433,19 +433,17 @@ function renderSaved(items) {
     });
 }
 
-function saveMarket(title) {
+function saveMarket(matchId, title, category) {
     fetch('/api/arbitrage/saved', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({title: title})
+        body: JSON.stringify({match_id: matchId, canonical_title: title, category: category})
     }).then(function() { loadSavedMarkets(); });
 }
 
-function removeSaved(title) {
-    fetch('/api/arbitrage/saved', {
-        method: 'DELETE',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({title: title})
+function removeSaved(matchId) {
+    fetch('/api/arbitrage/saved/' + encodeURIComponent(matchId), {
+        method: 'DELETE'
     }).then(function() { loadSavedMarkets(); });
 }
 

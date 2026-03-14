@@ -97,7 +97,8 @@ class CoinbaseAdapter(BaseAdapter):
         try:
             fetcher = Fetcher(auto_match=True)
             page = fetcher.get("https://www.coinbase.com/prediction-markets")
-            if not page or page.status_code != 200:
+            status = getattr(page, 'status', None) or getattr(page, 'status_code', None)
+            if not page or (status and status != 200):
                 return []
 
             cards = page.css('[class*="market"], [class*="prediction"], a[href*="prediction"]')

@@ -42,23 +42,56 @@ def _title_hash(title: str) -> str:
 # ============================================================
 # FUZZY MATCHING
 # ============================================================
+_STOPWORDS = {
+    "will", "the", "a", "an", "be", "by", "in", "of", "for", "to", "on",
+    "and", "or", "is", "it", "at", "this", "that", "if", "which", "who",
+    "what", "when", "how", "win", "election", "party", "market", "price",
+    "next", "after", "before", "between", "from", "than", "more", "most",
+    "republican", "democrat", "democratic", "governor", "senator", "state",
+    "primary", "general", "runoff", "vote", "year",
+    "2024", "2025", "2026", "2027", "2028", "2029", "2030",
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december",
+    "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
+}
+
+
+def _extract_entities(title: str) -> set[str]:
+    """Extract likely entity words (names, places, specific subjects).
+    Filters out generic political/market stopwords to improve match quality."""
+    words = set(title.lower().split())
+    return words - _STOPWORDS
+
+
 def _fuzzy_score(a: str, b: str) -> float:
-    """Score similarity between two titles using thefuzz."""
+    """Score similarity between two titles using thefuzz + entity bonus.
+    Entity overlap (proper nouns, specific subjects) boosts the score.
+    No entity overlap applies a penalty to prevent false matches on
+    generic political phrases like 'Republican governor 2026'."""
+    entities_a = _extract_entities(a)
+    entities_b = _extract_entities(b)
+    entity_overlap = len(entities_a & entities_b) if entities_a and entities_b else 0
+    entity_max = max(len(entities_a), len(entities_b), 1)
+    entity_ratio = entity_overlap / entity_max
+
     try:
         from thefuzz import fuzz
-        # Weighted: token_sort_ratio (word order insensitive) + partial_ratio
         score1 = fuzz.token_sort_ratio(a, b) / 100.0
         score2 = fuzz.partial_ratio(a, b) / 100.0
-        return 0.6 * score1 + 0.4 * score2
+        fuzzy = 0.6 * score1 + 0.4 * score2
     except ImportError:
-        # Fallback: simple word overlap (Jaccard)
         words_a = set(a.lower().split())
         words_b = set(b.lower().split())
         if not words_a or not words_b:
             return 0.0
         intersection = words_a & words_b
         union = words_a | words_b
-        return len(intersection) / len(union)
+        fuzzy = len(intersection) / len(union)
+
+    # Blend: 70% fuzzy score + 30% entity overlap
+    # This ensures high fuzzy scores on generic text get penalized
+    # without completely blocking matches that have some entity overlap
+    return 0.7 * fuzzy + 0.3 * entity_ratio
 
 
 def _expiry_compatible(a: str, b: str, max_days: int = 7) -> bool:
@@ -96,7 +129,7 @@ def _save_manual_links(links: list[dict]):
 # ============================================================
 # MATCH ENGINE
 # ============================================================
-MATCH_THRESHOLD = 0.70  # fuzzy score threshold
+MATCH_THRESHOLD = 0.72  # fuzzy + entity blend (entity overlap prevents false generic matches)
 
 
 def match_events(events: list[NormalizedEvent]) -> list[MatchedEvent]:
