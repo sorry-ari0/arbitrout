@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 .env
 src/data/*.json
+src/data/arbitrage/cache.json
 *.lock
 .dispatcher.lock
 _section_*.tmp

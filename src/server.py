@@ -34,6 +34,22 @@ import feedparser
 
 logger = logging.getLogger(__name__)
 
+# --- Arbitrage imports ---
+try:
+    from arbitrage_router import router as arbitrage_router, init_scanner
+    from adapters.registry import AdapterRegistry
+    from adapters.kalshi import KalshiAdapter
+    from adapters.polymarket import PolymarketAdapter
+    from adapters.predictit import PredictItAdapter
+    from adapters.limitless import LimitlessAdapter
+    from adapters.opinion_labs import OpinionLabsAdapter
+    from adapters.robinhood import RobinhoodAdapter
+    from adapters.coinbase import CoinbaseAdapter
+    _ARBITRAGE_AVAILABLE = True
+except ImportError as _arb_err:
+    logger.warning("Arbitrage modules not available: %s", _arb_err)
+    _ARBITRAGE_AVAILABLE = False
+
 # --- C1 fix: API Key Authentication ---
 API_KEY = os.environ.get("LOBSTERMINAL_API_KEY", "dev-local-only")
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -95,11 +111,26 @@ async def lifespan(app: FastAPI):
     # Start portfolio scheduler
     from portfolio_manager import start_scheduler
     scheduler = start_scheduler()
+    # Init Arbitrage subsystem
+    if _ARBITRAGE_AVAILABLE:
+        arb_registry = AdapterRegistry()
+        arb_registry.register(KalshiAdapter())
+        arb_registry.register(PolymarketAdapter())
+        arb_registry.register(PredictItAdapter())
+        arb_registry.register(LimitlessAdapter())
+        arb_registry.register(OpinionLabsAdapter())
+        arb_registry.register(RobinhoodAdapter())
+        arb_registry.register(CoinbaseAdapter())
+        init_scanner(arb_registry)
+        (DATA_DIR / "arbitrage").mkdir(exist_ok=True)
+        logger.info("Arbitrage subsystem initialized with %d adapters", len(arb_registry.list_platforms()))
     logger.info("Lobsterminal started on port 8500")
     yield
     # Shutdown scheduler on app exit
     if scheduler:
         scheduler.shutdown(wait=False)
+    if _ARBITRAGE_AVAILABLE:
+        await arb_registry.close_all()
     logger.info("Lobsterminal shutting down")
 
 
@@ -134,6 +165,9 @@ app.include_router(backtest_router)
 app.include_router(portfolio_router)
 app.include_router(portfolios_router)
 app.include_router(strategy_router)
+
+if _ARBITRAGE_AVAILABLE:
+    app.include_router(arbitrage_router)
 
 # --- API Routes ---
 
