@@ -75,6 +75,18 @@ class ArbitrageOpportunity:
     profit_pct: float           # spread * 100
     combined_volume: int
 
+    @property
+    def yes_allocation_pct(self) -> float:
+        """% of capital to allocate to YES contracts."""
+        total = self.buy_yes_price + self.buy_no_price
+        return round((self.buy_no_price / total) * 100, 1) if total > 0 else 50.0
+
+    @property
+    def no_allocation_pct(self) -> float:
+        """% of capital to allocate to NO contracts."""
+        total = self.buy_yes_price + self.buy_no_price
+        return round((self.buy_yes_price / total) * 100, 1) if total > 0 else 50.0
+
     def to_dict(self) -> dict:
         return {
             "matched_event": self.matched_event.to_dict(),
@@ -85,4 +97,6 @@ class ArbitrageOpportunity:
             "spread": round(self.spread, 4),
             "profit_pct": round(self.profit_pct, 2),
             "combined_volume": self.combined_volume,
+            "yes_allocation_pct": self.yes_allocation_pct,
+            "no_allocation_pct": self.no_allocation_pct,
         }

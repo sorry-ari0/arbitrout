@@ -3,6 +3,7 @@
 
 let arbMode = 'lobsterminal';
 let arbPollingInterval = null;
+let arbScanInterval = null;
 let arbWs = null;
 let selectedOpp = null;
 let feedItems = [];
@@ -10,15 +11,16 @@ let feedItems = [];
 // === PIXEL ART (CSS grid of div cells) ===
 function createPixelGrid(colorMap, scale) {
     // colorMap: 2D array of hex colors (null = transparent)
-    var size = colorMap.length;
+    var rows = colorMap.length;
+    var cols = colorMap[0] ? colorMap[0].length : rows;
     var container = document.createElement('div');
     container.style.display = 'grid';
-    container.style.gridTemplateColumns = 'repeat(' + size + ', ' + scale + 'px)';
-    container.style.gridTemplateRows = 'repeat(' + size + ', ' + scale + 'px)';
+    container.style.gridTemplateColumns = 'repeat(' + cols + ', ' + scale + 'px)';
+    container.style.gridTemplateRows = 'repeat(' + rows + ', ' + scale + 'px)';
     container.style.imageRendering = 'pixelated';
 
-    for (var y = 0; y < size; y++) {
-        for (var x = 0; x < size; x++) {
+    for (var y = 0; y < rows; y++) {
+        for (var x = 0; x < cols; x++) {
             var cell = document.createElement('div');
             var color = colorMap[y][x];
             if (color) {
@@ -31,30 +33,43 @@ function createPixelGrid(colorMap, scale) {
 }
 
 function getTroutPixelArt() {
-    // 16x16 pixel art trout, rendered at 4x scale = 64x64 visual
+    // 24x24 pixel art: trout on old wire phone with computer on desk
     var T = '#00e5cc'; // teal body
     var D = '#009688'; // dark teal
-    var E = '#004d40'; // eye
-    var W = '#e0f7fa'; // white belly
-    var F = '#ff8a65'; // fin/tail accent
+    var E = '#1a1a2e'; // eye
+    var W = '#b2dfdb'; // belly
+    var F = '#ff8a65'; // fin/tail
+    var G = '#3a3a4a'; // desk gray
+    var M = '#2a2a3a'; // monitor frame
+    var B = '#00bcd4'; // screen glow
+    var P = '#5d4037'; // phone brown
+    var Y = '#fdd835'; // phone cord
     var _ = null;
     var map = [
-        [_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_],
-        [_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_],
-        [_,_,_,_,_,_,T,T,T,T,_,_,_,_,_,_],
-        [_,_,_,_,_,T,T,T,T,T,T,_,_,_,_,_],
-        [_,_,_,_,T,T,T,E,T,T,T,T,_,_,_,_],
-        [_,_,_,T,T,T,T,T,T,T,T,T,T,F,_,_],
-        [_,_,T,D,T,T,T,T,T,T,T,T,T,F,F,_],
-        [_,_,T,D,W,W,T,T,T,T,T,T,F,F,_,_],
-        [_,_,T,D,W,W,T,T,T,T,T,T,F,F,_,_],
-        [_,_,T,D,T,T,T,T,T,T,T,T,T,F,F,_],
-        [_,_,_,T,T,T,T,T,T,T,T,T,T,F,_,_],
-        [_,_,_,_,T,T,T,T,T,T,T,T,_,_,_,_],
-        [_,_,_,_,_,T,T,T,T,T,T,_,_,_,_,_],
-        [_,_,_,_,_,_,T,T,T,T,_,_,_,_,_,_],
-        [_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_],
-        [_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_]
+        [_,_,_,_,_,_,_,_,_,_,_,_,_,_,P,P,_,_,_,_,_,_,_,_],
+        [_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,P,_,_,_,_,_,_,_,_],
+        [_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,P,_,_,_,_,_,_,_,_],
+        [_,_,_,_,_,_,_,T,T,T,T,T,_,T,P,P,_,_,_,_,_,_,_,_],
+        [_,_,_,_,_,_,T,T,T,T,T,T,T,T,_,Y,_,_,_,_,_,_,_,_],
+        [_,_,_,_,_,T,T,T,E,T,T,T,T,T,T,_,Y,_,_,_,_,_,_,_],
+        [_,_,_,_,T,T,T,T,T,T,T,T,T,T,T,_,_,Y,_,_,_,_,_,_],
+        [_,_,_,T,D,T,T,T,T,T,T,T,T,T,T,T,_,Y,_,_,_,_,_,_],
+        [_,_,T,D,W,W,T,T,T,T,T,T,T,T,T,T,F,Y,_,_,_,_,_,_],
+        [_,_,T,D,W,W,T,T,T,T,T,T,T,T,T,F,F,Y,_,_,_,_,_,_],
+        [_,_,_,T,T,T,T,T,T,T,T,T,T,T,F,F,_,Y,_,_,_,_,_,_],
+        [_,_,_,_,T,T,T,T,T,T,T,T,T,F,F,_,_,Y,_,_,_,_,_,_],
+        [_,_,_,_,_,T,T,T,T,T,T,F,F,_,_,_,_,Y,_,_,_,_,_,_],
+        [_,_,_,_,_,_,_,T,T,F,F,_,_,_,_,_,_,Y,_,_,_,_,_,_],
+        [G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G],
+        [_,M,M,M,M,M,M,_,_,_,_,_,_,_,_,_,P,P,P,P,_,_,_,_],
+        [_,M,B,B,B,B,M,_,_,_,_,_,_,_,_,_,P,Y,Y,P,_,_,_,_],
+        [_,M,B,B,B,B,M,_,_,_,_,_,_,_,_,_,P,Y,Y,P,_,_,_,_],
+        [_,M,M,M,M,M,M,_,_,_,_,_,_,_,_,_,P,P,P,P,_,_,_,_],
+        [_,_,_,M,M,_,_,_,_,_,_,_,_,_,_,_,_,_,P,_,_,_,_,_],
+        [_,_,M,M,M,M,_,_,_,_,_,_,_,_,_,_,_,P,P,P,_,_,_,_],
+        [G,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,G],
+        [G,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,G],
+        [G,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,G],
     ];
     return createPixelGrid(map, 4);
 }
@@ -144,11 +159,12 @@ function switchMode(mode) {
     }
 }
 
-// === POLLING ===
+// === POLLING + AUTO-SCAN ===
 function startArbPolling() {
-    loadOpportunities();
+    triggerScan();
     loadSavedMarkets();
     arbPollingInterval = setInterval(loadOpportunities, 15000);
+    arbScanInterval = setInterval(triggerScan, 60000);
     connectArbWs();
 }
 
@@ -157,10 +173,27 @@ function stopArbPolling() {
         clearInterval(arbPollingInterval);
         arbPollingInterval = null;
     }
+    if (arbScanInterval) {
+        clearInterval(arbScanInterval);
+        arbScanInterval = null;
+    }
     if (arbWs) {
         arbWs.close();
         arbWs = null;
     }
+}
+
+function triggerScan() {
+    fetch('/api/arbitrage/scan', {method: 'POST'})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var countEl = document.getElementById('opp-count');
+            if (countEl) {
+                countEl.textContent = data.opportunities_count || 0;
+            }
+            loadOpportunities();
+        })
+        .catch(function(err) { console.error('Scan error:', err); });
 }
 
 // === WEBSOCKET ===
@@ -323,6 +356,37 @@ function showEventDetail(opp) {
 
         container.appendChild(row);
     });
+
+    // Arbitrage trade ratio
+    if (opp.buy_yes_price !== undefined && opp.buy_no_price !== undefined) {
+        var yesAlloc = opp.yes_allocation_pct || '50.0';
+        var noAlloc = opp.no_allocation_pct || '50.0';
+
+        var tradeEl = document.createElement('div');
+        tradeEl.style.cssText = 'padding:8px;border-top:1px solid var(--arb-border);font-family:monospace;font-size:11px;';
+
+        var tradeTitle = document.createElement('div');
+        tradeTitle.style.cssText = 'color:var(--arb-accent);font-weight:700;margin-bottom:4px;';
+        tradeTitle.textContent = 'TRADE RATIO';
+        tradeEl.appendChild(tradeTitle);
+
+        var yesLine = document.createElement('div');
+        yesLine.style.color = 'var(--arb-green)';
+        yesLine.textContent = 'BUY YES on ' + (opp.buy_yes_platform || '?') + ': ' + (opp.buy_yes_price * 100).toFixed(1) + '\u00A2 (' + yesAlloc + '% of capital)';
+        tradeEl.appendChild(yesLine);
+
+        var noLine = document.createElement('div');
+        noLine.style.color = '#ff9800';
+        noLine.textContent = 'BUY NO on ' + (opp.buy_no_platform || '?') + ': ' + (opp.buy_no_price * 100).toFixed(1) + '\u00A2 (' + noAlloc + '% of capital)';
+        tradeEl.appendChild(noLine);
+
+        var profitLine = document.createElement('div');
+        profitLine.style.cssText = 'color:var(--arb-green);font-weight:700;margin-top:4px;';
+        profitLine.textContent = 'PROFIT: ' + (opp.profit_pct || (opp.spread * 100)).toFixed(2) + '% per $1 invested';
+        tradeEl.appendChild(profitLine);
+
+        container.appendChild(tradeEl);
+    }
 
     // Save button
     var saveBtn = document.createElement('button');

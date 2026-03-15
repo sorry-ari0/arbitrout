@@ -114,9 +114,18 @@ class PolymarketAdapter(BaseAdapter):
 
         slug = m.get("slug", m.get("id", ""))
         condition_id = m.get("conditionId", m.get("condition_id", slug))
+        # Prefer event slug for URL (event page, not individual market)
+        event_slug = m.get("eventSlug", m.get("groupItemSlug", slug))
         tags = m.get("tags", [])
         if isinstance(tags, str):
             tags = [tags]
+
+        if event_slug:
+            url = f"https://polymarket.com/event/{event_slug}"
+        elif slug:
+            url = f"https://polymarket.com/event/{slug}"
+        else:
+            url = "https://polymarket.com"
 
         return NormalizedEvent(
             platform="polymarket",
@@ -127,5 +136,5 @@ class PolymarketAdapter(BaseAdapter):
             no_price=round(no_price, 4),
             volume=volume,
             expiry=expiry or "ongoing",
-            url=f"https://polymarket.com/event/{slug}" if slug else "https://polymarket.com",
+            url=url,
         )

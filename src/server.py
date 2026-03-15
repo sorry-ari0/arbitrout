@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 # --- Arbitrage imports ---
 try:
-    from arbitrage_router import router as arbitrage_router, init_scanner
+    from arbitrage_router import router as arbitrage_router, init_scanner, get_scanner
     from adapters.registry import AdapterRegistry
     from adapters.kalshi import KalshiAdapter
     from adapters.polymarket import PolymarketAdapter
@@ -97,6 +97,26 @@ cache_time: float = 0
 CACHE_TTL = 15  # seconds
 
 
+async def _auto_scan_loop():
+    """Background task: auto-scan for arbitrage every 60 seconds."""
+    await asyncio.sleep(5)  # wait for server to fully start
+    while True:
+        try:
+            scanner = get_scanner()
+            result = await scanner.scan()
+            logger.info(
+                "Auto-scan: %d events, %d matched, %d opportunities",
+                result.get("events_count", 0),
+                result.get("multi_platform_matches", 0),
+                result.get("opportunities_count", 0),
+            )
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            logger.warning("Auto-scan error: %s", exc)
+        await asyncio.sleep(60)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -124,12 +144,15 @@ async def lifespan(app: FastAPI):
         init_scanner(arb_registry)
         (DATA_DIR / "arbitrage").mkdir(exist_ok=True)
         logger.info("Arbitrage subsystem initialized with %d adapters", len(arb_registry.list_platforms()))
+        # Start auto-scan background task
+        scan_task = asyncio.create_task(_auto_scan_loop())
     logger.info("Lobsterminal started on port 8500")
     yield
     # Shutdown scheduler on app exit
     if scheduler:
         scheduler.shutdown(wait=False)
     if _ARBITRAGE_AVAILABLE:
+        scan_task.cancel()
         await arb_registry.close_all()
     logger.info("Lobsterminal shutting down")
 

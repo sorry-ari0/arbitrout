@@ -19,6 +19,12 @@
     padding: 0 16px;
     position: relative;
     z-index: 100;
+    opacity: 0;
+    animation: fadeInTabBar 0.4s ease-out 2s forwards;
+}
+
+@keyframes fadeInTabBar {
+    to { opacity: 1; }
 }
 
 .tab-switcher .tab-btn {

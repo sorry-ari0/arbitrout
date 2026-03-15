@@ -32,7 +32,7 @@ class LimitlessAdapter(BaseAdapter):
 
     PLATFORM_NAME = "limitless"
     BASE_URL = "https://api.limitless.exchange"
-    RATE_LIMIT_SECONDS = 1.0
+    RATE_LIMIT_SECONDS = 0.5  # API requires 300ms minimum between calls
 
     # ============================================================
     # FETCH IMPLEMENTATION
@@ -41,21 +41,31 @@ class LimitlessAdapter(BaseAdapter):
         client = await self._get_client()
         events: list[NormalizedEvent] = []
 
-        # Step 1: get active market list
-        resp = await client.get(
-            f"{self.BASE_URL}/markets",
-            params={"status": "active", "limit": 200},
-        )
-        resp.raise_for_status()
-        markets = resp.json()
+        # API max limit is 25 per page, paginate to get more
+        for page in range(1, 9):  # up to 200 markets (8 pages x 25)
+            import asyncio
+            resp = await client.get(
+                f"{self.BASE_URL}/markets/active",
+                params={"limit": 25, "page": page},
+            )
+            resp.raise_for_status()
+            raw = resp.json()
 
-        if not isinstance(markets, list):
-            markets = markets.get("markets", markets.get("data", []))
+            if not isinstance(raw, list):
+                markets = raw.get("data", raw.get("markets", []))
+            else:
+                markets = raw
 
-        for m in markets:
-            ev = self._normalize(m)
-            if ev:
-                events.append(ev)
+            if not markets:
+                break
+
+            for m in markets:
+                ev = self._normalize(m)
+                if ev:
+                    events.append(ev)
+
+            # Rate limit between pages
+            await asyncio.sleep(0.3)
 
         return events
 
@@ -70,28 +80,38 @@ class LimitlessAdapter(BaseAdapter):
 
         market_id = str(m.get("id", m.get("slug", "")))
 
-        # Prices — Limitless uses probability or price fields
+        # Prices — API returns prices: [yesPrice, noPrice]
         yes_price = 0.0
         no_price = 0.0
 
-        if "probability" in m:
+        prices = m.get("prices")
+        if isinstance(prices, list) and len(prices) >= 2:
+            yes_price = float(prices[0])
+            no_price = float(prices[1])
+        elif "probability" in m:
             yes_price = float(m["probability"])
             no_price = 1.0 - yes_price
         elif "yes_price" in m:
             yes_price = float(m["yes_price"])
             no_price = float(m.get("no_price", 1.0 - yes_price))
-        elif "lastPrice" in m:
-            yes_price = float(m["lastPrice"])
-            no_price = 1.0 - yes_price
 
+        # Volume — volumeFormatted is human-readable USDC
         volume = 0
-        raw_vol = m.get("volume", m.get("totalVolume", 0))
-        try:
-            volume = int(float(raw_vol or 0))
-        except (ValueError, TypeError):
-            pass
+        vol_formatted = m.get("volumeFormatted")
+        if vol_formatted:
+            try:
+                volume = int(float(vol_formatted))
+            except (ValueError, TypeError):
+                pass
+        if volume == 0:
+            raw_vol = m.get("volume", 0)
+            try:
+                volume = int(float(raw_vol or 0) / 1_000_000)  # raw is 6-decimal USDC
+            except (ValueError, TypeError):
+                pass
 
-        expiry = m.get("closeDate", m.get("endDate", m.get("expiresAt", "ongoing")))
+        # Expiry
+        expiry = m.get("expirationDate", m.get("closeDate", m.get("endDate", "ongoing")))
         if expiry and "T" in str(expiry):
             expiry = str(expiry)[:10]
         elif not expiry:
@@ -99,6 +119,9 @@ class LimitlessAdapter(BaseAdapter):
 
         slug = m.get("slug", market_id)
         tags = m.get("tags", [])
+        categories = m.get("categories", [])
+        if categories and not tags:
+            tags = categories
 
         return NormalizedEvent(
             platform="limitless",
