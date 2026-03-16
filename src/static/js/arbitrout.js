@@ -33,45 +33,49 @@ function createPixelGrid(colorMap, scale) {
 }
 
 function getTroutPixelArt() {
-    // 24x24 pixel art: trout on old wire phone with computer on desk
-    var T = '#00e5cc'; // teal body
-    var D = '#009688'; // dark teal
-    var E = '#1a1a2e'; // eye
-    var W = '#b2dfdb'; // belly
-    var F = '#ff8a65'; // fin/tail
-    var G = '#3a3a4a'; // desk gray
-    var M = '#2a2a3a'; // monitor frame
+    // 44x20: elongated rainbow trout on grey wire phone at desk
+    var O = '#3d5c3a'; // dark olive back
+    var G = '#5a7a4e'; // green upper body
+    var S = '#8aaa7e'; // silver-green
+    var R = '#d44868'; // pink-red lateral stripe
+    var K = '#b8c8b8'; // silver sides
+    var W = '#dde4dd'; // white belly
+    var E = '#111122'; // eye pupil
+    var Q = '#ffffff'; // eye white
+    var X = '#2d3d2d'; // dark spots
+    var N = '#d49050'; // orange fin
+    var T = '#8a6830'; // fin edge
+    var H = '#78909c'; // grey phone handset
+    var L = '#546e7a'; // dark grey phone
+    var C = '#90a4ae'; // grey wire cord
+    var I = '#2a2a3a'; // monitor frame
     var B = '#00bcd4'; // screen glow
-    var P = '#5d4037'; // phone brown
-    var Y = '#fdd835'; // phone cord
+    var D = '#3a3a4a'; // desk
+    var J = '#455a64'; // phone base
     var _ = null;
     var map = [
-        [_,_,_,_,_,_,_,_,_,_,_,_,_,_,P,P,_,_,_,_,_,_,_,_],
-        [_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,P,_,_,_,_,_,_,_,_],
-        [_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,P,_,_,_,_,_,_,_,_],
-        [_,_,_,_,_,_,_,T,T,T,T,T,_,T,P,P,_,_,_,_,_,_,_,_],
-        [_,_,_,_,_,_,T,T,T,T,T,T,T,T,_,Y,_,_,_,_,_,_,_,_],
-        [_,_,_,_,_,T,T,T,E,T,T,T,T,T,T,_,Y,_,_,_,_,_,_,_],
-        [_,_,_,_,T,T,T,T,T,T,T,T,T,T,T,_,_,Y,_,_,_,_,_,_],
-        [_,_,_,T,D,T,T,T,T,T,T,T,T,T,T,T,_,Y,_,_,_,_,_,_],
-        [_,_,T,D,W,W,T,T,T,T,T,T,T,T,T,T,F,Y,_,_,_,_,_,_],
-        [_,_,T,D,W,W,T,T,T,T,T,T,T,T,T,F,F,Y,_,_,_,_,_,_],
-        [_,_,_,T,T,T,T,T,T,T,T,T,T,T,F,F,_,Y,_,_,_,_,_,_],
-        [_,_,_,_,T,T,T,T,T,T,T,T,T,F,F,_,_,Y,_,_,_,_,_,_],
-        [_,_,_,_,_,T,T,T,T,T,T,F,F,_,_,_,_,Y,_,_,_,_,_,_],
-        [_,_,_,_,_,_,_,T,T,F,F,_,_,_,_,_,_,Y,_,_,_,_,_,_],
-        [G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G],
-        [_,M,M,M,M,M,M,_,_,_,_,_,_,_,_,_,P,P,P,P,_,_,_,_],
-        [_,M,B,B,B,B,M,_,_,_,_,_,_,_,_,_,P,Y,Y,P,_,_,_,_],
-        [_,M,B,B,B,B,M,_,_,_,_,_,_,_,_,_,P,Y,Y,P,_,_,_,_],
-        [_,M,M,M,M,M,M,_,_,_,_,_,_,_,_,_,P,P,P,P,_,_,_,_],
-        [_,_,_,M,M,_,_,_,_,_,_,_,_,_,_,_,_,_,P,_,_,_,_,_],
-        [_,_,M,M,M,M,_,_,_,_,_,_,_,_,_,_,_,P,P,P,_,_,_,_],
-        [G,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,G],
-        [G,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,G],
-        [G,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,G],
+[_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,N,N,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_],
+[_,_,_,_,_,_,_,_,_,_,O,O,O,O,O,O,O,O,N,O,O,N,O,O,O,O,O,O,O,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_],
+[_,_,_,_,_,_,_,_,O,G,G,G,X,G,G,G,G,G,G,G,G,G,G,X,G,G,G,G,G,O,O,_,_,_,_,_,_,_,_,_,_,_,_,_],
+[_,_,_,_,_,_,_,O,G,G,G,G,G,X,G,G,X,G,G,G,X,G,G,G,G,G,X,G,G,G,G,O,O,_,_,_,_,_,_,_,_,_,_,_],
+[_,_,N,N,_,_,O,G,G,X,G,G,G,G,G,G,G,G,X,G,G,G,G,G,X,G,G,G,G,G,G,G,G,O,_,_,_,_,_,_,_,_,_,_],
+[_,N,T,N,_,O,G,G,G,G,G,X,G,G,G,G,G,G,G,G,G,X,G,G,G,G,G,G,G,G,G,G,Q,E,O,_,_,_,_,H,H,_,_,_],
+[N,T,T,N,O,G,G,G,G,G,G,G,G,X,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,S,S,S,G,G,G,O,_,_,H,L,L,H,_,_],
+[_,N,T,N,O,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,S,S,S,G,O,O,_,_,H,L,H,_,_],
+[_,_,N,N,_,O,S,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,S,S,S,O,O,_,_,_,H,L,L,H,_,_],
+[_,_,_,_,_,_,O,K,K,W,W,K,K,W,K,K,W,W,K,K,W,W,K,K,W,W,K,K,K,O,O,N,N,_,_,_,_,_,_,H,H,_,_,_],
+[_,_,_,_,_,_,_,O,W,W,W,W,W,W,W,W,W,W,W,W,W,W,W,W,W,W,O,O,O,_,N,T,_,_,_,_,_,_,_,_,C,_,_,_],
+[_,_,_,_,_,_,_,_,O,O,W,W,W,W,W,W,W,W,W,W,W,W,W,O,O,O,_,_,_,_,_,_,_,_,_,_,_,_,_,_,C,_,_,_],
+[_,_,_,_,_,_,_,_,_,_,O,O,O,O,O,O,O,O,O,O,O,O,O,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,C,_,_,_],
+[D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D],
+[_,_,I,I,I,I,I,I,I,I,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,J,J,J,J,J,J,J,J,_,_,_,_],
+[_,_,I,B,B,B,B,B,B,I,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,J,H,H,C,H,H,H,J,_,_,_,_],
+[_,_,I,B,B,B,B,B,B,I,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,J,H,H,C,H,H,H,J,_,_,_,_],
+[_,_,I,I,I,I,I,I,I,I,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,J,J,J,J,J,J,J,J,_,_,_,_],
+[_,_,_,_,I,I,I,I,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,J,J,_,_,_,_,_,_,_],
+[_,_,_,I,I,I,I,I,I,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,J,J,J,J,_,_,_,_,_,_],
     ];
-    return createPixelGrid(map, 4);
+    return createPixelGrid(map, 3);
 }
 
 function getLobsterPixelArt() {
@@ -111,7 +115,11 @@ function showSplash(mode) {
     if (mode === 'arbitrout') {
         artContainer.appendChild(getTroutPixelArt());
     } else {
-        artContainer.appendChild(getLobsterPixelArt());
+        var img = document.createElement('img');
+        img.src = '/static/img/lobster.svg';
+        img.style.width = '96px';
+        img.style.height = '96px';
+        artContainer.appendChild(img);
     }
     overlay.appendChild(artContainer);
 
