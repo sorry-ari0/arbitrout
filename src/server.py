@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field
 import yfinance as yf
 import httpx
 import feedparser
+import research.company_researcher
 
 logger = logging.getLogger(__name__)
 
@@ -549,6 +550,41 @@ async def dexter_score(symbol: str, _=Depends(verify_api_key)):
     if "error" in result:
         raise HTTPException(status_code=422, detail=result["error"])
     return JSONResponse(content=result)
+
+
+@app.get("/api/research/company/{ticker}")
+async def get_company_research(ticker: str, _=Depends(verify_api_key)):
+    """Get detailed company research for a single ticker."""
+    sym = _validate_symbol(ticker)
+    research_data = await asyncio.get_event_loop().run_in_executor(
+        None, research.company_researcher.research_company, sym
+    )
+    if not research_data:
+        raise HTTPException(status_code=404, detail=f"No research data found for {sym}")
+    return JSONResponse(content=research_data)
+
+@app.get("/api/research/batch")
+async def get_batch_company_research(tickers: str, _=Depends(verify_api_key)):
+    """Get detailed company research for multiple tickers."""
+    ticker_list = [t.strip().upper() for t in tickers.split(',') if t.strip()]
+    if not ticker_list:
+        raise HTTPException(status_code=400, detail="No tickers provided.")
+    
+    results = {}
+    for ticker in ticker_list:
+        try:
+            sym = _validate_symbol(ticker)
+            research_data = await asyncio.get_event_loop().run_in_executor(
+                None, research.company_researcher.research_company, sym
+            )
+            results[sym] = research_data
+        except HTTPException as e:
+            results[ticker] = {"error": e.detail}
+        except Exception as e:
+            logger.warning("Research failed for %s: %s", ticker, e)
+            results[ticker] = {"error": f"Failed to fetch research for {ticker}"}
+            
+    return JSONResponse(content=results)
 
 
 # --- WebSocket for real-time prices ---
