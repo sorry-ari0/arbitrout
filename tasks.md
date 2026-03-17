@@ -178,7 +178,7 @@
    - Add these `yes_allocation_pct` and `no_allocation_pct` fields to the `ArbitrageOpportunity` model (assuming it will be updated or already accepts them).
    - File: src/arbitrage_engine.py
 
-31. TODO - Limitless Adapter: Move `import asyncio` to module level
+31. COMPLETED - Limitless Adapter: Move `import asyncio` to module level
    - The `import asyncio` statement is currently inside the `_fetch` method in `src/adapters/limitless.py`.
    - Move `import asyncio` to the top of the file, outside of any function, to follow best practices and avoid repeated imports.
    - File: src/adapters/limitless.py
@@ -187,6 +187,7 @@
    - The `_normalize` method in `src/adapters/limitless.py` could be more robust in handling potentially missing or malformed price data, specifically for `probability` and `yes_price` fields which are accessed via `m["key"]` or `float(m["key"])` without sufficient `get` checks or `try-except` blocks.
    - Ensure all price extractions (`yes_price`, `no_price`) use safe access (e.g., `m.get('key', default_value)`) and robust type conversion with appropriate error handling (e.g., `try-except ValueError`) to prevent crashes from unexpected API responses.
    - File: src/adapters/limitless.py
+
 
 
 
