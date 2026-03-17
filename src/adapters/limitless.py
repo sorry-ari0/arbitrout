@@ -89,11 +89,20 @@ class LimitlessAdapter(BaseAdapter):
             yes_price = float(prices[0])
             no_price = float(prices[1])
         elif "probability" in m:
-            yes_price = float(m["probability"])
+            try:
+                yes_price = float(m.get("probability", 0.0))
+            except ValueError:
+                yes_price = 0.0
             no_price = 1.0 - yes_price
         elif "yes_price" in m:
-            yes_price = float(m["yes_price"])
-            no_price = float(m.get("no_price", 1.0 - yes_price))
+            try:
+                yes_price = float(m.get("yes_price", 0.0))
+            except ValueError:
+                yes_price = 0.0
+            try:
+                no_price = float(m.get("no_price", 1.0 - yes_price))
+            except ValueError:
+                no_price = 1.0 - yes_price
 
         # Volume — volumeFormatted is human-readable USDC
         volume = 0
