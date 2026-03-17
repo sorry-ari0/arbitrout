@@ -328,7 +328,7 @@
    - Log warnings on retries and an error if the request ultimately fails after all retries.
    - File: src/adapters/predictit.py
 
-55. TODO - Frontend JS: Enhance WebSocket client to process `init` and `scan_result` messages
+55. COMPLETED - Frontend JS: Enhance WebSocket client to process `init` and `scan_result` messages
    - The `arbWs.onmessage` handler in `src/static/js/arbitrout.js` only explicitly processes `opportunities` and `feed` message types, ignoring `init` and `scan_result` messages for UI updates.
    - Modify the `arbWs.onmessage` handler to correctly process `init` and `scan_result` message types.
    - For `init` and `scan_result` messages, update the `opp-count` element with `data.events_count` or `data.summary.opportunities_count`.
@@ -392,6 +392,7 @@
    - In the `find_arbitrage` function, calculate `yes_allocation_pct` and `no_allocation_pct` based on the `buy_yes_price` and `buy_no_price` to achieve a guaranteed fixed payout.
    - Add these calculated percentages to the `ArbitrageOpportunity` object before appending it to the results (assuming `ArbitrageOpportunity` model can accept them).
    - File: src/arbitrage_engine.py
+
 
 
 
