@@ -3,57 +3,60 @@
 
 ## Arbitrage Scanner Improvements
 
-1. TODO — Add error handling and retry logic to all adapters
-   - Polymarket, PredictIt, Limitless adapters should retry on 429/500 with exponential backoff
-   - Log failures without crashing the scan loop
-   - File: src/adapters/*.py
+1. TODO - Add retry logic to Polymarket adapter
+   - Add exponential backoff retry on 429/500 status codes (3 retries, 2s/4s/8s delays)
+   - Wrap the httpx.get call in a retry loop
+   - Log warning on retry, error on final failure
+   - File: src/adapters/polymarket.py
 
-2. TODO — Add Kalshi API adapter (requires API key setup)
-   - Implement _fetch() with proper auth headers
-   - Normalize events to NormalizedEvent format
-   - File: src/adapters/kalshi.py
+2. TODO - Add retry logic to PredictIt adapter
+   - Add exponential backoff retry on 429/500 status codes (3 retries, 2s/4s/8s delays)
+   - Wrap the httpx.get call in a retry loop
+   - Log warning on retry, error on final failure
+   - File: src/adapters/predictit.py
 
-3. TODO — Improve event matching accuracy
-   - Add more stopwords to _STOPWORDS set
-   - Handle event title variations (e.g. "Will X win" vs "X to win")
-   - Add unit tests for matching edge cases
+3. TODO - Add retry logic to Limitless adapter
+   - Add exponential backoff retry on 429/500 status codes (3 retries, 2s/4s/8s delays)
+   - Wrap the httpx.get call in a retry loop inside the pagination loop
+   - Log warning on retry, error on final failure
+   - File: src/adapters/limitless.py
+
+4. TODO - Add more stopwords to event matcher
+   - Add common prediction market words to _STOPWORDS: market, prediction, contract, shares, event, odds, probability, chance, likelihood, outcome, result, winner, election, vote, poll
    - File: src/event_matcher.py
 
-4. TODO — Add historical arbitrage tracking
-   - Store found opportunities with timestamps in a JSON file
-   - Track when opportunities appear and disappear
-   - Show historical profit if trades were taken
-   - Files: src/arbitrage_router.py, src/static/js/arbitrout.js
+5. TODO - Add platform status endpoint to API
+   - Add GET /api/arbitrage/platforms endpoint returning status of each adapter
+   - Include last_fetch_time, event_count, is_healthy, last_error for each platform
+   - Store status in a module-level dict updated during scans
+   - File: src/arbitrage_router.py
 
-5. TODO — Add notification system for high-profit opportunities
-   - When profit > 3%, log prominently and flash in UI
-   - Add sound notification option
-   - File: src/static/js/arbitrout.js, src/arbitrage_router.py
+6. TODO - Add profit threshold filter to opportunities endpoint
+   - Add optional query param min_profit to GET /api/arbitrage/opportunities
+   - Filter results where profit_pct >= min_profit before returning
+   - Default to 0 (show all) if not provided
+   - File: src/arbitrage_router.py
 
-6. TODO — Add platform status indicators to UI
-   - Show which platforms are responding vs erroring
-   - Display last successful fetch time per platform
-   - Show event count per platform
-   - Files: src/arbitrage_router.py, src/static/js/arbitrout.js
-
-7. TODO — Add sorting and filtering to opportunities list
-   - Sort by profit %, platform, category
-   - Filter by minimum profit threshold
-   - Filter by category (politics, sports, crypto, etc.)
+7. TODO - Add sorting controls to arbitrout frontend
+   - Add a dropdown select above the opportunities list with options: Profit High-Low, Profit Low-High, Platform A-Z, Newest First
+   - Sort feedItems array based on selection before rendering
    - File: src/static/js/arbitrout.js
 
-8. TODO — Improve Lobsterminal chart indicators
-   - Add Bollinger Bands overlay option
-   - Add volume bars below chart
+8. TODO - Add Bollinger Bands to Lobsterminal chart
+   - Calculate 20-period SMA and 2x standard deviation bands
+   - Add upper band, lower band, and middle SMA as line series on the chart
+   - Use semi-transparent colors so they dont obscure candles
    - File: src/static/js/app.js
 
-9. TODO — Add tests for arbitrage engine
-   - Test spread calculation with known prices
-   - Test YES/NO cross-platform detection
-   - Test trade ratio calculation
-   - File: tests/test_arbitrage.py (new)
+9. TODO - Add arbitrage engine unit tests
+   - Create tests/test_arbitrage.py with pytest
+   - Test that two events with yes=0.40 and no=0.55 produce profit=0.05
+   - Test that same-platform pairs are excluded
+   - Test trade ratio calculation returns correct percentages
+   - File: tests/test_arbitrage.py
 
-10. TODO — Mobile responsive layout for Arbitrout
-    - Make 4-pane grid collapse to single column on mobile
-    - Swipeable tabs for scanner/saved/detail views
+10. TODO - Make arbitrout layout responsive on mobile
+    - Add media query for max-width 768px
+    - Stack the 4-pane grid into single column
+    - Hide detail pane on mobile until an opportunity is clicked
     - File: src/static/css/arbitrout.css
