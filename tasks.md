@@ -1,9 +1,9 @@
-# Arbitrout Tasks
+﻿# Arbitrout Tasks
 # Status: TODO | IN_PROGRESS | COMPLETED | BLOCKED
 
 ## Arbitrage Scanner Improvements
 
-1. TODO - Add retry logic to Polymarket adapter
+1. COMPLETED - Add retry logic to Polymarket adapter
    - In src/adapters/polymarket.py, in the _fetch method, add `import asyncio` and `import logging` at the top of the file
    - Add `logger = logging.getLogger(__name__)` after the imports
    - Replace the single `resp = await client.get(...)` call (lines 52-60) and `resp.raise_for_status()` with a retry loop:
@@ -101,3 +101,4 @@
    - Stack the 4-pane grid into single column
    - Hide detail pane on mobile until an opportunity is clicked
    - File: src/static/css/arbitrout.css
+
