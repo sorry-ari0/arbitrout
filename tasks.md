@@ -245,7 +245,7 @@
    - If no reliable 'buy no' price can be determined from actual order book data, log a warning and default `no_price` to `0.0` rather than `1.0 - yes_price`.
    - File: src/adapters/predictit.py
 
-42. TODO - PredictIt Adapter: Add retry logic to `_fetch` method
+42. COMPLETED - PredictIt Adapter: Add retry logic to `_fetch` method
    - The `_fetch` method in `src/adapters/predictit.py` currently lacks retry logic for API calls, despite Task #2 being marked COMPLETED.
    - Implement exponential backoff retry logic for the `client.get` call within the `_fetch` method, specifically for 429 (Too Many Requests) and 5xx (Server Error) status codes.
    - Configure for approximately 3 retries with increasing delays (e.g., 2s, 4s, 8s).
@@ -285,6 +285,7 @@
    - Configure for approximately 3 retries with increasing delays (e.g., 2s, 4s, 8s).
    - Log warnings on retries and an error if the request ultimately fails after all retries.
    - File: src/adapters/polymarket.py
+
 
 
 
