@@ -215,6 +215,30 @@ function connectArbWs() {
             renderOpportunities(data.data);
         } else if (data.type === 'feed') {
             addFeedItem(data.data);
+        } else if (data.type === 'init') { // Handle initial state
+            if (data.data && data.data.events_count !== undefined) {
+                var countEl = document.getElementById('opp-count');
+                if (countEl) {
+                    countEl.textContent = data.data.events_count;
+                }
+            }
+        } else if (data.type === 'scan_result') { // Handle results from a scan operation
+            if (data.data) {
+                if (data.data.summary && data.data.summary.opportunities_count !== undefined) {
+                    var countEl = document.getElementById('opp-count');
+                    if (countEl) {
+                        countEl.textContent = data.data.summary.opportunities_count;
+                    }
+                }
+                if (data.data.opportunities) {
+                    renderOpportunities(data.data.opportunities);
+                }
+                if (data.data.feed) { // Assuming data.data.feed is an array of feed items
+                    data.data.feed.forEach(function(item) {
+                        addFeedItem(item);
+                    });
+                }
+            }
         }
     };
 
