@@ -162,7 +162,7 @@
    - Add the research data to the swarm_engine screening results so when a user says "tech companies with female CEOs" the unresolved criteria can be checked against actual scraped data
    - File: src/server.py, src/research/company_researcher.py
 
-26. TODO - Integrate scrapling research into portfolio prompt screening
+26. BLOCKED - Integrate scrapling research into portfolio prompt screening
    - When swarm_engine.py parses a prompt and gets `unresolved` criteria (e.g., "companies founded by immigrants", "CEOs with engineering backgrounds", "backed by Sequoia Capital"), it currently ignores them
    - After the initial fundamentals screening, for each passing ticker call `company_researcher.research_company()` to get qualitative data
    - Use a simple keyword/substring match against the research data to filter for unresolved criteria
@@ -218,6 +218,7 @@
    - Store findings in `data/strategy_research.json` with: strategy_name, description, expected_edge_pct, risk_factors, sources
    - This research should inform the implementation of tasks 27-30 above
    - File: src/research/arbitrage_strategies.py (new)
+
 
 
 
