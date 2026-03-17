@@ -45,6 +45,7 @@ try:
     from adapters.opinion_labs import OpinionLabsAdapter
     from adapters.robinhood import RobinhoodAdapter
     from adapters.coinbase import CoinbaseAdapter
+    from adapters.commodities import CommoditiesAdapter # Added for commodity market adapter
     _ARBITRAGE_AVAILABLE = True
 except ImportError as _arb_err:
     logger.warning("Arbitrage modules not available: %s", _arb_err)
@@ -141,6 +142,7 @@ async def lifespan(app: FastAPI):
         arb_registry.register(OpinionLabsAdapter())
         arb_registry.register(RobinhoodAdapter())
         arb_registry.register(CoinbaseAdapter())
+        arb_registry.register(CommoditiesAdapter()) # Registered CommoditiesAdapter
         init_scanner(arb_registry)
         (DATA_DIR / "arbitrage").mkdir(exist_ok=True)
         logger.info("Arbitrage subsystem initialized with %d adapters", len(arb_registry.list_platforms()))
