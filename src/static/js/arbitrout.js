@@ -7,6 +7,7 @@ let arbScanInterval = null;
 let arbWs = null;
 let selectedOpp = null;
 let feedItems = [];
+let sortOption = 'Profit High-Low';
 
 // === PIXEL ART (CSS grid of div cells) ===
 function createPixelGrid(colorMap, scale) {
@@ -56,11 +57,11 @@ function getTroutPixelArt() {
     var map = [
 [_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,N,N,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_],
 [_,_,_,_,_,_,_,_,_,_,O,O,O,O,O,O,O,O,N,O,O,N,O,O,O,O,O,O,O,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_],
-[_,_,_,_,_,_,_,_,O,G,G,G,X,G,G,G,G,G,G,G,G,G,G,X,G,G,G,G,G,O,O,_,_,_,_,_,_,_,_,_,_,_,_,_],
-[_,_,_,_,_,_,_,O,G,G,G,G,G,X,G,G,X,G,G,G,X,G,G,G,G,G,X,G,G,G,G,O,O,_,_,_,_,_,_,_,_,_,_,_],
+[_,_,_,_,_,_,_,O,G,G,G,X,G,G,G,G,G,G,G,G,G,G,X,G,G,G,G,G,O,O,_,_,_,_,_,_,_,_,_,_,_,_,_],
+[_,_,_,_,_,_,O,G,G,G,G,G,X,G,G,X,G,G,G,X,G,G,G,G,G,X,G,G,G,G,O,O,_,_,_,_,_,_,_,_,_,_,_],
 [_,_,N,N,_,_,O,G,G,X,G,G,G,G,G,G,G,G,X,G,G,G,G,G,X,G,G,G,G,G,G,G,G,O,_,_,_,_,_,_,_,_,_,_],
-[_,N,T,N,_,O,G,G,G,G,G,X,G,G,G,G,G,G,G,G,G,X,G,G,G,G,G,G,G,G,G,G,Q,E,O,_,_,_,_,H,H,_,_,_],
-[N,T,T,N,O,G,G,G,G,G,G,G,G,X,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,S,S,S,G,G,G,O,_,_,H,L,L,H,_,_],
+[_,N,T,N,_,O,G,G,G,G,G,X,G,G,G,G,G,G,G,G,G,X,G,G,G,G,G,G,G,G,G,Q,E,O,_,_,_,_,H,H,_,_,_],
+[N,T,T,N,O,G,G,G,G,G,G,G,G,X,G,G,G,G,G,G,G,G,G,G,G,G,G,G,S,S,S,G,G,G,O,_,_,H,L,L,H,_,_],
 [_,N,T,N,O,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,S,S,S,G,O,O,_,_,H,L,H,_,_],
 [_,_,N,N,_,O,S,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,S,S,S,O,O,_,_,_,H,L,L,H,_,_],
 [_,_,_,_,_,_,O,K,K,W,W,K,K,W,K,K,W,W,K,K,W,W,K,K,W,W,K,K,K,O,O,N,N,_,_,_,_,_,_,H,H,_,_,_],
@@ -96,9 +97,8 @@ function getLobsterPixelArt() {
         [_,_,_,_,_,D,R,R,R,R,D,_,_,_,_,_],
         [_,_,_,_,_,D,R,R,R,R,D,_,_,_,_,_],
         [_,_,_,_,_,_,D,R,R,D,_,_,_,_,_,_],
-        [_,_,_,_,_,R,_,D,D,_,R,_,_,_,_,_],
-        [_,_,_,_,R,_,_,D,D,_,_,R,_,_,_,_],
-        [_,_,_,R,_,_,_,_,_,_,_,_,R,_,_,_],
+        [_,_,_,_,R,_,D,D,_,R,_,_,_,_,_],
+        [_,_,_,R,_,_,D,D,_,_,R,_,_,_,_],
         [_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_],
         [_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_]
     ];
@@ -250,7 +250,8 @@ function renderOpportunities(opps) {
         return;
     }
 
-    opps.forEach(function(opp) {
+    var sortedOpps = sortOpportunities(opps);
+    sortedOpps.forEach(function(opp) {
         var row = document.createElement('div');
         row.className = 'opp-row';
         row.addEventListener('click', function() { showEventDetail(opp); });
@@ -284,6 +285,52 @@ function renderOpportunities(opps) {
 
         container.appendChild(row);
     });
+
+    var sortSelect = document.createElement('select');
+    sortSelect.style.cssText = 'margin-bottom: 10px;';
+    sortSelect.addEventListener('change', function() {
+        sortOption = sortSelect.value;
+        renderOpportunities(opps);
+    });
+    var options = [
+        { value: 'Profit High-Low', text: 'Profit High-Low' },
+        { value: 'Profit Low-High', text: 'Profit Low-High' },
+        { value: 'Platform A-Z', text: 'Platform A-Z' },
+        { value: 'Newest First', text: 'Newest First' }
+    ];
+    options.forEach(function(option) {
+        var opt = document.createElement('option');
+        opt.value = option.value;
+        opt.text = option.text;
+        if (option.value === sortOption) {
+            opt.selected = true;
+        }
+        sortSelect.appendChild(opt);
+    });
+    container.parentNode.insertBefore(sortSelect, container);
+}
+
+function sortOpportunities(opps) {
+    switch (sortOption) {
+        case 'Profit High-Low':
+            return opps.sort(function(a, b) {
+                return (b.profit_pct || b.spread * 100) - (a.profit_pct || a.spread * 100);
+            });
+        case 'Profit Low-High':
+            return opps.sort(function(a, b) {
+                return (a.profit_pct || a.spread * 100) - (b.profit_pct || b.spread * 100);
+            });
+        case 'Platform A-Z':
+            return opps.sort(function(a, b) {
+                return a.buy_yes_platform.localeCompare(b.buy_yes_platform);
+            });
+        case 'Newest First':
+            return opps.sort(function(a, b) {
+                return new Date(b.created_at) - new Date(a.created_at);
+            });
+        default:
+            return opps;
+    }
 }
 
 // === EVENT DETAIL ===
@@ -491,7 +538,8 @@ function renderFeed() {
         return;
     }
 
-    feedItems.slice(0, 50).forEach(function(item) {
+    var sortedFeedItems = sortFeedItems(feedItems);
+    sortedFeedItems.slice(0, 50).forEach(function(item) {
         var el = document.createElement('div');
         el.className = 'feed-item';
 
@@ -519,6 +567,29 @@ function renderFeed() {
 
         container.appendChild(el);
     });
+}
+
+function sortFeedItems(items) {
+    switch (sortOption) {
+        case 'Profit High-Low':
+            return items.sort(function(a, b) {
+                return b.price - a.price;
+            });
+        case 'Profit Low-High':
+            return items.sort(function(a, b) {
+                return a.price - b.price;
+            });
+        case 'Platform A-Z':
+            return items.sort(function(a, b) {
+                return a.platform.localeCompare(b.platform);
+            });
+        case 'Newest First':
+            return items.sort(function(a, b) {
+                return new Date(b.time) - new Date(a.time);
+            });
+        default:
+            return items;
+    }
 }
 
 // === SAVED MARKETS ===
