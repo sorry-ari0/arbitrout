@@ -252,7 +252,7 @@
    - Log warnings on retries and an error if the request ultimately fails after all retries.
    - File: src/adapters/predictit.py
 
-43. TODO - Frontend JS: Enhance WebSocket client to process all server-sent data
+43. COMPLETED - Frontend JS: Enhance WebSocket client to process all server-sent data
    - The `arbWs.onmessage` handler in `src/static/js/arbitrout.js` only explicitly processes `opportunities` and `feed` message types, ignoring `init` and `scan_result` messages for UI updates, despite Tasks #12, #19, and #22 being marked COMPLETED.
    - Modify the `arbWs.onmessage` handler to correctly process `init` and `scan_result` message types.
    - For `init` and `scan_result` messages, update the `opp-count` element with `data.events_count` or `data.summary.opportunities_count`.
@@ -285,6 +285,7 @@
    - Configure for approximately 3 retries with increasing delays (e.g., 2s, 4s, 8s).
    - Log warnings on retries and an error if the request ultimately fails after all retries.
    - File: src/adapters/polymarket.py
+
 
 
 
