@@ -272,7 +272,7 @@
    - Implement client-side sorting logic within the `renderOpportunities` function to re-sort the `opps` array based on the selected criteria before rendering.
    - File: src/static/js/arbitrout.js
 
-46. TODO - Limitless Adapter: Add retry logic to `_fetch` method
+46. COMPLETED - Limitless Adapter: Add retry logic to `_fetch` method
    - The `_fetch` method in `src/adapters/limitless.py` currently lacks retry logic for API calls, despite Task #3 being marked COMPLETED.
    - Implement exponential backoff retry logic for the `client.get` call within the `_fetch` method, specifically for 429 (Too Many Requests) and 5xx (Server Error) status codes.
    - Configure for approximately 3 retries with increasing delays (e.g., 2s, 4s, 8s).
@@ -285,6 +285,7 @@
    - Configure for approximately 3 retries with increasing delays (e.g., 2s, 4s, 8s).
    - Log warnings on retries and an error if the request ultimately fails after all retries.
    - File: src/adapters/polymarket.py
+
 
 
 
