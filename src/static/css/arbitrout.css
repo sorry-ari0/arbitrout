@@ -197,7 +197,7 @@
 /* === PLATFORM PRICE ROWS === */
 .platform-row {
     display: grid;
-    grid-template-columns: 100px 1fr 1fr auto;
+    grid-template-columns: 90px 1fr 1fr 55px auto;
     gap: 8px;
     padding: 6px 8px;
     border-bottom: 1px solid var(--arb-border);

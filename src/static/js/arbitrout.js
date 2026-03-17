@@ -265,15 +265,22 @@ function renderOpportunities(opps) {
         spreadEl.textContent = '+' + (opp.profit_pct || opp.spread * 100).toFixed(1) + '%';
         row.appendChild(spreadEl);
 
-        var platEl = document.createElement('div');
-        platEl.className = 'opp-platforms';
-        platEl.textContent = (opp.buy_yes_platform || '') + ' / ' + (opp.buy_no_platform || '');
-        row.appendChild(platEl);
-
-        var volEl = document.createElement('div');
-        volEl.className = 'opp-volume';
-        volEl.textContent = '$' + ((opp.combined_volume || 0) / 1000).toFixed(0) + 'K';
-        row.appendChild(volEl);
+        // Quick buy signal line
+        var signalEl = document.createElement('div');
+        signalEl.style.cssText = 'font-size:10px;font-family:monospace;padding:2px 0;display:flex;gap:8px;';
+        var yesTag = document.createElement('span');
+        yesTag.style.color = 'var(--arb-green)';
+        yesTag.textContent = 'YES ' + (opp.buy_yes_price * 100).toFixed(0) + '\u00A2 ' + (opp.buy_yes_platform || '');
+        signalEl.appendChild(yesTag);
+        var noTag = document.createElement('span');
+        noTag.style.color = '#ff9800';
+        noTag.textContent = 'NO ' + (opp.buy_no_price * 100).toFixed(0) + '\u00A2 ' + (opp.buy_no_platform || '');
+        signalEl.appendChild(noTag);
+        var volTag = document.createElement('span');
+        volTag.style.color = 'var(--arb-muted)';
+        volTag.textContent = '$' + ((opp.combined_volume || 0) / 1000).toFixed(0) + 'K vol';
+        signalEl.appendChild(volTag);
+        row.appendChild(signalEl);
 
         container.appendChild(row);
     });
@@ -319,7 +326,7 @@ function showEventDetail(opp) {
     colHeader.className = 'platform-row';
     colHeader.style.color = 'var(--arb-muted)';
     colHeader.style.fontSize = '10px';
-    var cols = ['PLATFORM', 'YES', 'NO', 'LINK'];
+    var cols = ['PLATFORM', 'YES %', 'NO %', 'ACTION', ''];
     cols.forEach(function(txt) {
         var c = document.createElement('div');
         c.textContent = txt;
@@ -327,12 +334,8 @@ function showEventDetail(opp) {
     });
     container.appendChild(colHeader);
 
-    // Find best prices
-    var bestYes = 1, bestNo = 1;
-    markets.forEach(function(m) {
-        if (m.yes_price < bestYes) bestYes = m.yes_price;
-        if (m.no_price < bestNo) bestNo = m.no_price;
-    });
+    var buyYesPlatform = opp.buy_yes_platform || '';
+    var buyNoPlatform = opp.buy_no_platform || '';
 
     markets.forEach(function(m) {
         var row = document.createElement('div');
@@ -344,14 +347,34 @@ function showEventDetail(opp) {
         row.appendChild(nameEl);
 
         var yesEl = document.createElement('div');
-        yesEl.className = 'price-yes' + (m.yes_price === bestYes ? ' price-best' : '');
+        yesEl.className = 'price-yes';
         yesEl.textContent = (m.yes_price * 100).toFixed(1) + '\u00A2';
+        if (m.platform === buyYesPlatform) {
+            yesEl.style.fontWeight = '700';
+            yesEl.classList.add('price-best');
+        }
         row.appendChild(yesEl);
 
         var noEl = document.createElement('div');
-        noEl.className = 'price-no' + (m.no_price === bestNo ? ' price-best' : '');
+        noEl.className = 'price-no';
         noEl.textContent = (m.no_price * 100).toFixed(1) + '\u00A2';
+        if (m.platform === buyNoPlatform) {
+            noEl.style.fontWeight = '700';
+            noEl.classList.add('price-best');
+        }
         row.appendChild(noEl);
+
+        // Action tag
+        var actionEl = document.createElement('div');
+        actionEl.style.cssText = 'font-size:9px;font-weight:700;';
+        if (m.platform === buyYesPlatform) {
+            actionEl.style.color = 'var(--arb-green)';
+            actionEl.textContent = 'BUY YES';
+        } else if (m.platform === buyNoPlatform) {
+            actionEl.style.color = '#ff9800';
+            actionEl.textContent = 'BUY NO';
+        }
+        row.appendChild(actionEl);
 
         var linkEl = document.createElement('a');
         linkEl.href = m.url || '#';
@@ -365,33 +388,72 @@ function showEventDetail(opp) {
         container.appendChild(row);
     });
 
-    // Arbitrage trade ratio
+    // Arbitrage trade instructions
     if (opp.buy_yes_price !== undefined && opp.buy_no_price !== undefined) {
-        var yesAlloc = opp.yes_allocation_pct || '50.0';
-        var noAlloc = opp.no_allocation_pct || '50.0';
+        var yesAlloc = parseFloat(opp.yes_allocation_pct) || 50.0;
+        var noAlloc = parseFloat(opp.no_allocation_pct) || 50.0;
+        var profitPct = opp.profit_pct || (opp.spread * 100);
+        var yesCost = opp.buy_yes_price;
+        var noCost = opp.buy_no_price;
 
         var tradeEl = document.createElement('div');
-        tradeEl.style.cssText = 'padding:8px;border-top:1px solid var(--arb-border);font-family:monospace;font-size:11px;';
+        tradeEl.style.cssText = 'padding:10px 8px;border-top:2px solid var(--arb-accent);font-family:monospace;font-size:11px;background:rgba(0,200,200,0.05);';
 
         var tradeTitle = document.createElement('div');
-        tradeTitle.style.cssText = 'color:var(--arb-accent);font-weight:700;margin-bottom:4px;';
-        tradeTitle.textContent = 'TRADE RATIO';
+        tradeTitle.style.cssText = 'color:var(--arb-accent);font-weight:700;font-size:12px;margin-bottom:6px;';
+        tradeTitle.textContent = 'HOW TO TRADE';
         tradeEl.appendChild(tradeTitle);
 
-        var yesLine = document.createElement('div');
-        yesLine.style.color = 'var(--arb-green)';
-        yesLine.textContent = 'BUY YES on ' + (opp.buy_yes_platform || '?') + ': ' + (opp.buy_yes_price * 100).toFixed(1) + '\u00A2 (' + yesAlloc + '% of capital)';
-        tradeEl.appendChild(yesLine);
+        // Step 1: BUY YES
+        var step1 = document.createElement('div');
+        step1.style.cssText = 'padding:4px 0;';
+        var s1a = document.createElement('span');
+        s1a.style.cssText = 'color:var(--arb-green);font-weight:700;';
+        s1a.textContent = 'BUY YES';
+        step1.appendChild(s1a);
+        step1.appendChild(document.createTextNode(' on '));
+        var s1b = document.createElement('span');
+        s1b.style.cssText = 'color:var(--arb-text);font-weight:700;';
+        s1b.textContent = (opp.buy_yes_platform || '?').toUpperCase();
+        step1.appendChild(s1b);
+        step1.appendChild(document.createTextNode(' @ ' + (yesCost * 100).toFixed(1) + '\u00A2 (' + yesAlloc.toFixed(1) + '% of capital)'));
+        tradeEl.appendChild(step1);
 
-        var noLine = document.createElement('div');
-        noLine.style.color = '#ff9800';
-        noLine.textContent = 'BUY NO on ' + (opp.buy_no_platform || '?') + ': ' + (opp.buy_no_price * 100).toFixed(1) + '\u00A2 (' + noAlloc + '% of capital)';
-        tradeEl.appendChild(noLine);
+        // Step 2: BUY NO
+        var step2 = document.createElement('div');
+        step2.style.cssText = 'padding:4px 0;';
+        var s2a = document.createElement('span');
+        s2a.style.cssText = 'color:#ff9800;font-weight:700;';
+        s2a.textContent = 'BUY NO';
+        step2.appendChild(s2a);
+        step2.appendChild(document.createTextNode(' on '));
+        var s2b = document.createElement('span');
+        s2b.style.cssText = 'color:var(--arb-text);font-weight:700;';
+        s2b.textContent = (opp.buy_no_platform || '?').toUpperCase();
+        step2.appendChild(s2b);
+        step2.appendChild(document.createTextNode(' @ ' + (noCost * 100).toFixed(1) + '\u00A2 (' + noAlloc.toFixed(1) + '% of capital)'));
+        tradeEl.appendChild(step2);
 
+        // Profit
         var profitLine = document.createElement('div');
-        profitLine.style.cssText = 'color:var(--arb-green);font-weight:700;margin-top:4px;';
-        profitLine.textContent = 'PROFIT: ' + (opp.profit_pct || (opp.spread * 100)).toFixed(2) + '% per $1 invested';
+        profitLine.style.cssText = 'color:var(--arb-green);font-weight:700;margin-top:6px;font-size:12px;';
+        profitLine.textContent = 'GUARANTEED PROFIT: ' + profitPct.toFixed(1) + '%';
         tradeEl.appendChild(profitLine);
+
+        // Dollar example
+        var exLine = document.createElement('div');
+        exLine.style.cssText = 'color:var(--arb-muted);margin-top:4px;font-size:10px;';
+        var yesSpend = (100 * yesAlloc / 100);
+        var noSpend = (100 * noAlloc / 100);
+        var profit = (100 * profitPct / 100);
+        exLine.textContent = '$100 invested = $' + yesSpend.toFixed(0) + ' YES + $' + noSpend.toFixed(0) + ' NO = $' + profit.toFixed(2) + ' profit';
+        tradeEl.appendChild(exLine);
+
+        // Cost per $1 payout
+        var costLine = document.createElement('div');
+        costLine.style.cssText = 'color:var(--arb-muted);margin-top:2px;font-size:10px;';
+        costLine.textContent = 'Cost: ' + ((yesCost + noCost) * 100).toFixed(1) + '\u00A2 per $1 payout (' + (100 - (yesCost + noCost) * 100).toFixed(1) + '\u00A2 spread)';
+        tradeEl.appendChild(costLine);
 
         container.appendChild(tradeEl);
     }
