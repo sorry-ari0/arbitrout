@@ -199,7 +199,7 @@
    - Wrap `float()` conversions in `try-except ValueError` blocks to catch non-numeric values gracefully, defaulting to 0.0 if conversion fails.
    - File: src/adapters/limitless.py
 
-35. TODO - Frontend CSS: Implement mobile responsiveness for Arbitrout layout
+35. COMPLETED - Frontend CSS: Implement mobile responsiveness for Arbitrout layout
    - The `src/static/css/arbitrout.css` file currently lacks `@media (max-width: 768px)` queries for mobile responsiveness, despite Tasks #8, #10, #17, and #27 being marked COMPLETED.
    - Add `@media (max-width: 768px)` queries to `src/static/css/arbitrout.css`.
    - Within this media query, set `.arbitrout-container` to `grid-template-columns: 1fr; grid-template-rows: auto;` to stack panels vertically.
@@ -285,5 +285,6 @@
    - Configure for approximately 3 retries with increasing delays (e.g., 2s, 4s, 8s).
    - Log warnings on retries and an error if the request ultimately fails after all retries.
    - File: src/adapters/polymarket.py
+
 
 
