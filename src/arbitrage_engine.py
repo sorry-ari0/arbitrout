@@ -118,6 +118,7 @@ def unsave_market(match_id: str) -> list[dict]:
 # FEED: RECENT PRICE CHANGES
 # ============================================================
 _previous_prices: dict[str, float] = {}  # "platform:event_id" -> yes_price
+_prune_threshold = 48 * 60 * 60  # 48 hours
 
 
 def compute_feed(events: list[NormalizedEvent], max_items: int = 50) -> list[dict]:
@@ -180,6 +181,8 @@ class ArbitrageScanner:
         feed = compute_feed(events)
         self._last_feed = feed
 
+        self._prune_previous_prices(events)
+
         self._last_scan_time = time.time()
 
         # 5. Cache to disk
@@ -211,3 +214,10 @@ class ArbitrageScanner:
             (DATA_DIR / "cache.json").write_text(json.dumps(cache, indent=2))
         except Exception as exc:
             logger.warning("Cache save failed: %s", exc)
+
+    def _prune_previous_prices(self, events: list[NormalizedEvent]):
+        global _previous_prices
+        global _prune_threshold
+        current_time = time.time()
+        active_event_ids = {f"{ev.platform}:{ev.event_id}" for ev in events}
+        _previous_prices = {k: v for k, v in _previous_prices.items() if k in active_event_ids or current_time - v < _prune_threshold}
