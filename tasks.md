@@ -38,7 +38,7 @@
    - Use semi-transparent colors so they dont obscure candles
    - File: src/static/js/app.js
 
-7. TODO - Add arbitrage engine unit tests
+7. BLOCKED - Add arbitrage engine unit tests
    - Create tests/test_arbitrage.py with pytest
    - Test that two events with yes=0.40 and no=0.55 produce profit=0.05
    - Test that same-platform pairs are excluded
@@ -50,6 +50,7 @@
    - Stack the 4-pane grid into single column
    - Hide detail pane on mobile until an opportunity is clicked
    - File: src/static/css/arbitrout.css
+
 
 
 
