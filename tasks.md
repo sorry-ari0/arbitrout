@@ -232,7 +232,7 @@
    - Pass this `min_profit` value (converted to `min_spread = min_profit / 100.0`) to `scanner.get_opportunities()`.
    - File: src/arbitrage_router.py
 
-40. TODO - Arbitrage Router: Add null check for `_registry` in WebSocket `init` message
+40. BLOCKED - Arbitrage Router: Add null check for `_registry` in WebSocket `init` message
    - The WebSocket `init` message in `src/arbitrage_router.py` attempts to call `_registry.get_all_status()` without a null check for `_registry`, despite Task #25 being marked COMPLETED.
    - In the `ws_arbitrage` function, add a null check for `_registry` before attempting to call `_registry.get_all_status()` when sending the initial WebSocket state.
    - If `_registry` is `None`, send an empty list or appropriate default.
@@ -285,6 +285,7 @@
    - Configure for approximately 3 retries with increasing delays (e.g., 2s, 4s, 8s).
    - Log warnings on retries and an error if the request ultimately fails after all retries.
    - File: src/adapters/polymarket.py
+
 
 
 
