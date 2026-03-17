@@ -194,7 +194,7 @@ def _entity_overlap_score(ent_a: dict, ent_b: dict) -> float:
                 if ratio >= 0.90:
                     score += ratio
     elif ent_a["crypto_ticker"] or ent_b["crypto_ticker"]:
-        return 0.0
+        max_score += 1.0  # consider partial crypto matches
 
     names_a, names_b = ent_a["names"], ent_b["names"]
     if names_a and names_b:
