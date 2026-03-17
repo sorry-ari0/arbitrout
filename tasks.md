@@ -297,7 +297,7 @@
    - Wrap `float()` conversions in `try-except ValueError` blocks to catch non-numeric values gracefully, defaulting to 0.0 if conversion fails.
    - File: src/adapters/limitless.py
 
-50. TODO - Event Matcher: Review crypto price presence check in `_passes_quick_filter`
+50. COMPLETED - Event Matcher: Review crypto price presence check in `_passes_quick_filter`
    - The `_passes_quick_filter` function returns `False` if only one of two crypto-related events has price data (`pa or pb`).
    - Re-evaluate this strict filtering to allow matching when a crypto ticker matches but one market is missing price data, potentially allowing for other entity overlaps to score.
    - File: src/event_matcher.py
@@ -392,5 +392,6 @@
    - In the `find_arbitrage` function, calculate `yes_allocation_pct` and `no_allocation_pct` based on the `buy_yes_price` and `buy_no_price` to achieve a guaranteed fixed payout.
    - Add these calculated percentages to the `ArbitrageOpportunity` object before appending it to the results (assuming `ArbitrageOpportunity` model can accept them).
    - File: src/arbitrage_engine.py
+
 
 
