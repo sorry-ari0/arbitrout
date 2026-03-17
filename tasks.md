@@ -4,25 +4,76 @@
 ## Arbitrage Scanner Improvements
 
 1. TODO - Add retry logic to Polymarket adapter
-   - Add exponential backoff retry on 429/500 status codes (3 retries, 2s/4s/8s delays)
-   - Wrap the httpx.get call in a retry loop
-   - Log warning on retry, error on final failure
+   - In src/adapters/polymarket.py, in the _fetch method, add `import asyncio` and `import logging` at the top of the file
+   - Add `logger = logging.getLogger(__name__)` after the imports
+   - Replace the single `resp = await client.get(...)` call (lines 52-60) and `resp.raise_for_status()` with a retry loop:
+   - ```python
+     for attempt in range(3):
+         try:
+             resp = await client.get(
+                 f"{self.BASE_URL}/markets",
+                 params={"closed": "false", "limit": 100, "order": "volume", "ascending": "false"},
+             )
+             resp.raise_for_status()
+             break
+         except Exception as e:
+             if attempt < 2:
+                 delay = [2, 4, 8][attempt]
+                 logger.warning(f"Polymarket attempt {attempt+1} failed: {e}, retrying in {delay}s")
+                 await asyncio.sleep(delay)
+             else:
+                 logger.error(f"Polymarket failed after 3 attempts: {e}")
+                 return []
+     ```
    - File: src/adapters/polymarket.py
 
 2. TODO - Add retry logic to PredictIt adapter
-   - Add exponential backoff retry on 429/500 status codes (3 retries, 2s/4s/8s delays)
-   - Wrap the httpx.get call in a retry loop
-   - Log warning on retry, error on final failure
+   - In src/adapters/predictit.py, add `import asyncio` and `import logging` at the top of the file
+   - Add `logger = logging.getLogger(__name__)` after the imports
+   - Replace `resp = await client.get(self.BASE_URL)` and `resp.raise_for_status()` (lines 40-41) with a retry loop:
+   - ```python
+     for attempt in range(3):
+         try:
+             resp = await client.get(self.BASE_URL)
+             resp.raise_for_status()
+             break
+         except Exception as e:
+             if attempt < 2:
+                 delay = [2, 4, 8][attempt]
+                 logger.warning(f"PredictIt attempt {attempt+1} failed: {e}, retrying in {delay}s")
+                 await asyncio.sleep(delay)
+             else:
+                 logger.error(f"PredictIt failed after 3 attempts: {e}")
+                 return []
+     ```
    - File: src/adapters/predictit.py
 
 3. TODO - Add retry logic to Limitless adapter
-   - Add exponential backoff retry on 429/500 status codes (3 retries, 2s/4s/8s delays)
-   - Wrap the httpx.get call in a retry loop inside the pagination loop
-   - Log warning on retry, error on final failure
+   - In src/adapters/limitless.py, add `import logging` at the top of the file (asyncio is already imported inside the method)
+   - Add `logger = logging.getLogger(__name__)` after the imports
+   - Replace the `resp = await client.get(...)` and `resp.raise_for_status()` calls (lines 47-51) inside the pagination loop with a retry loop:
+   - ```python
+             for attempt in range(3):
+                 try:
+                     resp = await client.get(
+                         f"{self.BASE_URL}/markets/active",
+                         params={"limit": 25, "page": page},
+                     )
+                     resp.raise_for_status()
+                     break
+                 except Exception as e:
+                     if attempt < 2:
+                         delay = [2, 4, 8][attempt]
+                         logger.warning(f"Limitless page {page} attempt {attempt+1} failed: {e}, retrying in {delay}s")
+                         await asyncio.sleep(delay)
+                     else:
+                         logger.error(f"Limitless page {page} failed after 3 attempts: {e}")
+                         break
+     ```
    - File: src/adapters/limitless.py
 
 4. TODO - Add profit threshold filter to opportunities endpoint
-   - Add optional query param min_profit to GET /api/arbitrage/opportunities
+   - In src/arbitrage_router.py, add an optional query param min_profit to GET /api/arbitrage/opportunities
    - Filter results where profit_pct >= min_profit before returning
    - Default to 0 (show all) if not provided
    - File: src/arbitrage_router.py

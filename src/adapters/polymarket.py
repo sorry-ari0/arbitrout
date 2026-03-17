@@ -1,4 +1,5 @@
-"""Polymarket adapter — Gamma API (no auth) + CLOB for prices."""
+import asyncio
+import logging
 from .base import BaseAdapter
 from .models import NormalizedEvent
 
@@ -47,18 +48,25 @@ class PolymarketAdapter(BaseAdapter):
     async def _fetch(self) -> list[NormalizedEvent]:
         client = await self._get_client()
         events: list[NormalizedEvent] = []
+        logger = logging.getLogger(__name__)
 
-        # Gamma API — get active markets
-        resp = await client.get(
-            f"{self.BASE_URL}/markets",
-            params={
-                "closed": "false",
-                "limit": 100,
-                "order": "volume",
-                "ascending": "false",
-            },
-        )
-        resp.raise_for_status()
+        for attempt in range(3):
+            try:
+                resp = await client.get(
+                    f"{self.BASE_URL}/markets",
+                    params={"closed": "false", "limit": 100, "order": "volume", "ascending": "false"},
+                )
+                resp.raise_for_status()
+                break
+            except Exception as e:
+                if attempt < 2:
+                    delay = [2, 4, 8][attempt]
+                    logger.warning(f"Polymarket attempt {attempt+1} failed: {e}, retrying in {delay}s")
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(f"Polymarket failed after 3 attempts: {e}")
+                    return []
+
         markets = resp.json()
 
         if not isinstance(markets, list):
