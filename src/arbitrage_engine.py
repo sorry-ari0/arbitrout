@@ -59,6 +59,9 @@ def find_arbitrage(matched: list[MatchedEvent],
         if combined_vol < min_volume:
             continue
 
+        yes_allocation_pct = best_yes_market.yes_price / (best_yes_market.yes_price + best_no_market.no_price) * 100
+        no_allocation_pct = best_no_market.no_price / (best_yes_market.yes_price + best_no_market.no_price) * 100
+
         opportunities.append(ArbitrageOpportunity(
             matched_event=match,
             buy_yes_platform=best_yes_market.platform,
@@ -68,6 +71,8 @@ def find_arbitrage(matched: list[MatchedEvent],
             spread=spread,
             profit_pct=profit_pct,
             combined_volume=combined_vol,
+            yes_allocation_pct=yes_allocation_pct,
+            no_allocation_pct=no_allocation_pct,
         ))
 
     # Sort by profit descending
