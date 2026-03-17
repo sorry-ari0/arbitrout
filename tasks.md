@@ -206,7 +206,7 @@
    - Initially hide the `#event-detail` pane on mobile screens, making it visible only when an opportunity is clicked.
    - File: src/static/css/arbitrout.css
 
-36. TODO - Arbitrage Engine: Refactor `find_arbitrage` for optimal distinct platform pairing
+36. COMPLETED - Arbitrage Engine: Refactor `find_arbitrage` for optimal distinct platform pairing
    - The `find_arbitrage` function in `src/arbitrage_engine.py` still uses a "second-best" logic for handling same-platform `best_yes` and `best_no` markets, which does not guarantee distinct platforms or the highest possible spread, despite Tasks #13, #15, and #28 being marked COMPLETED.
    - Revise the `find_arbitrage` function to remove the "second-best" logic.
    - Implement a systematic iteration through all unique pairs of *distinct* platforms present in a `MatchedEvent`'s markets.
@@ -285,6 +285,7 @@
    - Configure for approximately 3 retries with increasing delays (e.g., 2s, 4s, 8s).
    - Log warnings on retries and an error if the request ultimately fails after all retries.
    - File: src/adapters/polymarket.py
+
 
 
 
