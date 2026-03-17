@@ -1,4 +1,4 @@
-﻿# Arbitrout Tasks
+# Arbitrout Tasks
 # Status: TODO | IN_PROGRESS | COMPLETED | BLOCKED
 
 ## Arbitrage Scanner Improvements
@@ -188,13 +188,100 @@
    - Ensure all price extractions (`yes_price`, `no_price`) use safe access (e.g., `m.get('key', default_value)`) and robust type conversion with appropriate error handling (e.g., `try-except ValueError`) to prevent crashes from unexpected API responses.
    - File: src/adapters/limitless.py
 
+33. TODO - Limitless Adapter: Move `import asyncio` to module level
+   - The `import asyncio` statement is currently inside the `_fetch` method in `src/adapters/limitless.py`, despite Task #31 being marked COMPLETED.
+   - Relocate the `import asyncio` statement from inside the `_fetch` method to the top of the `src/adapters/limitless.py` file, adhering to standard Python practices.
+   - File: src/adapters/limitless.py
 
+34. TODO - Limitless Adapter: Enhance price parsing robustness in `_normalize`
+   - The `_normalize` method in `src/adapters/limitless.py` still uses direct `m["probability"]` and `m["yes_price"]` access without sufficient `get` checks or `try-except` blocks, despite Task #32 being marked COMPLETED.
+   - Modify the `_normalize` method to use `m.get('key', default_value)` for `probability` and `yes_price` (and derived `no_price`) to safely handle potentially missing keys.
+   - Wrap `float()` conversions in `try-except ValueError` blocks to catch non-numeric values gracefully, defaulting to 0.0 if conversion fails.
+   - File: src/adapters/limitless.py
 
+35. TODO - Frontend CSS: Implement mobile responsiveness for Arbitrout layout
+   - The `src/static/css/arbitrout.css` file currently lacks `@media (max-width: 768px)` queries for mobile responsiveness, despite Tasks #8, #10, #17, and #27 being marked COMPLETED.
+   - Add `@media (max-width: 768px)` queries to `src/static/css/arbitrout.css`.
+   - Within this media query, set `.arbitrout-container` to `grid-template-columns: 1fr; grid-template-rows: auto;` to stack panels vertically.
+   - Initially hide the `#event-detail` pane on mobile screens, making it visible only when an opportunity is clicked.
+   - File: src/static/css/arbitrout.css
 
+36. TODO - Arbitrage Engine: Refactor `find_arbitrage` for optimal distinct platform pairing
+   - The `find_arbitrage` function in `src/arbitrage_engine.py` still uses a "second-best" logic for handling same-platform `best_yes` and `best_no` markets, which does not guarantee distinct platforms or the highest possible spread, despite Tasks #13, #15, and #28 being marked COMPLETED.
+   - Revise the `find_arbitrage` function to remove the "second-best" logic.
+   - Implement a systematic iteration through all unique pairs of *distinct* platforms present in a `MatchedEvent`'s markets.
+   - For each platform pair, identify the best `yes_price` from one platform and the best `no_price` from the other.
+   - Select the pair of platforms that yields the maximum spread, ensuring `buy_yes_platform` and `buy_no_platform` are always different.
+   - File: src/arbitrage_engine.py
 
+37. TODO - Arbitrage Engine: Implement pruning for `_previous_prices` dictionary
+   - The `_previous_prices` dictionary in `src/arbitrage_engine.py` is used to track historical prices but grows indefinitely, leading to potential memory issues, despite Tasks #14, #16, and #29 being marked COMPLETED.
+   - Modify the `compute_feed` or `scan` method to periodically remove entries from the `_previous_prices` dictionary.
+   - Prune entries for events that are no longer active, have expired, or have not been updated for a configurable period (e.g., 24-48 hours).
+   - File: src/arbitrage_engine.py
 
+38. TODO - Arbitrage Engine: Calculate optimal capital allocation percentages for opportunities
+   - The `find_arbitrage` function in `src/arbitrage_engine.py` does not calculate `yes_allocation_pct` and `no_allocation_pct` for `ArbitrageOpportunity` objects, despite Tasks #20 and #30 being marked COMPLETED.
+   - In the `find_arbitrage` function, calculate `yes_allocation_pct` and `no_allocation_pct` based on the `buy_yes_price` and `buy_no_price` to achieve a guaranteed fixed payout.
+   - Add these calculated percentages to the `ArbitrageOpportunity` object before appending it to the results.
+   - File: src/arbitrage_engine.py
 
+39. TODO - Arbitrage Router: Implement `min_profit` filter for opportunities endpoint
+   - The `/api/arbitrage/opportunities` endpoint in `src/arbitrage_router.py` does not currently accept or apply a `min_profit` query parameter, despite Tasks #9 and #24 being marked COMPLETED.
+   - Modify the `/api/arbitrage/opportunities` endpoint to accept an optional `min_profit: float = 0.0` query parameter.
+   - Pass this `min_profit` value (converted to `min_spread = min_profit / 100.0`) to `scanner.get_opportunities()`.
+   - File: src/arbitrage_router.py
 
+40. TODO - Arbitrage Router: Add null check for `_registry` in WebSocket `init` message
+   - The WebSocket `init` message in `src/arbitrage_router.py` attempts to call `_registry.get_all_status()` without a null check for `_registry`, despite Task #25 being marked COMPLETED.
+   - In the `ws_arbitrage` function, add a null check for `_registry` before attempting to call `_registry.get_all_status()` when sending the initial WebSocket state.
+   - If `_registry` is `None`, send an empty list or appropriate default.
+   - File: src/arbitrage_router.py
 
+41. TODO - PredictIt Adapter: Improve `no_price` normalization to use actual order book data
+   - The `_normalize` method in `src/adapters/predictit.py` still falls back to `1.0 - yes_price` for `no_price` when `bestBuyNoCost` is zero, which was explicitly identified as an inaccuracy to be resolved in Tasks #21 and #26 (both marked COMPLETED).
+   - In the `_fetch` method's loop over contracts, prioritize using `contract.get("bestBuyNoCost", 0)` for `no_price`.
+   - If `bestBuyNoCost` is `0` or unavailable, consider if there's an alternative *actual* order book value for selling NO shares (e.g., `bestSellNoCost`) that could be used consistently as a bid/ask pair.
+   - If no reliable 'buy no' price can be determined from actual order book data, log a warning and default `no_price` to `0.0` rather than `1.0 - yes_price`.
+   - File: src/adapters/predictit.py
 
+42. TODO - PredictIt Adapter: Add retry logic to `_fetch` method
+   - The `_fetch` method in `src/adapters/predictit.py` currently lacks retry logic for API calls, despite Task #2 being marked COMPLETED.
+   - Implement exponential backoff retry logic for the `client.get` call within the `_fetch` method, specifically for 429 (Too Many Requests) and 5xx (Server Error) status codes.
+   - Configure for approximately 3 retries with increasing delays (e.g., 2s, 4s, 8s).
+   - Log warnings on retries and an error if the request ultimately fails after all retries.
+   - File: src/adapters/predictit.py
 
+43. TODO - Frontend JS: Enhance WebSocket client to process all server-sent data
+   - The `arbWs.onmessage` handler in `src/static/js/arbitrout.js` only explicitly processes `opportunities` and `feed` message types, ignoring `init` and `scan_result` messages for UI updates, despite Tasks #12, #19, and #22 being marked COMPLETED.
+   - Modify the `arbWs.onmessage` handler to correctly process `init` and `scan_result` message types.
+   - For `init` and `scan_result` messages, update the `opp-count` element with `data.events_count` or `data.summary.opportunities_count`.
+   - Implement logic to update the platform status display (e.g., using `arb-status` dots) based on `data.platforms` received in these messages.
+   - File: src/static/js/arbitrout.js
+
+44. TODO - Frontend JS: Implement retry logic for WebSocket reconnections
+   - The `arbWs.onclose` and `arbWs.onerror` functions in `src/static/js/arbitrout.js` currently call `connectArbWs` directly, leading to infinite retries without backoff. The `reconnectArbWs` function (which defines retry logic) is defined but not called, despite Task #23 being marked COMPLETED.
+   - Modify `arbWs.onclose` and `arbWs.onerror` functions to call `reconnectArbWs` instead of `connectArbWs` directly.
+   - Ensure `reconnectArbWs` properly handles the `retryCount` and `maxRetries` to implement exponential backoff.
+   - File: src/static/js/arbitrout.js
+
+45. TODO - Frontend JS: Add sorting controls and logic to Arbitrout opportunities list
+   - The UI for the arbitrage opportunities list is missing sorting controls, and the `renderOpportunities` function lacks client-side sorting logic, despite Tasks #5 and #18 being marked COMPLETED/BLOCKED.
+   - Add a dropdown UI element (e.g., `<select>`) to the opportunities panel header for sorting.
+   - Provide options for sorting criteria: "Profit High-Low", "Profit Low-High", "Platform A-Z", "Newest First" (using `matched_event.last_updated` or similar timestamp).
+   - Implement client-side sorting logic within the `renderOpportunities` function to re-sort the `opps` array based on the selected criteria before rendering.
+   - File: src/static/js/arbitrout.js
+
+46. TODO - Limitless Adapter: Add retry logic to `_fetch` method
+   - The `_fetch` method in `src/adapters/limitless.py` currently lacks retry logic for API calls, despite Task #3 being marked COMPLETED.
+   - Implement exponential backoff retry logic for the `client.get` call within the `_fetch` method, specifically for 429 (Too Many Requests) and 5xx (Server Error) status codes.
+   - Configure for approximately 3 retries with increasing delays (e.g., 2s, 4s, 8s).
+   - Log warnings on retries and an error if the request ultimately fails after all retries.
+   - File: src/adapters/limitless.py
+
+47. TODO - Polymarket Adapter: Add retry logic to `_fetch` method
+   - The `_fetch` method in `src/adapters/polymarket.py` currently lacks retry logic for API calls, despite Task #1 being marked COMPLETED.
+   - Implement exponential backoff retry logic for the `client.get` call within the `_fetch` method, specifically for 429 (Too Many Requests) and 5xx (Server Error) status codes.
+   - Configure for approximately 3 retries with increasing delays (e.g., 2s, 4s, 8s).
+   - Log warnings on retries and an error if the request ultimately fails after all retries.
+   - File: src/adapters/polymarket.py
