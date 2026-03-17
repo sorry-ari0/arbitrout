@@ -321,7 +321,7 @@
    - If no reliable 'buy no' price can be determined from actual order book data, log a warning and default `no_price` to `0.0` rather than `1.0 - yes_price`.
    - File: src/adapters/predictit.py
 
-54. TODO - PredictIt Adapter: Add retry logic to `_fetch` method
+54. COMPLETED - PredictIt Adapter: Add retry logic to `_fetch` method
    - The `_fetch` method in `src/adapters/predictit.py` lacks retry logic for API calls.
    - Implement exponential backoff retry logic for the `client.get` call within the `_fetch` method, specifically for 429 (Too Many Requests) and 5xx (Server Error) status codes.
    - Configure for approximately 3 retries with increasing delays (e.g., 2s, 4s, 8s).
@@ -392,6 +392,7 @@
    - In the `find_arbitrage` function, calculate `yes_allocation_pct` and `no_allocation_pct` based on the `buy_yes_price` and `buy_no_price` to achieve a guaranteed fixed payout.
    - Add these calculated percentages to the `ArbitrageOpportunity` object before appending it to the results (assuming `ArbitrageOpportunity` model can accept them).
    - File: src/arbitrage_engine.py
+
 
 
 
