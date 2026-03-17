@@ -153,7 +153,7 @@
    - If no actual 'buy no' price can be found, log a warning instead of using the heuristic.
    - File: src/adapters/predictit.py
 
-27. TODO - Frontend CSS: Implement mobile responsiveness for Arbitrout layout
+27. COMPLETED - Frontend CSS: Implement mobile responsiveness for Arbitrout layout
    - The `src/static/css/arbitrout.css` file is missing `@media (max-width: 768px)` queries to implement the mobile-responsive layout changes described in tasks #8 and #17 (marked COMPLETED).
    - Add `@media (max-width: 768px)` queries to:
      - Change `.arbitrout-container` to a single column layout (e.g., `grid-template-columns: 1fr; grid-template-rows: auto;`).
@@ -187,6 +187,7 @@
    - The `_normalize` method in `src/adapters/limitless.py` could be more robust in handling potentially missing or malformed price data, specifically for `probability` and `yes_price` fields which are accessed via `m["key"]` or `float(m["key"])` without sufficient `get` checks or `try-except` blocks.
    - Ensure all price extractions (`yes_price`, `no_price`) use safe access (e.g., `m.get('key', default_value)`) and robust type conversion with appropriate error handling (e.g., `try-except ValueError`) to prevent crashes from unexpected API responses.
    - File: src/adapters/limitless.py
+
 
 
 
