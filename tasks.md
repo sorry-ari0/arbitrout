@@ -147,7 +147,7 @@
    - Add a check for `_registry` being `None` before attempting to call `_registry.get_all_status()`.
    - File: src/arbitrage_router.py
 
-26. TODO - PredictIt Adapter: Improve `no_price` normalization to use actual order book data
+26. COMPLETED - PredictIt Adapter: Improve `no_price` normalization to use actual order book data
    - The `_normalize` method in `src/adapters/predictit.py` still falls back to `1.0 - yes_price` for `no_price` when `bestBuyNoCost` is zero, which was explicitly identified as an inaccuracy to be resolved in Task #21 (marked COMPLETED).
    - Refactor the logic to prioritize `bestBuyNoCost` or other actual order book data (`bestSellNoCost` if applicable) for `no_price`.
    - If no actual 'buy no' price can be found, log a warning instead of using the heuristic.
@@ -187,6 +187,7 @@
    - The `_normalize` method in `src/adapters/limitless.py` could be more robust in handling potentially missing or malformed price data, specifically for `probability` and `yes_price` fields which are accessed via `m["key"]` or `float(m["key"])` without sufficient `get` checks or `try-except` blocks.
    - Ensure all price extractions (`yes_price`, `no_price`) use safe access (e.g., `m.get('key', default_value)`) and robust type conversion with appropriate error handling (e.g., `try-except ValueError`) to prevent crashes from unexpected API responses.
    - File: src/adapters/limitless.py
+
 
 
 
