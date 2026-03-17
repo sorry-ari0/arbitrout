@@ -172,7 +172,7 @@
 
 ## Commodity, Crypto & Prediction Market Arbitrage
 
-27. TODO - Add commodity market adapter for arbitrage scanning
+27. COMPLETED - Add commodity market adapter for arbitrage scanning
    - Create `src/adapters/commodities.py` that fetches commodity prices
    - Use a free API like Metals API, Open Exchange Rates, or scrape from TradingView/Yahoo Finance for: gold (XAU), silver (XAG), crude oil (WTI, Brent), natural gas, copper, corn, wheat, soybeans
    - Normalize to the same `NormalizedEvent` format used by other adapters with: event_name (e.g., "Gold Price > $2500 by Dec 2026"), platform ("Commodities"), yes_price, no_price
@@ -218,6 +218,7 @@
    - Store findings in `data/strategy_research.json` with: strategy_name, description, expected_edge_pct, risk_factors, sources
    - This research should inform the implementation of tasks 27-30 above
    - File: src/research/arbitrage_strategies.py (new)
+
 
 
 
