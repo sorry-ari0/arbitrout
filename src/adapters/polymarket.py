@@ -1,7 +1,8 @@
 """Polymarket adapter — Gamma API (no auth) + CLOB for prices."""
 from .base import BaseAdapter
 from .models import NormalizedEvent
-
+import httpx
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 # ============================================================
 # CATEGORY MAPPING
@@ -44,6 +45,7 @@ class PolymarketAdapter(BaseAdapter):
     # ============================================================
     # FETCH IMPLEMENTATION
     # ============================================================
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=2, min=2, max=8))
     async def _fetch(self) -> list[NormalizedEvent]:
         client = await self._get_client()
         events: list[NormalizedEvent] = []
