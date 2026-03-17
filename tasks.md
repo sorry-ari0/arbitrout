@@ -45,11 +45,12 @@
    - Test trade ratio calculation returns correct percentages
    - File: tests/test_arbitrage.py
 
-8. TODO - Make arbitrout layout responsive on mobile
+8. COMPLETED - Make arbitrout layout responsive on mobile
    - Add media query for max-width 768px
    - Stack the 4-pane grid into single column
    - Hide detail pane on mobile until an opportunity is clicked
    - File: src/static/css/arbitrout.css
+
 
 
 
