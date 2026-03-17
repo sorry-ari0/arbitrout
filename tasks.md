@@ -360,7 +360,7 @@
    - Pass this `min_profit` value (converted to `min_spread = min_profit / 100.0`) to `scanner.get_opportunities()`.
    - File: src/arbitrage_router.py
 
-60. TODO - Arbitrage Router: Add null check for `_registry` in WebSocket `init` message
+60. BLOCKED - Arbitrage Router: Add null check for `_registry` in WebSocket `init` message
    - The WebSocket `init` message in `src/arbitrage_router.py` attempts to call `_registry.get_all_status()` without a null check for `_registry`.
    - In the `ws_arbitrage` function, add a null check for `_registry` before attempting to call `_registry.get_all_status()` when sending the initial WebSocket state.
    - If `_registry` is `None`, send an empty list or appropriate default.
@@ -392,6 +392,7 @@
    - In the `find_arbitrage` function, calculate `yes_allocation_pct` and `no_allocation_pct` based on the `buy_yes_price` and `buy_no_price` to achieve a guaranteed fixed payout.
    - Add these calculated percentages to the `ArbitrageOpportunity` object before appending it to the results (assuming `ArbitrageOpportunity` model can accept them).
    - File: src/arbitrage_engine.py
+
 
 
 
