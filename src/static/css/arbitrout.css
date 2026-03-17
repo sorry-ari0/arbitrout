@@ -115,6 +115,17 @@
     display: grid;
 }
 
+@media (max-width: 768px) {
+    .arbitrout-container {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto;
+    }
+
+    #event-detail {
+        display: none;
+    }
+}
+
 .arb-panel {
     background: var(--arb-card);
     border: 1px solid var(--arb-border);
