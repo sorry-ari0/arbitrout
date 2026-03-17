@@ -78,10 +78,11 @@
    - Refactor the logic in `find_arbitrage` to systematically iterate through pairs of distinct platforms to ensure that `buy_yes_platform` and `buy_no_platform` are always different for an arbitrage opportunity, finding the highest possible spread.
    - File: src/arbitrage_engine.py
 
-14. TODO - Arbitrage Engine: Prune `_previous_prices` to prevent unbounded growth
+14. COMPLETED - Arbitrage Engine: Prune `_previous_prices` to prevent unbounded growth
    - The `_previous_prices` dictionary in `src/arbitrage_engine.py` is used to track historical prices for `compute_feed`. This dictionary is never explicitly pruned, which means it will continue to grow indefinitely as new events are encountered, potentially leading to unbounded memory consumption over long periods.
    - Implement a mechanism to periodically prune `_previous_prices`, for example, by removing entries for events that are no longer active or have not been updated for a very long time.
    - File: src/arbitrage_engine.py
+
 
 
 
