@@ -34,41 +34,57 @@ def find_arbitrage(matched: list[MatchedEvent],
             continue
 
         markets = match.markets
-        # Find cheapest YES and cheapest NO across different platforms
-        best_yes_market = min(markets, key=lambda m: m.yes_price)
-        best_no_market = min(markets, key=lambda m: m.no_price)
+        unique_platforms = list(set(m.platform for m in markets))
 
-        # Skip if both are on the same platform (no arbitrage)
-        if best_yes_market.platform == best_no_market.platform:
-            # Try second-best on other platform
-            other_yes = [m for m in markets if m.platform != best_no_market.platform]
-            other_no = [m for m in markets if m.platform != best_yes_market.platform]
-            if other_yes:
-                best_yes_market = min(other_yes, key=lambda m: m.yes_price)
-            elif other_no:
-                best_no_market = min(other_no, key=lambda m: m.no_price)
-            else:
+        if len(unique_platforms) < 2:
+            continue
+
+        best_overall_spread = -1.0
+        selected_buy_yes_market = None
+        selected_buy_no_market = None
+
+        # Group markets by platform for easier lookup of best prices per platform
+        markets_by_platform = {p: [m for m in markets if m.platform == p] for p in unique_platforms}
+
+        for platform1 in unique_platforms:
+            # Find the market with the best (lowest) 'yes' price on platform1
+            best_yes_market_on_p1 = min(markets_by_platform[platform1], key=lambda m: m.yes_price)
+
+            for platform2 in unique_platforms:
+                if platform1 == platform2:
+                    continue  # Platforms for buying YES and NO must be distinct
+
+                # Find the market with the best (lowest) 'no' price on platform2
+                best_no_market_on_p2 = min(markets_by_platform[platform2], key=lambda m: m.no_price)
+
+                current_spread = 1.0 - (best_yes_market_on_p1.yes_price + best_no_market_on_p2.no_price)
+
+                if current_spread > best_overall_spread:
+                    best_overall_spread = current_spread
+                    selected_buy_yes_market = best_yes_market_on_p1
+                    selected_buy_no_market = best_no_market_on_p2
+
+        # If a valid opportunity was found across distinct platforms
+        if selected_buy_yes_market and selected_buy_no_market:
+            spread = best_overall_spread
+            profit_pct = spread * 100.0
+            combined_vol = sum(m.volume for m in markets) # Keep original combined_vol logic based on all markets in the match
+
+            if spread < min_spread:
+                continue
+            if combined_vol < min_volume:
                 continue
 
-        spread = 1.0 - (best_yes_market.yes_price + best_no_market.no_price)
-        profit_pct = spread * 100.0
-        combined_vol = sum(m.volume for m in markets)
-
-        if spread < min_spread:
-            continue
-        if combined_vol < min_volume:
-            continue
-
-        opportunities.append(ArbitrageOpportunity(
-            matched_event=match,
-            buy_yes_platform=best_yes_market.platform,
-            buy_yes_price=best_yes_market.yes_price,
-            buy_no_platform=best_no_market.platform,
-            buy_no_price=best_no_market.no_price,
-            spread=spread,
-            profit_pct=profit_pct,
-            combined_volume=combined_vol,
-        ))
+            opportunities.append(ArbitrageOpportunity(
+                matched_event=match,
+                buy_yes_platform=selected_buy_yes_market.platform,
+                buy_yes_price=selected_buy_yes_market.yes_price,
+                buy_no_platform=selected_buy_no_market.platform,
+                buy_no_price=selected_buy_no_market.no_price,
+                spread=spread,
+                profit_pct=profit_pct,
+                combined_volume=combined_vol,
+            ))
 
     # Sort by profit descending
     opportunities.sort(key=lambda o: o.profit_pct, reverse=True)
