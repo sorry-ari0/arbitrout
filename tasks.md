@@ -354,7 +354,7 @@
    - Use the `platforms` data received from `init` and `scan_result` WebSocket messages to update the status dots (online, offline, stale).
    - File: src/static/js/arbitrout.js
 
-59. TODO - Arbitrage Router: Implement `min_profit` filter for opportunities endpoint
+59. COMPLETED - Arbitrage Router: Implement `min_profit` filter for opportunities endpoint
    - The `/api/arbitrage/opportunities` endpoint in `src/arbitrage_router.py` does not currently accept or apply a `min_profit` query parameter.
    - Modify the `/api/arbitrage/opportunities` endpoint to accept an optional `min_profit: float = 0.0` query parameter.
    - Pass this `min_profit` value (converted to `min_spread = min_profit / 100.0`) to `scanner.get_opportunities()`.
@@ -392,6 +392,7 @@
    - In the `find_arbitrage` function, calculate `yes_allocation_pct` and `no_allocation_pct` based on the `buy_yes_price` and `buy_no_price` to achieve a guaranteed fixed payout.
    - Add these calculated percentages to the `ArbitrageOpportunity` object before appending it to the results (assuming `ArbitrageOpportunity` model can accept them).
    - File: src/arbitrage_engine.py
+
 
 
 
