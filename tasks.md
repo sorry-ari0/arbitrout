@@ -167,7 +167,7 @@
    - Select the overall pair of *distinct* platforms that yields the maximum spread.
    - File: src/arbitrage_engine.py
 
-29. TODO - Arbitrage Engine: Implement pruning for `_previous_prices` dictionary
+29. COMPLETED - Arbitrage Engine: Implement pruning for `_previous_prices` dictionary
    - The `_previous_prices` dictionary in `src/arbitrage_engine.py` grows indefinitely as new event prices are added, leading to potential memory issues. Tasks #14 and #16 (marked COMPLETED) specified implementing a pruning mechanism, but none is present.
    - Modify the `compute_feed` or `scan` method to periodically remove entries from `_previous_prices` that correspond to events that are no longer active, have expired, or have not been updated for a configurable period (e.g., 24-48 hours).
    - File: src/arbitrage_engine.py
@@ -187,6 +187,7 @@
    - The `_normalize` method in `src/adapters/limitless.py` could be more robust in handling potentially missing or malformed price data, specifically for `probability` and `yes_price` fields which are accessed via `m["key"]` or `float(m["key"])` without sufficient `get` checks or `try-except` blocks.
    - Ensure all price extractions (`yes_price`, `no_price`) use safe access (e.g., `m.get('key', default_value)`) and robust type conversion with appropriate error handling (e.g., `try-except ValueError`) to prevent crashes from unexpected API responses.
    - File: src/adapters/limitless.py
+
 
 
 
