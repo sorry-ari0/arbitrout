@@ -62,7 +62,7 @@
    - Add `@media (max-width: 768px)` queries to implement the specified responsive layout changes.
    - File: src/static/css/arbitrout.css
 
-11. TODO - Frontend JS: Add sorting controls to Arbitrout opportunities list
+11. COMPLETED - Frontend JS: Add sorting controls to Arbitrout opportunities list
    - Task #5, "Add sorting controls to arbitrout frontend," is marked COMPLETED, but `src/static/js/arbitrout.js` does not implement a dropdown select or logic to sort the opportunities list by criteria like Profit High-Low, Profit Low-High, Platform A-Z, or Newest First. The current display relies solely on the backend's default sorting.
    - Add a dropdown element to the UI to select sorting preferences.
    - Implement client-side sorting logic within `renderOpportunities` based on the selected criteria.
@@ -82,5 +82,6 @@
    - The `_previous_prices` dictionary in `src/arbitrage_engine.py` is used to track historical prices for `compute_feed`. This dictionary is never explicitly pruned, which means it will continue to grow indefinitely as new events are encountered, potentially leading to unbounded memory consumption over long periods.
    - Implement a mechanism to periodically prune `_previous_prices`, for example, by removing entries for events that are no longer active or have not been updated for a very long time.
    - File: src/arbitrage_engine.py
+
 
 
