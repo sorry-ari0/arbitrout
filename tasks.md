@@ -220,7 +220,7 @@
    - Prune entries for events that are no longer active, have expired, or have not been updated for a configurable period (e.g., 24-48 hours).
    - File: src/arbitrage_engine.py
 
-38. TODO - Arbitrage Engine: Calculate optimal capital allocation percentages for opportunities
+38. COMPLETED - Arbitrage Engine: Calculate optimal capital allocation percentages for opportunities
    - The `find_arbitrage` function in `src/arbitrage_engine.py` does not calculate `yes_allocation_pct` and `no_allocation_pct` for `ArbitrageOpportunity` objects, despite Tasks #20 and #30 being marked COMPLETED.
    - In the `find_arbitrage` function, calculate `yes_allocation_pct` and `no_allocation_pct` based on the `buy_yes_price` and `buy_no_price` to achieve a guaranteed fixed payout.
    - Add these calculated percentages to the `ArbitrageOpportunity` object before appending it to the results.
@@ -285,6 +285,7 @@
    - Configure for approximately 3 retries with increasing delays (e.g., 2s, 4s, 8s).
    - Log warnings on retries and an error if the request ultimately fails after all retries.
    - File: src/adapters/polymarket.py
+
 
 
 
