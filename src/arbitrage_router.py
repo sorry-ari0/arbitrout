@@ -154,7 +154,7 @@ async def ws_arbitrage(websocket: WebSocket):
             "type": "init",
             "opportunities": scanner.get_opportunities(),
             "events_count": len(scanner.get_events()),
-            "platforms": _registry.get_all_status() if _registry else [],
+            "platforms": _registry.get_all_status() if _registry is not None else [],
         })
 
         while True:
