@@ -214,7 +214,7 @@
    - Select the pair of platforms that yields the maximum spread, ensuring `buy_yes_platform` and `buy_no_platform` are always different.
    - File: src/arbitrage_engine.py
 
-37. TODO - Arbitrage Engine: Implement pruning for `_previous_prices` dictionary
+37. COMPLETED - Arbitrage Engine: Implement pruning for `_previous_prices` dictionary
    - The `_previous_prices` dictionary in `src/arbitrage_engine.py` is used to track historical prices but grows indefinitely, leading to potential memory issues, despite Tasks #14, #16, and #29 being marked COMPLETED.
    - Modify the `compute_feed` or `scan` method to periodically remove entries from the `_previous_prices` dictionary.
    - Prune entries for events that are no longer active, have expired, or have not been updated for a configurable period (e.g., 24-48 hours).
@@ -285,6 +285,7 @@
    - Configure for approximately 3 retries with increasing delays (e.g., 2s, 4s, 8s).
    - Log warnings on retries and an error if the request ultimately fails after all retries.
    - File: src/adapters/polymarket.py
+
 
 
 
