@@ -326,3 +326,14 @@
     background: var(--arb-border);
     border-radius: 2px;
 }
+
+/* === MOBILE RESPONSIVENESS === */
+@media (max-width: 768px) {
+    .arbitrout-container {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto;
+    }
+    #event-detail {
+        display: none;
+    }
+}
