@@ -373,7 +373,7 @@
    - Initially hide the `#event-detail` pane on mobile screens, making it visible only when an opportunity is clicked.
    - File: src/static/css/arbitrout.css
 
-62. TODO - Arbitrage Engine: Refactor `find_arbitrage` for optimal distinct platform pairing
+62. COMPLETED - Arbitrage Engine: Refactor `find_arbitrage` for optimal distinct platform pairing
    - The `find_arbitrage` function in `src/arbitrage_engine.py` still uses a "second-best" logic for handling same-platform `best_yes` and `best_no` markets, which does not guarantee distinct platforms or the highest possible spread.
    - Revise the `find_arbitrage` function to remove the "second-best" logic.
    - Implement a systematic iteration through all unique pairs of *distinct* platforms present in a `MatchedEvent`'s markets.
@@ -392,6 +392,7 @@
    - In the `find_arbitrage` function, calculate `yes_allocation_pct` and `no_allocation_pct` based on the `buy_yes_price` and `buy_no_price` to achieve a guaranteed fixed payout.
    - Add these calculated percentages to the `ArbitrageOpportunity` object before appending it to the results (assuming `ArbitrageOpportunity` model can accept them).
    - File: src/arbitrage_engine.py
+
 
 
 
