@@ -68,7 +68,7 @@
    - Implement client-side sorting logic within `renderOpportunities` based on the selected criteria.
    - File: src/static/js/arbitrout.js
 
-12. TODO - Frontend JS: Enhance WebSocket client to process all server-sent data
+12. COMPLETED - Frontend JS: Enhance WebSocket client to process all server-sent data
    - The `arbWs.onmessage` handler in `src/static/js/arbitrout.js` only explicitly processes `opportunities` and `feed` message types. It does not handle the `init` message (which provides initial `events_count` and `platforms` status) or the `scan_result` message (which provides `summary` and updated `opportunities`/`feed` after a manual scan) for updating the UI elements like opportunity count and platform status.
    - Add logic within `arbWs.onmessage` to handle `init` and `scan_result` message types, updating relevant UI components (e.g., `opp-count`, platform status) with the received data.
    - File: src/static/js/arbitrout.js
@@ -82,6 +82,7 @@
    - The `_previous_prices` dictionary in `src/arbitrage_engine.py` is used to track historical prices for `compute_feed`. This dictionary is never explicitly pruned, which means it will continue to grow indefinitely as new events are encountered, potentially leading to unbounded memory consumption over long periods.
    - Implement a mechanism to periodically prune `_previous_prices`, for example, by removing entries for events that are no longer active or have not been updated for a very long time.
    - File: src/arbitrage_engine.py
+
 
 
 
