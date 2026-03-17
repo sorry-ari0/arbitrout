@@ -172,7 +172,7 @@
    - Modify the `compute_feed` or `scan` method to periodically remove entries from `_previous_prices` that correspond to events that are no longer active, have expired, or have not been updated for a configurable period (e.g., 24-48 hours).
    - File: src/arbitrage_engine.py
 
-30. TODO - Arbitrage Engine: Calculate and add optimal capital allocation percentages to opportunities
+30. COMPLETED - Arbitrage Engine: Calculate and add optimal capital allocation percentages to opportunities
    - The `find_arbitrage` function in `src/arbitrage_engine.py` does not calculate `yes_allocation_pct` and `no_allocation_pct` for `ArbitrageOpportunity` objects, despite Task #20 being marked COMPLETED.
    - Modify `find_arbitrage` to calculate the optimal capital allocation percentages for buying YES and NO contracts to maximize guaranteed payout.
    - Add these `yes_allocation_pct` and `no_allocation_pct` fields to the `ArbitrageOpportunity` model (assuming it will be updated or already accepts them).
@@ -187,6 +187,7 @@
    - The `_normalize` method in `src/adapters/limitless.py` could be more robust in handling potentially missing or malformed price data, specifically for `probability` and `yes_price` fields which are accessed via `m["key"]` or `float(m["key"])` without sufficient `get` checks or `try-except` blocks.
    - Ensure all price extractions (`yes_price`, `no_price`) use safe access (e.g., `m.get('key', default_value)`) and robust type conversion with appropriate error handling (e.g., `try-except ValueError`) to prevent crashes from unexpected API responses.
    - File: src/adapters/limitless.py
+
 
 
 
