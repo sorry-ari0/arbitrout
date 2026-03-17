@@ -1,4 +1,4 @@
-﻿# Arbitrout Tasks
+# Arbitrout Tasks
 # Status: TODO | IN_PROGRESS | COMPLETED | BLOCKED
 
 ## Arbitrage Scanner Improvements
@@ -124,9 +124,66 @@
    - Adjust the `_normalize` method to preferentially use `bestBuyNoCost` for the `no_price` (representing the cost to buy NO shares). If `bestBuyNoCost` is unavailable or zero, consider if `bestSellNoCost` (price to sell NO shares) might be relevant if used consistently with `bestBuyYesCost` as bid/ask pairs, or log a warning if actual 'buy no' price cannot be found.
    - File: src/adapters/predictit.py
 
+22. TODO - Frontend JS: Correctly implement processing for all WebSocket message types
+   - The `arbWs.onmessage` handler in `src/static/js/arbitrout.js` still only processes `opportunities` and `feed` message types. Logic for `init` and `scan_result` messages (which update `opp-count` and platform status) is missing, despite being marked as completed in Task #19.
+   - Add logic within `arbWs.onmessage` to handle `init` and `scan_result` message types.
+   - Update the `opp-count` element with `data.events_count` from these messages.
+   - Update the platform status display (e.g., `arb-status`) with `data.platforms` from these messages.
+   - File: src/static/js/arbitrout.js
 
+23. TODO - Frontend JS: Implement retry logic for WebSocket reconnections
+   - The `reconnectArbWs` function is defined with retry logic (`retryCount`, `maxRetries`), but it is not called. `arbWs.onclose` and `arbWs.onerror` currently call `connectArbWs` directly, leading to infinite retries.
+   - Modify `arbWs.onclose` and `arbWs.onerror` to call `reconnectArbWs` instead of `connectArbWs` directly.
+   - File: src/static/js/arbitrout.js
 
+24. TODO - Arbitrage Router: Implement `min_profit` filter for opportunities endpoint
+   - The `/api/arbitrage/opportunities` endpoint in `src/arbitrage_router.py` does not currently accept or apply a `min_profit` query parameter, despite Task #9 being marked as COMPLETED.
+   - Modify the `/api/arbitrage/opportunities` endpoint to accept an optional `min_profit: float = 0.0` query parameter.
+   - Pass this `min_profit` value (converted to `min_spread`) to `scanner.get_opportunities()`.
+   - File: src/arbitrage_router.py
 
+25. TODO - Arbitrage Router: Add null check for `_registry` in WebSocket `init` message
+   - The WebSocket `init` message sends `_registry.get_all_status()` without a null check for `_registry`. If `_registry` is `None`, this will raise an error.
+   - Add a check for `_registry` being `None` before attempting to call `_registry.get_all_status()`.
+   - File: src/arbitrage_router.py
 
+26. TODO - PredictIt Adapter: Improve `no_price` normalization to use actual order book data
+   - The `_normalize` method in `src/adapters/predictit.py` still falls back to `1.0 - yes_price` for `no_price` when `bestBuyNoCost` is zero, which was explicitly identified as an inaccuracy to be resolved in Task #21 (marked COMPLETED).
+   - Refactor the logic to prioritize `bestBuyNoCost` or other actual order book data (`bestSellNoCost` if applicable) for `no_price`.
+   - If no actual 'buy no' price can be found, log a warning instead of using the heuristic.
+   - File: src/adapters/predictit.py
 
+27. TODO - Frontend CSS: Implement mobile responsiveness for Arbitrout layout
+   - The `src/static/css/arbitrout.css` file is missing `@media (max-width: 768px)` queries to implement the mobile-responsive layout changes described in tasks #8 and #17 (marked COMPLETED).
+   - Add `@media (max-width: 768px)` queries to:
+     - Change `.arbitrout-container` to a single column layout (e.g., `grid-template-columns: 1fr; grid-template-rows: auto;`).
+     - Initially hide the event detail pane (`#event-detail`) on mobile, making it visible only when an opportunity is clicked.
+   - File: src/static/css/arbitrout.css
 
+28. TODO - Arbitrage Engine: Refactor `find_arbitrage` for optimal distinct platform pairing
+   - The `find_arbitrage` function in `src/arbitrage_engine.py` still uses a "second-best" logic when `best_yes_market.platform == best_no_market.platform`, which does not guarantee distinct platforms or the highest possible spread. This directly contradicts the resolution described in tasks #13 and #15 (marked COMPLETED).
+   - Refactor `find_arbitrage` to systematically iterate through all unique pairs of distinct platforms for a `MatchedEvent`.
+   - For each pair of platforms, identify the best `buy_yes_price` and `buy_no_price`.
+   - Select the overall pair of *distinct* platforms that yields the maximum spread.
+   - File: src/arbitrage_engine.py
+
+29. TODO - Arbitrage Engine: Implement pruning for `_previous_prices` dictionary
+   - The `_previous_prices` dictionary in `src/arbitrage_engine.py` grows indefinitely as new event prices are added, leading to potential memory issues. Tasks #14 and #16 (marked COMPLETED) specified implementing a pruning mechanism, but none is present.
+   - Modify the `compute_feed` or `scan` method to periodically remove entries from `_previous_prices` that correspond to events that are no longer active, have expired, or have not been updated for a configurable period (e.g., 24-48 hours).
+   - File: src/arbitrage_engine.py
+
+30. TODO - Arbitrage Engine: Calculate and add optimal capital allocation percentages to opportunities
+   - The `find_arbitrage` function in `src/arbitrage_engine.py` does not calculate `yes_allocation_pct` and `no_allocation_pct` for `ArbitrageOpportunity` objects, despite Task #20 being marked COMPLETED.
+   - Modify `find_arbitrage` to calculate the optimal capital allocation percentages for buying YES and NO contracts to maximize guaranteed payout.
+   - Add these `yes_allocation_pct` and `no_allocation_pct` fields to the `ArbitrageOpportunity` model (assuming it will be updated or already accepts them).
+   - File: src/arbitrage_engine.py
+
+31. TODO - Limitless Adapter: Move `import asyncio` to module level
+   - The `import asyncio` statement is currently inside the `_fetch` method in `src/adapters/limitless.py`.
+   - Move `import asyncio` to the top of the file, outside of any function, to follow best practices and avoid repeated imports.
+   - File: src/adapters/limitless.py
+
+32. TODO - Limitless Adapter: Enhance price parsing robustness in `_normalize`
+   - The `_normalize` method in `src/adapters/limitless.py` could be more robust in handling potentially missing or malformed price data, specifically for `probability` and `yes_price` fields which are accessed via `m["key"]` or `float(m["key"])` without sufficient `get` checks or `try-except` blocks.
+   - Ensure all price extractions (`yes_price`, `no_price`) use safe access (e.g., `m.get('key', default_value)`) and robust type conversion with appropriate error handling (e.g., `try-except ValueError`) to prevent crashes from unexpected API responses.
+   - File: src/adapters/limitless.py
