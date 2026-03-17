@@ -259,7 +259,7 @@
    - Implement logic to update the platform status display (e.g., using `arb-status` dots) based on `data.platforms` received in these messages.
    - File: src/static/js/arbitrout.js
 
-44. TODO - Frontend JS: Implement retry logic for WebSocket reconnections
+44. COMPLETED - Frontend JS: Implement retry logic for WebSocket reconnections
    - The `arbWs.onclose` and `arbWs.onerror` functions in `src/static/js/arbitrout.js` currently call `connectArbWs` directly, leading to infinite retries without backoff. The `reconnectArbWs` function (which defines retry logic) is defined but not called, despite Task #23 being marked COMPLETED.
    - Modify `arbWs.onclose` and `arbWs.onerror` functions to call `reconnectArbWs` instead of `connectArbWs` directly.
    - Ensure `reconnectArbWs` properly handles the `retryCount` and `maxRetries` to implement exponential backoff.
@@ -285,6 +285,7 @@
    - Configure for approximately 3 retries with increasing delays (e.g., 2s, 4s, 8s).
    - Log warnings on retries and an error if the request ultimately fails after all retries.
    - File: src/adapters/polymarket.py
+
 
 
 
