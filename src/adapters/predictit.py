@@ -1,7 +1,7 @@
 """PredictIt adapter — public JSON API, no auth, ~1 req/min rate limit."""
 from .base import BaseAdapter
 from .models import NormalizedEvent
-
+import logging
 
 # ============================================================
 # CATEGORY MAPPING
@@ -58,11 +58,14 @@ class PredictItAdapter(BaseAdapter):
                 yes_price = contract.get("lastTradePrice", 0) or 0
                 best_yes = contract.get("bestBuyYesCost", 0) or 0
                 best_no = contract.get("bestBuyNoCost", 0) or 0
+                best_sell_no = contract.get("bestSellNoCost", 0) or 0
 
                 # Prefer bestBuy costs (actual order book)
                 if best_yes > 0:
                     yes_price = best_yes
-                no_price = best_no if best_no > 0 else (1.0 - yes_price)
+                no_price = best_no if best_no > 0 else best_sell_no if best_sell_no > 0 else 0.0
+                if no_price == 0.0:
+                    logging.warning(f"Could not determine reliable 'buy no' price for contract {contract.get('id', market_id)}")
 
                 volume = contract.get("totalSharesTraded", 0) or 0
                 end_date = market.get("dateEnd", "ongoing")
