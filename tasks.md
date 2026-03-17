@@ -131,7 +131,7 @@
    - Update the platform status display (e.g., `arb-status`) with `data.platforms` from these messages.
    - File: src/static/js/arbitrout.js
 
-23. TODO - Frontend JS: Implement retry logic for WebSocket reconnections
+23. COMPLETED - Frontend JS: Implement retry logic for WebSocket reconnections
    - The `reconnectArbWs` function is defined with retry logic (`retryCount`, `maxRetries`), but it is not called. `arbWs.onclose` and `arbWs.onerror` currently call `connectArbWs` directly, leading to infinite retries.
    - Modify `arbWs.onclose` and `arbWs.onerror` to call `reconnectArbWs` instead of `connectArbWs` directly.
    - File: src/static/js/arbitrout.js
@@ -187,4 +187,5 @@
    - The `_normalize` method in `src/adapters/limitless.py` could be more robust in handling potentially missing or malformed price data, specifically for `probability` and `yes_price` fields which are accessed via `m["key"]` or `float(m["key"])` without sufficient `get` checks or `try-except` blocks.
    - Ensure all price extractions (`yes_price`, `no_price`) use safe access (e.g., `m.get('key', default_value)`) and robust type conversion with appropriate error handling (e.g., `try-except ValueError`) to prevent crashes from unexpected API responses.
    - File: src/adapters/limitless.py
+
 
