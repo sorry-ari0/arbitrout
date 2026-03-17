@@ -113,7 +113,7 @@
    - Update the platform status display (e.g., `arb-status`) with `data.platforms` (from `init` or `scan_result`).
    - File: src/static/js/arbitrout.js
 
-20. TODO - Arbitrage Engine: Calculate optimal capital allocation for arbitrage opportunities.
+20. COMPLETED - Arbitrage Engine: Calculate optimal capital allocation for arbitrage opportunities.
    - The frontend currently defaults to 50/50 capital allocation, which is not optimal for maximizing guaranteed profit. The backend should calculate and provide `yes_allocation_pct` and `no_allocation_pct`.
    - Modify the `find_arbitrage` function to calculate the optimal capital allocation percentages for buying YES and NO contracts, considering their respective prices, to guarantee a fixed payout.
    - Add these `yes_allocation_pct` and `no_allocation_pct` fields to the `ArbitrageOpportunity` model (assuming it exists or would be created).
@@ -123,6 +123,7 @@
    - The `PredictItAdapter` sometimes derives the `no_price` as `1.0 - yes_price` when `bestBuyNoCost` is zero. This is a heuristic and not an actual order book price, which can lead to inaccuracies in arbitrage calculations.
    - Adjust the `_normalize` method to preferentially use `bestBuyNoCost` for the `no_price` (representing the cost to buy NO shares). If `bestBuyNoCost` is unavailable or zero, consider if `bestSellNoCost` (price to sell NO shares) might be relevant if used consistently with `bestBuyYesCost` as bid/ask pairs, or log a warning if actual 'buy no' price cannot be found.
    - File: src/adapters/predictit.py
+
 
 
 
