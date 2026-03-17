@@ -93,7 +93,7 @@
    - Modify the `compute_feed` or `scan` method to periodically remove entries from `_previous_prices` that correspond to events that are no longer active, have expired, or have not been updated for a configurable period (e.g., 24-48 hours).
    - File: src/arbitrage_engine.py
 
-17. TODO - Frontend CSS: Implement mobile responsiveness for Arbitrout layout.
+17. COMPLETED - Frontend CSS: Implement mobile responsiveness for Arbitrout layout.
    - The `src/static/css/arbitrout.css` file currently lacks `@media` queries to adapt the layout for mobile screens.
    - Add `@media (max-width: 768px)` queries to:
      - Change `.arbitrout-container` to a single column layout (e.g., `grid-template-columns: 1fr; grid-template-rows: auto;`).
@@ -123,5 +123,6 @@
    - The `PredictItAdapter` sometimes derives the `no_price` as `1.0 - yes_price` when `bestBuyNoCost` is zero. This is a heuristic and not an actual order book price, which can lead to inaccuracies in arbitrage calculations.
    - Adjust the `_normalize` method to preferentially use `bestBuyNoCost` for the `no_price` (representing the cost to buy NO shares). If `bestBuyNoCost` is unavailable or zero, consider if `bestSellNoCost` (price to sell NO shares) might be relevant if used consistently with `bestBuyYesCost` as bid/ask pairs, or log a warning if actual 'buy no' price cannot be found.
    - File: src/adapters/predictit.py
+
 
 
