@@ -302,7 +302,7 @@
    - Re-evaluate this strict filtering to allow matching when a crypto ticker matches but one market is missing price data, potentially allowing for other entity overlaps to score.
    - File: src/event_matcher.py
 
-51. TODO - Event Matcher: Consider refining `_entity_overlap_score` for partial crypto matches
+51. COMPLETED - Event Matcher: Consider refining `_entity_overlap_score` for partial crypto matches
    - The `_entity_overlap_score` function returns `0.0` if only one of the two event entities contains a `crypto_ticker`.
    - Consider if there are valid scenarios for partial crypto matches where other entities should still contribute to the score, or confirm the current strict matching is intended.
    - File: src/event_matcher.py
@@ -392,6 +392,7 @@
    - In the `find_arbitrage` function, calculate `yes_allocation_pct` and `no_allocation_pct` based on the `buy_yes_price` and `buy_no_price` to achieve a guaranteed fixed payout.
    - Add these calculated percentages to the `ArbitrageOpportunity` object before appending it to the results (assuming `ArbitrageOpportunity` model can accept them).
    - File: src/arbitrage_engine.py
+
 
 
 
