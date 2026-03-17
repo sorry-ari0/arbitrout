@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from adapters.registry import AdapterRegistry
 from arbitrage_engine import ArbitrageScanner, load_saved, save_market, unsave_market
 from event_matcher import add_manual_link, remove_manual_link
+from theta_scanner import ThetaScanner
 
 logger = logging.getLogger("arbitrage_router")
 
@@ -18,19 +19,27 @@ router = APIRouter(prefix="/api/arbitrage", tags=["arbitrage"])
 # ============================================================
 _scanner: ArbitrageScanner | None = None
 _registry: AdapterRegistry | None = None
+_theta_scanner: ThetaScanner | None = None
 
 
 def init_scanner(registry: AdapterRegistry):
     """Called by server.py to initialize the scanner."""
-    global _scanner, _registry
+    global _scanner, _registry, _theta_scanner
     _registry = registry
     _scanner = ArbitrageScanner(registry)
+    _theta_scanner = ThetaScanner(registry)
 
 
 def get_scanner() -> ArbitrageScanner:
     if _scanner is None:
         raise RuntimeError("Scanner not initialized")
     return _scanner
+
+
+def get_theta_scanner() -> ThetaScanner:
+    if _theta_scanner is None:
+        raise RuntimeError("Theta scanner not initialized")
+    return _theta_scanner
 
 
 # ============================================================
@@ -120,6 +129,13 @@ async def delete_saved(match_id: str):
     """Remove a bookmark."""
     saved = unsave_market(match_id)
     return JSONResponse(content=saved)
+
+
+@router.get("/theta")
+async def get_theta_opportunities():
+    """Theta opportunities, sorted by days to expiry and edge %."""
+    theta_scanner = get_theta_scanner()
+    return JSONResponse(content=theta_scanner.get_theta_opportunities())
 
 
 # ============================================================
