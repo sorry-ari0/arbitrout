@@ -142,7 +142,7 @@
    - Pass this `min_profit` value (converted to `min_spread`) to `scanner.get_opportunities()`.
    - File: src/arbitrage_router.py
 
-25. TODO - Arbitrage Router: Add null check for `_registry` in WebSocket `init` message
+25. COMPLETED - Arbitrage Router: Add null check for `_registry` in WebSocket `init` message
    - The WebSocket `init` message sends `_registry.get_all_status()` without a null check for `_registry`. If `_registry` is `None`, this will raise an error.
    - Add a check for `_registry` being `None` before attempting to call `_registry.get_all_status()`.
    - File: src/arbitrage_router.py
@@ -187,6 +187,7 @@
    - The `_normalize` method in `src/adapters/limitless.py` could be more robust in handling potentially missing or malformed price data, specifically for `probability` and `yes_price` fields which are accessed via `m["key"]` or `float(m["key"])` without sufficient `get` checks or `try-except` blocks.
    - Ensure all price extractions (`yes_price`, `no_price`) use safe access (e.g., `m.get('key', default_value)`) and robust type conversion with appropriate error handling (e.g., `try-except ValueError`) to prevent crashes from unexpected API responses.
    - File: src/adapters/limitless.py
+
 
 
 
