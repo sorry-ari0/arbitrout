@@ -1,4 +1,4 @@
-# Arbitrout Tasks
+﻿# Arbitrout Tasks
 # Status: TODO | IN_PROGRESS | COMPLETED | BLOCKED
 
 ## Arbitrage Scanner Improvements
@@ -286,7 +286,7 @@
    - Log warnings on retries and an error if the request ultimately fails after all retries.
    - File: src/adapters/polymarket.py
 
-48. TODO - Limitless Adapter: Move `import asyncio` to module level
+48. COMPLETED - Limitless Adapter: Move `import asyncio` to module level
    - The `import asyncio` statement is currently inside the `_fetch` method.
    - Relocate the `import asyncio` statement from inside the `_fetch` method to the top of the file, adhering to standard Python practices.
    - File: src/adapters/limitless.py
@@ -392,3 +392,4 @@
    - In the `find_arbitrage` function, calculate `yes_allocation_pct` and `no_allocation_pct` based on the `buy_yes_price` and `buy_no_price` to achieve a guaranteed fixed payout.
    - Add these calculated percentages to the `ArbitrageOpportunity` object before appending it to the results (assuming `ArbitrageOpportunity` model can accept them).
    - File: src/arbitrage_engine.py
+
