@@ -124,3 +124,98 @@
    - Adjust the `_normalize` method to preferentially use `bestBuyNoCost` for the `no_price` (representing the cost to buy NO shares). If `bestBuyNoCost` is unavailable or zero, consider if `bestSellNoCost` (price to sell NO shares) might be relevant if used consistently with `bestBuyYesCost` as bid/ask pairs, or log a warning if actual 'buy no' price cannot be found.
    - File: src/adapters/predictit.py
 
+## Stock Analysis & Portfolio Research (Bloomberg Terminal)
+
+22. TODO - Add scrapling-based company research module
+   - Create a new module `src/research/company_researcher.py` that uses the scrapling library (already installed v0.4.1)
+   - Implement `research_company(ticker: str) -> dict` that scrapes Wikipedia for: CEO name, founders, founding year, headquarters, industry, key investors, board members, recent controversies
+   - Use the existing `_COMPANY_NAMES` mapping in swarm_engine.py (maps ~50 tickers to Wikipedia article titles) as a starting point, but also support looking up unknown tickers by searching Wikipedia for "{company_name} company"
+   - Cache results in a local JSON file `data/company_research_cache.json` to avoid re-scraping
+   - Add a `research_batch(tickers: list) -> list[dict]` function that processes multiple tickers with 1-2 second delays between requests
+   - File: src/research/company_researcher.py (new)
+
+23. TODO - Expand stock universe to full NASDAQ and NYSE listings
+   - The current swarm_engine.py MOCK_UNIVERSE has only 103 hardcoded tickers with synthetic fundamentals
+   - Create `src/research/stock_universe.py` that downloads full ticker lists from public sources:
+     - NASDAQ: use the NASDAQ FTP file at `ftp.nasdaqtrader.com/symboldirectory/nasdaqtraded.txt` or the SEC EDGAR company tickers JSON at `https://www.sec.gov/files/company_tickers.json`
+     - NYSE: included in the same SEC EDGAR file (covers all US exchanges)
+   - Parse into a list of dicts with: ticker, company_name, exchange (NASDAQ/NYSE/AMEX), market_cap_tier (large/mid/small/micro)
+   - Store in `data/us_stock_universe.json` and refresh weekly
+   - Add a `get_universe(exchange=None, cap_tier=None) -> list` function that filters by exchange and market cap tier
+   - Modify `swarm_engine.py` to use this universe instead of MOCK_UNIVERSE when the data file exists, falling back to MOCK_UNIVERSE if not
+   - File: src/research/stock_universe.py (new), src/swarm_engine.py
+
+24. TODO - Add Hong Kong Stock Exchange (HKEX) listings to universe
+   - Extend `src/research/stock_universe.py` to include HKEX stocks
+   - Scrape HKEX stock list from `https://www.hkex.com.hk/Market-Data/Securities-Prices/Equities` or use the HKEX API
+   - Hong Kong tickers use 4-digit codes (e.g., 0700.HK for Tencent, 9988.HK for Alibaba HK)
+   - Add exchange="HKEX" support to `get_universe()` filter
+   - Include at minimum the Hang Seng Index constituents (~80 stocks) and Hang Seng Composite (~500 stocks)
+   - Map HKEX tickers to company names for Wikipedia research lookups
+   - File: src/research/stock_universe.py
+
+25. TODO - Add CEO/founder/investor detail endpoint to Bloomberg Terminal API
+   - Add GET `/api/research/company/{ticker}` endpoint that returns detailed company research
+   - Call `company_researcher.research_company(ticker)` and return the scraped data as JSON
+   - Include fields: ceo, founders (list), key_investors (list), founding_year, headquarters, industry, board_members (list), wikipedia_url
+   - Add GET `/api/research/batch` endpoint that accepts `?tickers=AAPL,MSFT,GOOGL` and returns research for multiple companies
+   - Add the research data to the swarm_engine screening results so when a user says "tech companies with female CEOs" the unresolved criteria can be checked against actual scraped data
+   - File: src/server.py, src/research/company_researcher.py
+
+26. TODO - Integrate scrapling research into portfolio prompt screening
+   - When swarm_engine.py parses a prompt and gets `unresolved` criteria (e.g., "companies founded by immigrants", "CEOs with engineering backgrounds", "backed by Sequoia Capital"), it currently ignores them
+   - After the initial fundamentals screening, for each passing ticker call `company_researcher.research_company()` to get qualitative data
+   - Use a simple keyword/substring match against the research data to filter for unresolved criteria
+   - Example: prompt "tech stocks with founder-led companies" -> screen fundamentals -> for each result, check if CEO name appears in founders list
+   - Log which unresolved criteria could and could not be verified
+   - File: src/swarm_engine.py, src/research/company_researcher.py
+
+## Commodity, Crypto & Prediction Market Arbitrage
+
+27. TODO - Add commodity market adapter for arbitrage scanning
+   - Create `src/adapters/commodities.py` that fetches commodity prices
+   - Use a free API like Metals API, Open Exchange Rates, or scrape from TradingView/Yahoo Finance for: gold (XAU), silver (XAG), crude oil (WTI, Brent), natural gas, copper, corn, wheat, soybeans
+   - Normalize to the same `NormalizedEvent` format used by other adapters with: event_name (e.g., "Gold Price > $2500 by Dec 2026"), platform ("Commodities"), yes_price, no_price
+   - The adapter should compare current spot prices against prediction market questions about commodity prices to find arbitrage between real commodity futures and prediction market contracts
+   - Register the adapter in server.py alongside existing adapters
+   - File: src/adapters/commodities.py (new), src/server.py
+
+28. TODO - Add crypto spot price adapter for cross-platform arbitrage
+   - Create `src/adapters/crypto_spot.py` that fetches real-time crypto prices from multiple exchanges
+   - Use free APIs: CoinGecko (no key needed) for BTC, ETH, SOL, DOGE, XRP, ADA, AVAX, LINK, DOT, MATIC prices across exchanges
+   - Normalize into `NormalizedEvent` format: compare prediction market contracts about crypto prices (e.g., "BTC > $100k by July") against actual spot prices and implied probabilities from options/futures
+   - Calculate implied probability from current price vs strike: if BTC is at $95k and prediction market says "BTC > $100k" at $0.40, compare against historical volatility to find mispriced contracts
+   - Register in server.py
+   - File: src/adapters/crypto_spot.py (new), src/server.py
+
+29. TODO - Add theta decay detection for prediction markets near expiry
+   - Add a `theta_scanner` module `src/theta_scanner.py` that identifies prediction market contracts approaching expiry where theta (time decay) creates arbitrage opportunities
+   - For each prediction market event, check if `end_date` or `close_date` is within 7 days
+   - Calculate implied probability vs current price: if an event is 95% likely to resolve YES (based on current real-world data) but the YES contract trades at $0.80, thats a $0.15 edge
+   - Flag "in the money" contracts trading below fair value near expiry (high-confidence free money)
+   - Flag "out of the money" contracts still trading above $0.05 near expiry (sell opportunity)
+   - Add a `/api/arbitrage/theta` endpoint that returns theta opportunities sorted by days_to_expiry and edge_pct
+   - File: src/theta_scanner.py (new), src/arbitrage_router.py
+
+30. TODO - Add prediction-to-real-asset arbitrage matching
+   - Create `src/cross_asset_matcher.py` that finds combinations where prediction market contracts can be hedged with real tradeable assets
+   - Example: Polymarket has "BTC > $100k by July" at $0.40 -> buy YES at $0.40 + short BTC futures at $100k strike = guaranteed profit if spread exceeds transaction costs
+   - Example: Kalshi has "S&P 500 above 5500 by Q3" at $0.55 -> buy YES + buy SPY puts at 5500 strike = hedged position
+   - Match prediction market events against: crypto prices (via Coinbase adapter), stock prices (via Robinhood adapter), commodity prices (via commodities adapter)
+   - Calculate the net cost of the hedged position and the guaranteed profit/loss
+   - Add `/api/arbitrage/cross-asset` endpoint returning matched opportunities with hedge instructions
+   - File: src/cross_asset_matcher.py (new), src/arbitrage_router.py
+
+31. TODO - Research best arbitrage strategies before implementation
+   - Create `src/research/arbitrage_strategies.py` that uses scrapling to research and document the best approaches for:
+     - Prediction market arbitrage (academic papers, blog posts from experienced traders)
+     - Crypto spot vs prediction market hedging
+     - Commodity futures vs prediction market contracts
+     - Theta decay harvesting strategies
+     - Kelly criterion for optimal bet sizing
+   - Scrape key sources: Wikipedia articles on "Arbitrage", "Prediction market", "Theta (finance)", "Kelly criterion"
+   - Scrape trading strategy blogs: e.g., Polymarket strategy guides, Kalshi trading tips
+   - Store findings in `data/strategy_research.json` with: strategy_name, description, expected_edge_pct, risk_factors, sources
+   - This research should inform the implementation of tasks 27-30 above
+   - File: src/research/arbitrage_strategies.py (new)
+

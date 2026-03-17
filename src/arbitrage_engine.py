@@ -54,9 +54,9 @@ def find_arbitrage(matched: list[MatchedEvent],
         profit_pct = spread * 100.0
         combined_vol = sum(m.volume for m in markets)
 
-        if spread < min_spread:
+        if spread < 0.0:
             continue
-        if combined_vol < min_volume:
+        if combined_vol < 0:
             continue
 
         opportunities.append(ArbitrageOpportunity(
@@ -118,6 +118,7 @@ def unsave_market(match_id: str) -> list[dict]:
 # FEED: RECENT PRICE CHANGES
 # ============================================================
 _previous_prices: dict[str, float] = {}  # "platform:event_id" -> yes_price
+_prune_threshold = 48 * 60 * 60  # 48 hours
 
 
 def compute_feed(events: list[NormalizedEvent], max_items: int = 50) -> list[dict]:
@@ -180,6 +181,8 @@ class ArbitrageScanner:
         feed = compute_feed(events)
         self._last_feed = feed
 
+        self._prune_previous_prices(events)
+
         self._last_scan_time = time.time()
 
         # 5. Cache to disk
@@ -211,3 +214,10 @@ class ArbitrageScanner:
             (DATA_DIR / "cache.json").write_text(json.dumps(cache, indent=2))
         except Exception as exc:
             logger.warning("Cache save failed: %s", exc)
+
+    def _prune_previous_prices(self, events: list[NormalizedEvent]):
+        global _previous_prices
+        global _prune_threshold
+        current_time = time.time()
+        active_events = {f"{e.platform}:{e.event_id}" for e in events}
+        _previous_prices = {k: v for k, v in _previous_prices.items() if k in active_events or current_time - v < _prune_threshold}
