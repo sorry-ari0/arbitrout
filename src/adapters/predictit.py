@@ -62,7 +62,18 @@ class PredictItAdapter(BaseAdapter):
                 # Prefer bestBuy costs (actual order book)
                 if best_yes > 0:
                     yes_price = best_yes
-                no_price = best_no if best_no > 0 else (1.0 - yes_price)
+                
+                if best_no > 0:
+                    no_price = best_no
+                else:
+                    self.logger.warning(
+                        "PredictIt: No actual 'buy no' price found for contract '%s' (ID: %s) in market '%s' (ID: %s). Defaulting no_price to 0.",
+                        contract.get("name", ""),
+                        contract.get("id", ""),
+                        market_name,
+                        market_id
+                    )
+                    no_price = 0.0
 
                 volume = contract.get("totalSharesTraded", 0) or 0
                 end_date = market.get("dateEnd", "ongoing")
