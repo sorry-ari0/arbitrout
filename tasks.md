@@ -100,7 +100,7 @@
      - Initially hide the event detail pane (`#event-detail`) on mobile, making it visible only when an opportunity is clicked.
    - File: src/static/css/arbitrout.css
 
-18. TODO - Frontend JS: Add sorting controls and logic to Arbitrout opportunities list.
+18. BLOCKED - Frontend JS: Add sorting controls and logic to Arbitrout opportunities list.
    - The UI is missing a dropdown to select sorting preferences for the arbitrage opportunities. The `renderOpportunities` function also lacks the logic to apply sorting client-side.
    - Add a dropdown UI element (e.g., `<select>`) in the opportunities panel header.
    - Implement client-side sorting logic within `renderOpportunities` or a helper function, allowing users to sort by criteria such as "Profit High-Low", "Profit Low-High", "Platform A-Z", and "Newest First" (using `matched_event.last_updated` or similar).
@@ -123,6 +123,7 @@
    - The `PredictItAdapter` sometimes derives the `no_price` as `1.0 - yes_price` when `bestBuyNoCost` is zero. This is a heuristic and not an actual order book price, which can lead to inaccuracies in arbitrage calculations.
    - Adjust the `_normalize` method to preferentially use `bestBuyNoCost` for the `no_price` (representing the cost to buy NO shares). If `bestBuyNoCost` is unavailable or zero, consider if `bestSellNoCost` (price to sell NO shares) might be relevant if used consistently with `bestBuyYesCost` as bid/ask pairs, or log a warning if actual 'buy no' price cannot be found.
    - File: src/adapters/predictit.py
+
 
 
 
