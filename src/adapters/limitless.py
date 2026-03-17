@@ -86,14 +86,23 @@ class LimitlessAdapter(BaseAdapter):
 
         prices = m.get("prices")
         if isinstance(prices, list) and len(prices) >= 2:
-            yes_price = float(prices[0])
-            no_price = float(prices[1])
+            try:
+                yes_price = float(prices[0])
+                no_price = float(prices[1])
+            except (ValueError, TypeError):
+                pass
         elif "probability" in m:
-            yes_price = float(m["probability"])
-            no_price = 1.0 - yes_price
+            try:
+                yes_price = float(m.get("probability", 0.0))
+                no_price = 1.0 - yes_price
+            except (ValueError, TypeError):
+                pass
         elif "yes_price" in m:
-            yes_price = float(m["yes_price"])
-            no_price = float(m.get("no_price", 1.0 - yes_price))
+            try:
+                yes_price = float(m.get("yes_price", 0.0))
+                no_price = float(m.get("no_price", 1.0 - yes_price))
+            except (ValueError, TypeError):
+                pass
 
         # Volume — volumeFormatted is human-readable USDC
         volume = 0
