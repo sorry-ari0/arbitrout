@@ -341,7 +341,7 @@
    - Define a `reconnectArbWs` function that properly handles `retryCount` and `maxRetries` to implement exponential backoff.
    - File: src/static/js/arbitrout.js
 
-57. TODO - Frontend JS: Add sorting controls and logic to Arbitrout opportunities list
+57. COMPLETED - Frontend JS: Add sorting controls and logic to Arbitrout opportunities list
    - The UI for the arbitrage opportunities list is missing sorting controls, and the `renderOpportunities` function lacks client-side sorting logic.
    - Add a dropdown UI element (e.g., `<select>`) to the opportunities panel header for sorting.
    - Provide options for sorting criteria: "Profit High-Low", "Profit Low-High", "Platform A-Z", "Newest First" (using `matched_event.last_updated` or similar timestamp).
@@ -392,6 +392,7 @@
    - In the `find_arbitrage` function, calculate `yes_allocation_pct` and `no_allocation_pct` based on the `buy_yes_price` and `buy_no_price` to achieve a guaranteed fixed payout.
    - Add these calculated percentages to the `ArbitrageOpportunity` object before appending it to the results (assuming `ArbitrageOpportunity` model can accept them).
    - File: src/arbitrage_engine.py
+
 
 
 
