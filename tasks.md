@@ -180,7 +180,7 @@
    - Register the adapter in server.py alongside existing adapters
    - File: src/adapters/commodities.py (new), src/server.py
 
-28. TODO - Add crypto spot price adapter for cross-platform arbitrage
+28. BLOCKED - Add crypto spot price adapter for cross-platform arbitrage
    - Create `src/adapters/crypto_spot.py` that fetches real-time crypto prices from multiple exchanges
    - Use free APIs: CoinGecko (no key needed) for BTC, ETH, SOL, DOGE, XRP, ADA, AVAX, LINK, DOT, MATIC prices across exchanges
    - Normalize into `NormalizedEvent` format: compare prediction market contracts about crypto prices (e.g., "BTC > $100k by July") against actual spot prices and implied probabilities from options/futures
@@ -218,6 +218,7 @@
    - Store findings in `data/strategy_research.json` with: strategy_name, description, expected_edge_pct, risk_factors, sources
    - This research should inform the implementation of tasks 27-30 above
    - File: src/research/arbitrage_strategies.py (new)
+
 
 
 
