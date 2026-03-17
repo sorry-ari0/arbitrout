@@ -27,7 +27,7 @@
    - Default to 0 (show all) if not provided
    - File: src/arbitrage_router.py
 
-5. TODO - Add sorting controls to arbitrout frontend
+5. COMPLETED - Add sorting controls to arbitrout frontend
    - Add a dropdown select above the opportunities list with options: Profit High-Low, Profit Low-High, Platform A-Z, Newest First
    - Sort feedItems array based on selection before rendering
    - File: src/static/js/arbitrout.js
@@ -50,6 +50,7 @@
    - Stack the 4-pane grid into single column
    - Hide detail pane on mobile until an opportunity is clicked
    - File: src/static/css/arbitrout.css
+
 
 
 
