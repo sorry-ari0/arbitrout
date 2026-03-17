@@ -279,12 +279,13 @@
    - Log warnings on retries and an error if the request ultimately fails after all retries.
    - File: src/adapters/limitless.py
 
-47. TODO - Polymarket Adapter: Add retry logic to `_fetch` method
+47. COMPLETED - Polymarket Adapter: Add retry logic to `_fetch` method
    - The `_fetch` method in `src/adapters/polymarket.py` currently lacks retry logic for API calls, despite Task #1 being marked COMPLETED.
    - Implement exponential backoff retry logic for the `client.get` call within the `_fetch` method, specifically for 429 (Too Many Requests) and 5xx (Server Error) status codes.
    - Configure for approximately 3 retries with increasing delays (e.g., 2s, 4s, 8s).
    - Log warnings on retries and an error if the request ultimately fails after all retries.
    - File: src/adapters/polymarket.py
+
 
 
 
