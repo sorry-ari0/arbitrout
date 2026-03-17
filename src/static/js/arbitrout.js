@@ -8,6 +8,9 @@ let arbWs = null;
 let selectedOpp = null;
 let feedItems = [];
 
+// Global variable for sorting preference
+let currentSortPreference = 'profit_desc'; // Default to Profit (High-Low)
+
 // === PIXEL ART (CSS grid of div cells) ===
 function createPixelGrid(colorMap, scale) {
     // colorMap: 2D array of hex colors (null = transparent)
@@ -237,12 +240,37 @@ function renderOpportunities(opps) {
     var container = document.getElementById('opp-list');
     if (!container) return;
 
+    let sortedOpps = [...opps]; // Create a shallow copy to sort
+
+    if (sortedOpps.length > 0) {
+        sortedOpps.sort((a, b) => {
+            if (currentSortPreference === 'profit_desc') {
+                const profitA = a.profit_pct !== undefined ? a.profit_pct : a.spread * 100;
+                const profitB = b.profit_pct !== undefined ? b.profit_pct : b.spread * 100;
+                return profitB - profitA; // High to Low
+            } else if (currentSortPreference === 'profit_asc') {
+                const profitA = a.profit_pct !== undefined ? a.profit_pct : a.spread * 100;
+                const profitB = b.profit_pct !== undefined ? b.profit_pct : b.spread * 100;
+                return profitA - profitB; // Low to High
+            } else if (currentSortPreference === 'platform_asc') {
+                const platformA = a.buy_yes_platform || '';
+                const platformB = b.buy_yes_platform || '';
+                return platformA.localeCompare(platformB); // A-Z
+            } else if (currentSortPreference === 'newest_first') {
+                // Assuming the order received from the API is "newest first" by default.
+                // No explicit client-side sort needed for this preference, preserving original order.
+                return 0;
+            }
+            return 0; // Default no change
+        });
+    }
+
     // Clear existing
     while (container.firstChild) {
         container.removeChild(container.firstChild);
     }
 
-    if (!opps || opps.length === 0) {
+    if (!sortedOpps || sortedOpps.length === 0) {
         var empty = document.createElement('div');
         empty.className = 'arb-empty';
         empty.textContent = 'Scanning for opportunities...';
@@ -250,7 +278,7 @@ function renderOpportunities(opps) {
         return;
     }
 
-    opps.forEach(function(opp) {
+    sortedOpps.forEach(function(opp) {
         var row = document.createElement('div');
         row.className = 'opp-row';
         row.addEventListener('click', function() { showEventDetail(opp); });
@@ -591,5 +619,56 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     if (tabArb) {
         tabArb.addEventListener('click', function() { switchMode('arbitrout'); });
+    }
+
+    // Add sorting controls
+    var arbitroutContainer = document.getElementById('arbitrout-container');
+    if (arbitroutContainer) {
+        var oppList = document.getElementById('opp-list');
+
+        var sortControlsContainer = document.createElement('div');
+        sortControlsContainer.className = 'arb-sort-controls';
+        sortControlsContainer.style.cssText = 'padding: 8px; border-bottom: 1px solid var(--arb-border); display: flex; align-items: center; gap: 8px;';
+
+        var label = document.createElement('label');
+        label.setAttribute('for', 'sort-opportunities');
+        label.textContent = 'Sort by:';
+        label.style.cssText = 'font-family: monospace; font-size: 11px; color: var(--arb-muted);';
+        sortControlsContainer.appendChild(label);
+
+        var select = document.createElement('select');
+        select.id = 'sort-opportunities';
+        select.style.cssText = 'background: var(--arb-bg-dark); color: var(--arb-text); border: 1px solid var(--arb-border); padding: 4px; border-radius: 3px; font-family: monospace; font-size: 11px;';
+
+        var options = [
+            { value: 'profit_desc', text: 'Profit (High-Low)' },
+            { value: 'profit_asc', text: 'Profit (Low-High)' },
+            { value: 'platform_asc', text: 'Platform (A-Z)' },
+            { value: 'newest_first', text: 'Newest First' }
+        ];
+
+        options.forEach(function(optData) {
+            var option = document.createElement('option');
+            option.value = optData.value;
+            option.textContent = optData.text;
+            select.appendChild(option);
+        });
+
+        select.value = currentSortPreference; // Set initial selection
+
+        select.addEventListener('change', function() {
+            currentSortPreference = this.value;
+            loadOpportunities(); // Re-fetch and re-render with the new sort preference
+        });
+
+        sortControlsContainer.appendChild(select);
+
+        // Insert the sort controls before the opp-list
+        if (oppList) {
+            arbitroutContainer.insertBefore(sortControlsContainer, oppList);
+        } else {
+            // Fallback if opp-list isn't found immediately (shouldn't happen if HTML is standard)
+            arbitroutContainer.appendChild(sortControlsContainer);
+        }
     }
 });
