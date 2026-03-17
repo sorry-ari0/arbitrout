@@ -366,7 +366,7 @@
    - If `_registry` is `None`, send an empty list or appropriate default.
    - File: src/arbitrage_router.py
 
-61. TODO - Frontend CSS: Implement mobile responsiveness for Arbitrout layout
+61. COMPLETED - Frontend CSS: Implement mobile responsiveness for Arbitrout layout
    - The `src/static/css/arbitrout.css` file currently lacks `@media (max-width: 768px)` queries for mobile responsiveness.
    - Add `@media (max-width: 768px)` queries to `src/static/css/arbitrout.css`.
    - Within this media query, set `.arbitrout-container` to `grid-template-columns: 1fr; grid-template-rows: auto;` to stack panels vertically.
@@ -392,6 +392,7 @@
    - In the `find_arbitrage` function, calculate `yes_allocation_pct` and `no_allocation_pct` based on the `buy_yes_price` and `buy_no_price` to achieve a guaranteed fixed payout.
    - Add these calculated percentages to the `ArbitrageOpportunity` object before appending it to the results (assuming `ArbitrageOpportunity` model can accept them).
    - File: src/arbitrage_engine.py
+
 
 
 
