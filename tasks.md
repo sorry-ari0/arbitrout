@@ -124,274 +124,100 @@
    - Adjust the `_normalize` method to preferentially use `bestBuyNoCost` for the `no_price` (representing the cost to buy NO shares). If `bestBuyNoCost` is unavailable or zero, consider if `bestSellNoCost` (price to sell NO shares) might be relevant if used consistently with `bestBuyYesCost` as bid/ask pairs, or log a warning if actual 'buy no' price cannot be found.
    - File: src/adapters/predictit.py
 
-22. COMPLETED - Frontend JS: Correctly implement processing for all WebSocket message types
-   - The `arbWs.onmessage` handler in `src/static/js/arbitrout.js` still only processes `opportunities` and `feed` message types. Logic for `init` and `scan_result` messages (which update `opp-count` and platform status) is missing, despite being marked as completed in Task #19.
-   - Add logic within `arbWs.onmessage` to handle `init` and `scan_result` message types.
-   - Update the `opp-count` element with `data.events_count` from these messages.
-   - Update the platform status display (e.g., `arb-status`) with `data.platforms` from these messages.
-   - File: src/static/js/arbitrout.js
+## Stock Analysis & Portfolio Research (Bloomberg Terminal)
 
-23. COMPLETED - Frontend JS: Implement retry logic for WebSocket reconnections
-   - The `reconnectArbWs` function is defined with retry logic (`retryCount`, `maxRetries`), but it is not called. `arbWs.onclose` and `arbWs.onerror` currently call `connectArbWs` directly, leading to infinite retries.
-   - Modify `arbWs.onclose` and `arbWs.onerror` to call `reconnectArbWs` instead of `connectArbWs` directly.
-   - File: src/static/js/arbitrout.js
+22. TODO - Add scrapling-based company research module
+   - Create a new module `src/research/company_researcher.py` that uses the scrapling library (already installed v0.4.1)
+   - Implement `research_company(ticker: str) -> dict` that scrapes Wikipedia for: CEO name, founders, founding year, headquarters, industry, key investors, board members, recent controversies
+   - Use the existing `_COMPANY_NAMES` mapping in swarm_engine.py (maps ~50 tickers to Wikipedia article titles) as a starting point, but also support looking up unknown tickers by searching Wikipedia for "{company_name} company"
+   - Cache results in a local JSON file `data/company_research_cache.json` to avoid re-scraping
+   - Add a `research_batch(tickers: list) -> list[dict]` function that processes multiple tickers with 1-2 second delays between requests
+   - File: src/research/company_researcher.py (new)
 
-24. COMPLETED - Arbitrage Router: Implement `min_profit` filter for opportunities endpoint
-   - The `/api/arbitrage/opportunities` endpoint in `src/arbitrage_router.py` does not currently accept or apply a `min_profit` query parameter, despite Task #9 being marked as COMPLETED.
-   - Modify the `/api/arbitrage/opportunities` endpoint to accept an optional `min_profit: float = 0.0` query parameter.
-   - Pass this `min_profit` value (converted to `min_spread`) to `scanner.get_opportunities()`.
-   - File: src/arbitrage_router.py
+23. TODO - Expand stock universe to full NASDAQ and NYSE listings
+   - The current swarm_engine.py MOCK_UNIVERSE has only 103 hardcoded tickers with synthetic fundamentals
+   - Create `src/research/stock_universe.py` that downloads full ticker lists from public sources:
+     - NASDAQ: use the NASDAQ FTP file at `ftp.nasdaqtrader.com/symboldirectory/nasdaqtraded.txt` or the SEC EDGAR company tickers JSON at `https://www.sec.gov/files/company_tickers.json`
+     - NYSE: included in the same SEC EDGAR file (covers all US exchanges)
+   - Parse into a list of dicts with: ticker, company_name, exchange (NASDAQ/NYSE/AMEX), market_cap_tier (large/mid/small/micro)
+   - Store in `data/us_stock_universe.json` and refresh weekly
+   - Add a `get_universe(exchange=None, cap_tier=None) -> list` function that filters by exchange and market cap tier
+   - Modify `swarm_engine.py` to use this universe instead of MOCK_UNIVERSE when the data file exists, falling back to MOCK_UNIVERSE if not
+   - File: src/research/stock_universe.py (new), src/swarm_engine.py
 
-25. COMPLETED - Arbitrage Router: Add null check for `_registry` in WebSocket `init` message
-   - The WebSocket `init` message sends `_registry.get_all_status()` without a null check for `_registry`. If `_registry` is `None`, this will raise an error.
-   - Add a check for `_registry` being `None` before attempting to call `_registry.get_all_status()`.
-   - File: src/arbitrage_router.py
+24. TODO - Add Hong Kong Stock Exchange (HKEX) listings to universe
+   - Extend `src/research/stock_universe.py` to include HKEX stocks
+   - Scrape HKEX stock list from `https://www.hkex.com.hk/Market-Data/Securities-Prices/Equities` or use the HKEX API
+   - Hong Kong tickers use 4-digit codes (e.g., 0700.HK for Tencent, 9988.HK for Alibaba HK)
+   - Add exchange="HKEX" support to `get_universe()` filter
+   - Include at minimum the Hang Seng Index constituents (~80 stocks) and Hang Seng Composite (~500 stocks)
+   - Map HKEX tickers to company names for Wikipedia research lookups
+   - File: src/research/stock_universe.py
 
-26. COMPLETED - PredictIt Adapter: Improve `no_price` normalization to use actual order book data
-   - The `_normalize` method in `src/adapters/predictit.py` still falls back to `1.0 - yes_price` for `no_price` when `bestBuyNoCost` is zero, which was explicitly identified as an inaccuracy to be resolved in Task #21 (marked COMPLETED).
-   - Refactor the logic to prioritize `bestBuyNoCost` or other actual order book data (`bestSellNoCost` if applicable) for `no_price`.
-   - If no actual 'buy no' price can be found, log a warning instead of using the heuristic.
-   - File: src/adapters/predictit.py
+25. TODO - Add CEO/founder/investor detail endpoint to Bloomberg Terminal API
+   - Add GET `/api/research/company/{ticker}` endpoint that returns detailed company research
+   - Call `company_researcher.research_company(ticker)` and return the scraped data as JSON
+   - Include fields: ceo, founders (list), key_investors (list), founding_year, headquarters, industry, board_members (list), wikipedia_url
+   - Add GET `/api/research/batch` endpoint that accepts `?tickers=AAPL,MSFT,GOOGL` and returns research for multiple companies
+   - Add the research data to the swarm_engine screening results so when a user says "tech companies with female CEOs" the unresolved criteria can be checked against actual scraped data
+   - File: src/server.py, src/research/company_researcher.py
 
-27. COMPLETED - Frontend CSS: Implement mobile responsiveness for Arbitrout layout
-   - The `src/static/css/arbitrout.css` file is missing `@media (max-width: 768px)` queries to implement the mobile-responsive layout changes described in tasks #8 and #17 (marked COMPLETED).
-   - Add `@media (max-width: 768px)` queries to:
-     - Change `.arbitrout-container` to a single column layout (e.g., `grid-template-columns: 1fr; grid-template-rows: auto;`).
-     - Initially hide the `#event-detail` pane on mobile, making it visible only when an opportunity is clicked.
-   - File: src/static/css/arbitrout.css
+26. TODO - Integrate scrapling research into portfolio prompt screening
+   - When swarm_engine.py parses a prompt and gets `unresolved` criteria (e.g., "companies founded by immigrants", "CEOs with engineering backgrounds", "backed by Sequoia Capital"), it currently ignores them
+   - After the initial fundamentals screening, for each passing ticker call `company_researcher.research_company()` to get qualitative data
+   - Use a simple keyword/substring match against the research data to filter for unresolved criteria
+   - Example: prompt "tech stocks with founder-led companies" -> screen fundamentals -> for each result, check if CEO name appears in founders list
+   - Log which unresolved criteria could and could not be verified
+   - File: src/swarm_engine.py, src/research/company_researcher.py
 
-28. COMPLETED - Arbitrage Engine: Refactor `find_arbitrage` for optimal distinct platform pairing
-   - The `find_arbitrage` function in `src/arbitrage_engine.py` still uses a "second-best" logic when `best_yes_market.platform == best_no_market.platform`, which does not guarantee distinct platforms or the highest possible spread. This directly contradicts the resolution described in tasks #13 and #15 (marked COMPLETED).
-   - Refactor `find_arbitrage` to systematically iterate through all unique pairs of distinct platforms for a `MatchedEvent`.
-   - For each pair of platforms, identify the best `buy_yes_price` and `buy_no_price`.
-   - Select the overall pair of *distinct* platforms that yields the maximum spread.
-   - File: src/arbitrage_engine.py
+## Commodity, Crypto & Prediction Market Arbitrage
 
-29. COMPLETED - Arbitrage Engine: Implement pruning for `_previous_prices` dictionary
-   - The `_previous_prices` dictionary in `src/arbitrage_engine.py` grows indefinitely as new event prices are added, leading to potential memory issues. Tasks #14 and #16 (marked COMPLETED) specified implementing a pruning mechanism, but none is present.
-   - Modify the `compute_feed` or `scan` method to periodically remove entries from `_previous_prices` that correspond to events that are no longer active, have expired, or have not been updated for a configurable period (e.g., 24-48 hours).
-   - File: src/arbitrage_engine.py
+27. TODO - Add commodity market adapter for arbitrage scanning
+   - Create `src/adapters/commodities.py` that fetches commodity prices
+   - Use a free API like Metals API, Open Exchange Rates, or scrape from TradingView/Yahoo Finance for: gold (XAU), silver (XAG), crude oil (WTI, Brent), natural gas, copper, corn, wheat, soybeans
+   - Normalize to the same `NormalizedEvent` format used by other adapters with: event_name (e.g., "Gold Price > $2500 by Dec 2026"), platform ("Commodities"), yes_price, no_price
+   - The adapter should compare current spot prices against prediction market questions about commodity prices to find arbitrage between real commodity futures and prediction market contracts
+   - Register the adapter in server.py alongside existing adapters
+   - File: src/adapters/commodities.py (new), src/server.py
 
-30. COMPLETED - Arbitrage Engine: Calculate and add optimal capital allocation percentages to opportunities
-   - The `find_arbitrage` function in `src/arbitrage_engine.py` does not calculate `yes_allocation_pct` and `no_allocation_pct` for `ArbitrageOpportunity` objects, despite Task #20 being marked COMPLETED.
-   - Modify `find_arbitrage` to calculate the optimal capital allocation percentages for buying YES and NO contracts to maximize guaranteed payout.
-   - Add these `yes_allocation_pct` and `no_allocation_pct` fields to the `ArbitrageOpportunity` model (assuming it will be updated or already accepts them).
-   - File: src/arbitrage_engine.py
+28. TODO - Add crypto spot price adapter for cross-platform arbitrage
+   - Create `src/adapters/crypto_spot.py` that fetches real-time crypto prices from multiple exchanges
+   - Use free APIs: CoinGecko (no key needed) for BTC, ETH, SOL, DOGE, XRP, ADA, AVAX, LINK, DOT, MATIC prices across exchanges
+   - Normalize into `NormalizedEvent` format: compare prediction market contracts about crypto prices (e.g., "BTC > $100k by July") against actual spot prices and implied probabilities from options/futures
+   - Calculate implied probability from current price vs strike: if BTC is at $95k and prediction market says "BTC > $100k" at $0.40, compare against historical volatility to find mispriced contracts
+   - Register in server.py
+   - File: src/adapters/crypto_spot.py (new), src/server.py
 
-31. COMPLETED - Limitless Adapter: Move `import asyncio` to module level
-   - The `import asyncio` statement is currently inside the `_fetch` method in `src/adapters/limitless.py`.
-   - Move `import asyncio` to the top of the file, outside of any function, to follow best practices and avoid repeated imports.
-   - File: src/adapters/limitless.py
+29. TODO - Add theta decay detection for prediction markets near expiry
+   - Add a `theta_scanner` module `src/theta_scanner.py` that identifies prediction market contracts approaching expiry where theta (time decay) creates arbitrage opportunities
+   - For each prediction market event, check if `end_date` or `close_date` is within 7 days
+   - Calculate implied probability vs current price: if an event is 95% likely to resolve YES (based on current real-world data) but the YES contract trades at $0.80, thats a $0.15 edge
+   - Flag "in the money" contracts trading below fair value near expiry (high-confidence free money)
+   - Flag "out of the money" contracts still trading above $0.05 near expiry (sell opportunity)
+   - Add a `/api/arbitrage/theta` endpoint that returns theta opportunities sorted by days_to_expiry and edge_pct
+   - File: src/theta_scanner.py (new), src/arbitrage_router.py
 
-32. COMPLETED - Limitless Adapter: Enhance price parsing robustness in `_normalize`
-   - The `_normalize` method in `src/adapters/limitless.py` could be more robust in handling potentially missing or malformed price data, specifically for `probability` and `yes_price` fields which are accessed via `m["key"]` or `float(m["key"])` without sufficient `get` checks or `try-except` blocks.
-   - Ensure all price extractions (`yes_price`, `no_price`) use safe access (e.g., `m.get('key', default_value)`) and robust type conversion with appropriate error handling (e.g., `try-except ValueError`) to prevent crashes from unexpected API responses.
-   - File: src/adapters/limitless.py
+30. TODO - Add prediction-to-real-asset arbitrage matching
+   - Create `src/cross_asset_matcher.py` that finds combinations where prediction market contracts can be hedged with real tradeable assets
+   - Example: Polymarket has "BTC > $100k by July" at $0.40 -> buy YES at $0.40 + short BTC futures at $100k strike = guaranteed profit if spread exceeds transaction costs
+   - Example: Kalshi has "S&P 500 above 5500 by Q3" at $0.55 -> buy YES + buy SPY puts at 5500 strike = hedged position
+   - Match prediction market events against: crypto prices (via Coinbase adapter), stock prices (via Robinhood adapter), commodity prices (via commodities adapter)
+   - Calculate the net cost of the hedged position and the guaranteed profit/loss
+   - Add `/api/arbitrage/cross-asset` endpoint returning matched opportunities with hedge instructions
+   - File: src/cross_asset_matcher.py (new), src/arbitrage_router.py
 
-33. COMPLETED - Limitless Adapter: Move `import asyncio` to module level
-   - The `import asyncio` statement is currently inside the `_fetch` method in `src/adapters/limitless.py`, despite Task #31 being marked COMPLETED.
-   - Relocate the `import asyncio` statement from inside the `_fetch` method to the top of the `src/adapters/limitless.py` file, adhering to standard Python practices.
-   - File: src/adapters/limitless.py
-
-34. COMPLETED - Limitless Adapter: Enhance price parsing robustness in `_normalize`
-   - The `_normalize` method in `src/adapters/limitless.py` still uses direct `m["probability"]` and `m["yes_price"]` access without sufficient `get` checks or `try-except` blocks, despite Task #32 being marked COMPLETED.
-   - Modify the `_normalize` method to use `m.get('key', default_value)` for `probability` and `yes_price` (and derived `no_price`) to safely handle potentially missing keys.
-   - Wrap `float()` conversions in `try-except ValueError` blocks to catch non-numeric values gracefully, defaulting to 0.0 if conversion fails.
-   - File: src/adapters/limitless.py
-
-35. COMPLETED - Frontend CSS: Implement mobile responsiveness for Arbitrout layout
-   - The `src/static/css/arbitrout.css` file currently lacks `@media (max-width: 768px)` queries for mobile responsiveness, despite Tasks #8, #10, #17, and #27 being marked COMPLETED.
-   - Add `@media (max-width: 768px)` queries to `src/static/css/arbitrout.css`.
-   - Within this media query, set `.arbitrout-container` to `grid-template-columns: 1fr; grid-template-rows: auto;` to stack panels vertically.
-   - Initially hide the `#event-detail` pane on mobile screens, making it visible only when an opportunity is clicked.
-   - File: src/static/css/arbitrout.css
-
-36. COMPLETED - Arbitrage Engine: Refactor `find_arbitrage` for optimal distinct platform pairing
-   - The `find_arbitrage` function in `src/arbitrage_engine.py` still uses a "second-best" logic for handling same-platform `best_yes` and `best_no` markets, which does not guarantee distinct platforms or the highest possible spread, despite Tasks #13, #15, and #28 being marked COMPLETED.
-   - Revise the `find_arbitrage` function to remove the "second-best" logic.
-   - Implement a systematic iteration through all unique pairs of *distinct* platforms present in a `MatchedEvent`'s markets.
-   - For each platform pair, identify the best `yes_price` from one platform and the best `no_price` from the other.
-   - Select the pair of platforms that yields the maximum spread, ensuring `buy_yes_platform` and `buy_no_platform` are always different.
-   - File: src/arbitrage_engine.py
-
-37. COMPLETED - Arbitrage Engine: Implement pruning for `_previous_prices` dictionary
-   - The `_previous_prices` dictionary in `src/arbitrage_engine.py` is used to track historical prices but grows indefinitely, leading to potential memory issues, despite Tasks #14, #16, and #29 being marked COMPLETED.
-   - Modify the `compute_feed` or `scan` method to periodically remove entries from the `_previous_prices` dictionary.
-   - Prune entries for events that are no longer active, have expired, or have not been updated for a configurable period (e.g., 24-48 hours).
-   - File: src/arbitrage_engine.py
-
-38. COMPLETED - Arbitrage Engine: Calculate optimal capital allocation percentages for opportunities
-   - The `find_arbitrage` function in `src/arbitrage_engine.py` does not calculate `yes_allocation_pct` and `no_allocation_pct` for `ArbitrageOpportunity` objects, despite Tasks #20 and #30 being marked COMPLETED.
-   - In the `find_arbitrage` function, calculate `yes_allocation_pct` and `no_allocation_pct` based on the `buy_yes_price` and `buy_no_price` to achieve a guaranteed fixed payout.
-   - Add these calculated percentages to the `ArbitrageOpportunity` object before appending it to the results.
-   - File: src/arbitrage_engine.py
-
-39. COMPLETED - Arbitrage Router: Implement `min_profit` filter for opportunities endpoint
-   - The `/api/arbitrage/opportunities` endpoint in `src/arbitrage_router.py` does not currently accept or apply a `min_profit` query parameter, despite Tasks #9 and #24 being marked COMPLETED.
-   - Modify the `/api/arbitrage/opportunities` endpoint to accept an optional `min_profit: float = 0.0` query parameter.
-   - Pass this `min_profit` value (converted to `min_spread = min_profit / 100.0`) to `scanner.get_opportunities()`.
-   - File: src/arbitrage_router.py
-
-40. BLOCKED - Arbitrage Router: Add null check for `_registry` in WebSocket `init` message
-   - The WebSocket `init` message in `src/arbitrage_router.py` attempts to call `_registry.get_all_status()` without a null check for `_registry`, despite Task #25 being marked COMPLETED.
-   - In the `ws_arbitrage` function, add a null check for `_registry` before attempting to call `_registry.get_all_status()` when sending the initial WebSocket state.
-   - If `_registry` is `None`, send an empty list or appropriate default.
-   - File: src/arbitrage_router.py
-
-41. COMPLETED - PredictIt Adapter: Improve `no_price` normalization to use actual order book data
-   - The `_normalize` method in `src/adapters/predictit.py` still falls back to `1.0 - yes_price` for `no_price` when `bestBuyNoCost` is zero, which was explicitly identified as an inaccuracy to be resolved in Tasks #21 and #26 (both marked COMPLETED).
-   - In the `_fetch` method's loop over contracts, prioritize using `contract.get("bestBuyNoCost", 0)` for `no_price`.
-   - If `bestBuyNoCost` is `0` or unavailable, consider if there's an alternative *actual* order book value for selling NO shares (e.g., `bestSellNoCost`) that could be used consistently as a bid/ask pair.
-   - If no reliable 'buy no' price can be determined from actual order book data, log a warning and default `no_price` to `0.0` rather than `1.0 - yes_price`.
-   - File: src/adapters/predictit.py
-
-42. COMPLETED - PredictIt Adapter: Add retry logic to `_fetch` method
-   - The `_fetch` method in `src/adapters/predictit.py` currently lacks retry logic for API calls, despite Task #2 being marked COMPLETED.
-   - Implement exponential backoff retry logic for the `client.get` call within the `_fetch` method, specifically for 429 (Too Many Requests) and 5xx (Server Error) status codes.
-   - Configure for approximately 3 retries with increasing delays (e.g., 2s, 4s, 8s).
-   - Log warnings on retries and an error if the request ultimately fails after all retries.
-   - File: src/adapters/predictit.py
-
-43. COMPLETED - Frontend JS: Enhance WebSocket client to process all server-sent data
-   - The `arbWs.onmessage` handler in `src/static/js/arbitrout.js` only explicitly processes `opportunities` and `feed` message types, ignoring `init` and `scan_result` messages for UI updates, despite Tasks #12, #19, and #22 being marked COMPLETED.
-   - Modify the `arbWs.onmessage` handler to correctly process `init` and `scan_result` message types.
-   - For `init` and `scan_result` messages, update the `opp-count` element with `data.events_count` or `data.summary.opportunities_count`.
-   - Implement logic to update the platform status display (e.g., using `arb-status` dots) based on `data.platforms` received in these messages.
-   - File: src/static/js/arbitrout.js
-
-44. COMPLETED - Frontend JS: Implement retry logic for WebSocket reconnections
-   - The `arbWs.onclose` and `arbWs.onerror` functions in `src/static/js/arbitrout.js` currently call `connectArbWs` directly, leading to infinite retries without backoff. The `reconnectArbWs` function (which defines retry logic) is defined but not called, despite Task #23 being marked COMPLETED.
-   - Modify `arbWs.onclose` and `arbWs.onerror` functions to call `reconnectArbWs` instead of `connectArbWs` directly.
-   - Ensure `reconnectArbWs` properly handles the `retryCount` and `maxRetries` to implement exponential backoff.
-   - File: src/static/js/arbitrout.js
-
-45. COMPLETED - Frontend JS: Add sorting controls and logic to Arbitrout opportunities list
-   - The UI for the arbitrage opportunities list is missing sorting controls, and the `renderOpportunities` function lacks client-side sorting logic, despite Tasks #5 and #18 being marked COMPLETED/BLOCKED.
-   - Add a dropdown UI element (e.g., `<select>`) to the opportunities panel header for sorting.
-   - Provide options for sorting criteria: "Profit High-Low", "Profit Low-High", "Platform A-Z", "Newest First" (using `matched_event.last_updated` or similar timestamp).
-   - Implement client-side sorting logic within the `renderOpportunities` function to re-sort the `opps` array based on the selected criteria before rendering.
-   - File: src/static/js/arbitrout.js
-
-46. COMPLETED - Limitless Adapter: Add retry logic to `_fetch` method
-   - The `_fetch` method in `src/adapters/limitless.py` currently lacks retry logic for API calls, despite Task #3 being marked COMPLETED.
-   - Implement exponential backoff retry logic for the `client.get` call within the `_fetch` method, specifically for 429 (Too Many Requests) and 5xx (Server Error) status codes.
-   - Configure for approximately 3 retries with increasing delays (e.g., 2s, 4s, 8s).
-   - Log warnings on retries and an error if the request ultimately fails after all retries.
-   - File: src/adapters/limitless.py
-
-47. COMPLETED - Polymarket Adapter: Add retry logic to `_fetch` method
-   - The `_fetch` method in `src/adapters/polymarket.py` currently lacks retry logic for API calls, despite Task #1 being marked COMPLETED.
-   - Implement exponential backoff retry logic for the `client.get` call within the `_fetch` method, specifically for 429 (Too Many Requests) and 5xx (Server Error) status codes.
-   - Configure for approximately 3 retries with increasing delays (e.g., 2s, 4s, 8s).
-   - Log warnings on retries and an error if the request ultimately fails after all retries.
-   - File: src/adapters/polymarket.py
-
-48. COMPLETED - Limitless Adapter: Move `import asyncio` to module level
-   - The `import asyncio` statement is currently inside the `_fetch` method.
-   - Relocate the `import asyncio` statement from inside the `_fetch` method to the top of the file, adhering to standard Python practices.
-   - File: src/adapters/limitless.py
-
-49. COMPLETED - Limitless Adapter: Enhance price parsing robustness in `_normalize`
-   - The `_normalize` method uses direct `m["probability"]` and `m["yes_price"]` access without sufficient `get` checks or `try-except` blocks.
-   - Modify the `_normalize` method to use `m.get('key', default_value)` for `probability` and `yes_price` (and derived `no_price`) to safely handle potentially missing keys.
-   - Wrap `float()` conversions in `try-except ValueError` blocks to catch non-numeric values gracefully, defaulting to 0.0 if conversion fails.
-   - File: src/adapters/limitless.py
-
-50. COMPLETED - Event Matcher: Review crypto price presence check in `_passes_quick_filter`
-   - The `_passes_quick_filter` function returns `False` if only one of two crypto-related events has price data (`pa or pb`).
-   - Re-evaluate this strict filtering to allow matching when a crypto ticker matches but one market is missing price data, potentially allowing for other entity overlaps to score.
-   - File: src/event_matcher.py
-
-51. COMPLETED - Event Matcher: Consider refining `_entity_overlap_score` for partial crypto matches
-   - The `_entity_overlap_score` function returns `0.0` if only one of the two event entities contains a `crypto_ticker`.
-   - Consider if there are valid scenarios for partial crypto matches where other entities should still contribute to the score, or confirm the current strict matching is intended.
-   - File: src/event_matcher.py
-
-52. COMPLETED - Polymarket Adapter: Add retry logic to `_fetch` method
-   - The `_fetch` method in `src/adapters/polymarket.py` lacks retry logic for API calls.
-   - Implement exponential backoff retry logic for the `client.get` call within the `_fetch` method, specifically for 429 (Too Many Requests) and 5xx (Server Error) status codes.
-   - Configure for approximately 3 retries with increasing delays (e.g., 2s, 4s, 8s).
-   - Log warnings on retries and an error if the request ultimately fails after all retries.
-   - File: src/adapters/polymarket.py
-
-53. COMPLETED - PredictIt Adapter: Improve `no_price` normalization to use actual order book data
-   - The `_normalize` method in `src/adapters/predictit.py` still falls back to `1.0 - yes_price` for `no_price` when `bestBuyNoCost` is zero, which can lead to inaccuracies.
-   - In the `_fetch` method's loop over contracts, prioritize using `contract.get("bestBuyNoCost", 0)` for `no_price`.
-   - If `bestBuyNoCost` is `0` or unavailable, consider if there's an alternative *actual* order book value for selling NO shares that could be used consistently as a bid/ask pair.
-   - If no reliable 'buy no' price can be determined from actual order book data, log a warning and default `no_price` to `0.0` rather than `1.0 - yes_price`.
-   - File: src/adapters/predictit.py
-
-54. COMPLETED - PredictIt Adapter: Add retry logic to `_fetch` method
-   - The `_fetch` method in `src/adapters/predictit.py` lacks retry logic for API calls.
-   - Implement exponential backoff retry logic for the `client.get` call within the `_fetch` method, specifically for 429 (Too Many Requests) and 5xx (Server Error) status codes.
-   - Configure for approximately 3 retries with increasing delays (e.g., 2s, 4s, 8s).
-   - Log warnings on retries and an error if the request ultimately fails after all retries.
-   - File: src/adapters/predictit.py
-
-55. COMPLETED - Frontend JS: Enhance WebSocket client to process `init` and `scan_result` messages
-   - The `arbWs.onmessage` handler in `src/static/js/arbitrout.js` only explicitly processes `opportunities` and `feed` message types, ignoring `init` and `scan_result` messages for UI updates.
-   - Modify the `arbWs.onmessage` handler to correctly process `init` and `scan_result` message types.
-   - For `init` and `scan_result` messages, update the `opp-count` element with `data.events_count` or `data.summary.opportunities_count`.
-   - Implement logic to update the platform status display (e.g., using `arb-status` dots) based on `data.platforms` received in these messages.
-   - File: src/static/js/arbitrout.js
-
-56. COMPLETED - Frontend JS: Implement retry logic for WebSocket reconnections
-   - The `arbWs.onclose` and `arbWs.onerror` functions in `src/static/js/arbitrout.js` currently call `connectArbWs` directly, leading to infinite retries without backoff. The `reconnectArbWs` function (which defines retry logic) is defined but not called.
-   - Modify `arbWs.onclose` and `arbWs.onerror` functions to call a `reconnectArbWs` function instead of `connectArbWs` directly.
-   - Define a `reconnectArbWs` function that properly handles `retryCount` and `maxRetries` to implement exponential backoff.
-   - File: src/static/js/arbitrout.js
-
-57. COMPLETED - Frontend JS: Add sorting controls and logic to Arbitrout opportunities list
-   - The UI for the arbitrage opportunities list is missing sorting controls, and the `renderOpportunities` function lacks client-side sorting logic.
-   - Add a dropdown UI element (e.g., `<select>`) to the opportunities panel header for sorting.
-   - Provide options for sorting criteria: "Profit High-Low", "Profit Low-High", "Platform A-Z", "Newest First" (using `matched_event.last_updated` or similar timestamp).
-   - Implement client-side sorting logic within the `renderOpportunities` function to re-sort the `opps` array based on the selected criteria before rendering.
-   - File: src/static/js/arbitrout.js
-
-58. BLOCKED - Frontend JS: Implement platform status display in the UI
-   - The UI concept for `arb-status` and `status-dot` exists in `arbitrout.css`, but `arbitrout.js` does not populate or update the platform status based on WebSocket `platforms` data.
-   - Create or update a section in the UI (e.g., in the status bar) to display the connection status for each platform.
-   - Use the `platforms` data received from `init` and `scan_result` WebSocket messages to update the status dots (online, offline, stale).
-   - File: src/static/js/arbitrout.js
-
-59. COMPLETED - Arbitrage Router: Implement `min_profit` filter for opportunities endpoint
-   - The `/api/arbitrage/opportunities` endpoint in `src/arbitrage_router.py` does not currently accept or apply a `min_profit` query parameter.
-   - Modify the `/api/arbitrage/opportunities` endpoint to accept an optional `min_profit: float = 0.0` query parameter.
-   - Pass this `min_profit` value (converted to `min_spread = min_profit / 100.0`) to `scanner.get_opportunities()`.
-   - File: src/arbitrage_router.py
-
-60. BLOCKED - Arbitrage Router: Add null check for `_registry` in WebSocket `init` message
-   - The WebSocket `init` message in `src/arbitrage_router.py` attempts to call `_registry.get_all_status()` without a null check for `_registry`.
-   - In the `ws_arbitrage` function, add a null check for `_registry` before attempting to call `_registry.get_all_status()` when sending the initial WebSocket state.
-   - If `_registry` is `None`, send an empty list or appropriate default.
-   - File: src/arbitrage_router.py
-
-61. COMPLETED - Frontend CSS: Implement mobile responsiveness for Arbitrout layout
-   - The `src/static/css/arbitrout.css` file currently lacks `@media (max-width: 768px)` queries for mobile responsiveness.
-   - Add `@media (max-width: 768px)` queries to `src/static/css/arbitrout.css`.
-   - Within this media query, set `.arbitrout-container` to `grid-template-columns: 1fr; grid-template-rows: auto;` to stack panels vertically.
-   - Initially hide the `#event-detail` pane on mobile screens, making it visible only when an opportunity is clicked.
-   - File: src/static/css/arbitrout.css
-
-62. COMPLETED - Arbitrage Engine: Refactor `find_arbitrage` for optimal distinct platform pairing
-   - The `find_arbitrage` function in `src/arbitrage_engine.py` still uses a "second-best" logic for handling same-platform `best_yes` and `best_no` markets, which does not guarantee distinct platforms or the highest possible spread.
-   - Revise the `find_arbitrage` function to remove the "second-best" logic.
-   - Implement a systematic iteration through all unique pairs of *distinct* platforms present in a `MatchedEvent`'s markets.
-   - For each platform pair, identify the best `yes_price` from one platform and the best `no_price` from the other.
-   - Select the pair of platforms that yields the maximum spread, ensuring `buy_yes_platform` and `buy_no_platform` are always different.
-   - File: src/arbitrage_engine.py
-
-63. BLOCKED - Arbitrage Engine: Implement pruning for `_previous_prices` dictionary
-   - The `_previous_prices` dictionary in `src/arbitrage_engine.py` is used to track historical prices but grows indefinitely, leading to potential memory issues.
-   - Modify the `compute_feed` or `scan` method to periodically remove entries from the `_previous_prices` dictionary.
-   - Prune entries for events that are no longer active, have expired, or have not been updated for a configurable period (e.g., 24-48 hours).
-   - File: src/arbitrage_engine.py
-
-64. TODO - Arbitrage Engine: Calculate optimal capital allocation percentages for opportunities
-   - The `find_arbitrage` function in `src/arbitrage_engine.py` does not calculate `yes_allocation_pct` and `no_allocation_pct` for `ArbitrageOpportunity` objects.
-   - In the `find_arbitrage` function, calculate `yes_allocation_pct` and `no_allocation_pct` based on the `buy_yes_price` and `buy_no_price` to achieve a guaranteed fixed payout.
-   - Add these calculated percentages to the `ArbitrageOpportunity` object before appending it to the results (assuming `ArbitrageOpportunity` model can accept them).
-   - File: src/arbitrage_engine.py
+31. TODO - Research best arbitrage strategies before implementation
+   - Create `src/research/arbitrage_strategies.py` that uses scrapling to research and document the best approaches for:
+     - Prediction market arbitrage (academic papers, blog posts from experienced traders)
+     - Crypto spot vs prediction market hedging
+     - Commodity futures vs prediction market contracts
+     - Theta decay harvesting strategies
+     - Kelly criterion for optimal bet sizing
+   - Scrape key sources: Wikipedia articles on "Arbitrage", "Prediction market", "Theta (finance)", "Kelly criterion"
+   - Scrape trading strategy blogs: e.g., Polymarket strategy guides, Kalshi trading tips
+   - Store findings in `data/strategy_research.json` with: strategy_name, description, expected_edge_pct, risk_factors, sources
+   - This research should inform the implementation of tasks 27-30 above
+   - File: src/research/arbitrage_strategies.py (new)
 
 
 
