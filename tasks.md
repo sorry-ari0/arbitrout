@@ -188,7 +188,7 @@
    - Register in server.py
    - File: src/adapters/crypto_spot.py (new), src/server.py
 
-29. TODO - Add theta decay detection for prediction markets near expiry
+29. COMPLETED - Add theta decay detection for prediction markets near expiry
    - Add a `theta_scanner` module `src/theta_scanner.py` that identifies prediction market contracts approaching expiry where theta (time decay) creates arbitrage opportunities
    - For each prediction market event, check if `end_date` or `close_date` is within 7 days
    - Calculate implied probability vs current price: if an event is 95% likely to resolve YES (based on current real-world data) but the YES contract trades at $0.80, thats a $0.15 edge
@@ -218,6 +218,7 @@
    - Store findings in `data/strategy_research.json` with: strategy_name, description, expected_edge_pct, risk_factors, sources
    - This research should inform the implementation of tasks 27-30 above
    - File: src/research/arbitrage_strategies.py (new)
+
 
 
 
