@@ -1,4 +1,4 @@
-# Arbitrout Tasks
+﻿# Arbitrout Tasks
 # Status: TODO | IN_PROGRESS | COMPLETED | BLOCKED
 
 ## Arbitrage Scanner Improvements
@@ -83,7 +83,7 @@
    - Implement a mechanism to periodically prune `_previous_prices`, for example, by removing entries for events that are no longer active or have not been updated for a very long time.
    - File: src/arbitrage_engine.py
 
-15. TODO - Arbitrage Engine: Fix `find_arbitrage` to guarantee distinct platforms and optimal spread.
+15. COMPLETED - Arbitrage Engine: Fix `find_arbitrage` to guarantee distinct platforms and optimal spread.
    - The current logic attempts a "second-best" fix if the initially chosen best YES and NO markets are on the same platform, but this does not guarantee distinct platforms for the final `buy_yes_market` and `buy_no_market`, nor does it ensure the highest possible spread between *any* two distinct platforms.
    - Refactor `find_arbitrage` to systematically iterate through all unique pairs of platforms for a `MatchedEvent`, identify the best `buy_yes_price` and `buy_no_price` for each platform, and then select the pair of *distinct* platforms that yields the maximum spread.
    - File: src/arbitrage_engine.py
@@ -123,3 +123,4 @@
    - The `PredictItAdapter` sometimes derives the `no_price` as `1.0 - yes_price` when `bestBuyNoCost` is zero. This is a heuristic and not an actual order book price, which can lead to inaccuracies in arbitrage calculations.
    - Adjust the `_normalize` method to preferentially use `bestBuyNoCost` for the `no_price` (representing the cost to buy NO shares). If `bestBuyNoCost` is unavailable or zero, consider if `bestSellNoCost` (price to sell NO shares) might be relevant if used consistently with `bestBuyYesCost` as bid/ask pairs, or log a warning if actual 'buy no' price cannot be found.
    - File: src/adapters/predictit.py
+
