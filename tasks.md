@@ -145,7 +145,7 @@
    - Modify `swarm_engine.py` to use this universe instead of MOCK_UNIVERSE when the data file exists, falling back to MOCK_UNIVERSE if not
    - File: src/research/stock_universe.py (new), src/swarm_engine.py
 
-24. TODO - Add Hong Kong Stock Exchange (HKEX) listings to universe
+24. BLOCKED - Add Hong Kong Stock Exchange (HKEX) listings to universe
    - Extend `src/research/stock_universe.py` to include HKEX stocks
    - Scrape HKEX stock list from `https://www.hkex.com.hk/Market-Data/Securities-Prices/Equities` or use the HKEX API
    - Hong Kong tickers use 4-digit codes (e.g., 0700.HK for Tencent, 9988.HK for Alibaba HK)
@@ -218,6 +218,7 @@
    - Store findings in `data/strategy_research.json` with: strategy_name, description, expected_edge_pct, risk_factors, sources
    - This research should inform the implementation of tasks 27-30 above
    - File: src/research/arbitrage_strategies.py (new)
+
 
 
 
