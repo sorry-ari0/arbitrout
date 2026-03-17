@@ -7,6 +7,8 @@ let arbScanInterval = null;
 let arbWs = null;
 let selectedOpp = null;
 let feedItems = [];
+let arbWsRetryCount = 0; // Track reconnection attempts
+const arbWsMaxRetries = 10; // Maximum reconnection attempts
 
 // === PIXEL ART (CSS grid of div cells) ===
 function createPixelGrid(colorMap, scale) {
@@ -206,8 +208,14 @@ function triggerScan() {
 
 // === WEBSOCKET ===
 function connectArbWs() {
+    console.log('Attempting WebSocket connection...');
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     arbWs = new WebSocket(proto + '//' + location.host + '/api/arbitrage/ws');
+
+    arbWs.onopen = function() {
+        console.log('WebSocket connected.');
+        arbWsRetryCount = 0; // Reset retry count on successful connection
+    };
 
     arbWs.onmessage = function(e) {
         var data = JSON.parse(e.data);
@@ -218,11 +226,28 @@ function connectArbWs() {
         }
     };
 
-    arbWs.onclose = function() {
-        if (arbMode === 'arbitrout') {
-            setTimeout(connectArbWs, 3000);
-        }
+    arbWs.onclose = function(event) {
+        console.log('WebSocket closed:', event.code, event.reason);
+        reconnectArbWs();
     };
+
+    arbWs.onerror = function(err) {
+        console.error('WebSocket error:', err);
+        reconnectArbWs();
+    };
+}
+
+function reconnectArbWs() {
+    if (arbMode === 'arbitrout' && arbWsRetryCount < arbWsMaxRetries) {
+        const delay = Math.pow(2, arbWsRetryCount) * 1000; // Exponential backoff (1s, 2s, 4s, etc.)
+        arbWsRetryCount++;
+        console.log(`Attempting to reconnect WebSocket in ${delay / 1000} seconds (attempt ${arbWsRetryCount}/${arbWsMaxRetries})...`);
+        setTimeout(connectArbWs, delay);
+    } else if (arbMode === 'arbitrout') {
+        console.error('Max WebSocket reconnection attempts reached. Please refresh the page.');
+    } else {
+        console.log('WebSocket closed while not in arbitrout mode, not attempting reconnect.');
+    }
 }
 
 // === OPPORTUNITIES ===
