@@ -291,7 +291,7 @@
    - Relocate the `import asyncio` statement from inside the `_fetch` method to the top of the file, adhering to standard Python practices.
    - File: src/adapters/limitless.py
 
-49. TODO - Limitless Adapter: Enhance price parsing robustness in `_normalize`
+49. COMPLETED - Limitless Adapter: Enhance price parsing robustness in `_normalize`
    - The `_normalize` method uses direct `m["probability"]` and `m["yes_price"]` access without sufficient `get` checks or `try-except` blocks.
    - Modify the `_normalize` method to use `m.get('key', default_value)` for `probability` and `yes_price` (and derived `no_price`) to safely handle potentially missing keys.
    - Wrap `float()` conversions in `try-except ValueError` blocks to catch non-numeric values gracefully, defaulting to 0.0 if conversion fails.
@@ -392,4 +392,5 @@
    - In the `find_arbitrage` function, calculate `yes_allocation_pct` and `no_allocation_pct` based on the `buy_yes_price` and `buy_no_price` to achieve a guaranteed fixed payout.
    - Add these calculated percentages to the `ArbitrageOpportunity` object before appending it to the results (assuming `ArbitrageOpportunity` model can accept them).
    - File: src/arbitrage_engine.py
+
 
