@@ -34,38 +34,46 @@ def find_arbitrage(matched: list[MatchedEvent],
             continue
 
         markets = match.markets
-        # Find cheapest YES and cheapest NO across different platforms
-        best_yes_market = min(markets, key=lambda m: m.yes_price)
-        best_no_market = min(markets, key=lambda m: m.no_price)
+        
+        max_spread_for_match = -1.0 # Initialize with a value lower than any possible valid spread
+        best_yes_market_for_match = None
+        best_no_market_for_match = None
 
-        # Skip if both are on the same platform (no arbitrage)
-        if best_yes_market.platform == best_no_market.platform:
-            # Try second-best on other platform
-            other_yes = [m for m in markets if m.platform != best_no_market.platform]
-            other_no = [m for m in markets if m.platform != best_yes_market.platform]
-            if other_yes:
-                best_yes_market = min(other_yes, key=lambda m: m.yes_price)
-            elif other_no:
-                best_no_market = min(other_no, key=lambda m: m.no_price)
-            else:
-                continue
+        # Iterate through all combinations of two markets to find the optimal cross-platform arbitrage
+        # We need to ensure buy_yes_platform != buy_no_platform
+        # and maximize the spread.
+        for buy_yes_candidate in markets:
+            for buy_no_candidate in markets:
+                if buy_yes_candidate.platform == buy_no_candidate.platform:
+                    continue # Platforms must be distinct for an arbitrage opportunity
 
-        spread = 1.0 - (best_yes_market.yes_price + best_no_market.no_price)
-        profit_pct = spread * 100.0
-        combined_vol = sum(m.volume for m in markets)
+                current_spread = 1.0 - (buy_yes_candidate.yes_price + buy_no_candidate.no_price)
+                
+                if current_spread > max_spread_for_match:
+                    max_spread_for_match = current_spread
+                    best_yes_market_for_match = buy_yes_candidate
+                    best_no_market_for_match = buy_no_candidate
+        
+        # If no valid cross-platform arbitrage was found for this match (e.g., all markets are on one platform,
+        # which should be caught by platform_count < 2, or no profitable distinct pair)
+        if best_yes_market_for_match is None or best_no_market_for_match is None:
+            continue
 
-        if spread < min_spread:
+        profit_pct = max_spread_for_match * 100.0
+        combined_vol = sum(m.volume for m in markets) # Volume for ALL markets in the matched event
+
+        if max_spread_for_match < min_spread:
             continue
         if combined_vol < min_volume:
             continue
 
         opportunities.append(ArbitrageOpportunity(
             matched_event=match,
-            buy_yes_platform=best_yes_market.platform,
-            buy_yes_price=best_yes_market.yes_price,
-            buy_no_platform=best_no_market.platform,
-            buy_no_price=best_no_market.no_price,
-            spread=spread,
+            buy_yes_platform=best_yes_market_for_match.platform,
+            buy_yes_price=best_yes_market_for_match.yes_price,
+            buy_no_platform=best_no_market_for_match.platform,
+            buy_no_price=best_no_market_for_match.no_price,
+            spread=max_spread_for_match,
             profit_pct=profit_pct,
             combined_volume=combined_vol,
         ))
