@@ -1,7 +1,9 @@
 """PredictIt adapter — public JSON API, no auth, ~1 req/min rate limit."""
 from .base import BaseAdapter
 from .models import NormalizedEvent
-
+import logging
+import time
+import httpx
 
 # ============================================================
 # CATEGORY MAPPING
@@ -37,8 +39,24 @@ class PredictItAdapter(BaseAdapter):
     # ============================================================
     async def _fetch(self) -> list[NormalizedEvent]:
         client = await self._get_client()
-        resp = await client.get(self.BASE_URL)
-        resp.raise_for_status()
+        max_retries = 3
+        retry_delays = [2, 4, 8]
+        for attempt in range(max_retries + 1):
+            try:
+                resp = await client.get(self.BASE_URL)
+                resp.raise_for_status()
+                break
+            except httpx.HTTPError as e:
+                if e.response.status_code in [429, 500]:
+                    if attempt < max_retries:
+                        logging.warning(f"PredictIt API returned {e.response.status_code}, retrying in {retry_delays[attempt]}s")
+                        await httpx.AsyncHTTPTransport().handle_request(httpx.Request("GET", "https://www.predictit.org"), None)
+                        time.sleep(retry_delays[attempt])
+                    else:
+                        logging.error(f"PredictIt API returned {e.response.status_code} after {max_retries} retries, giving up")
+                        raise
+                else:
+                    raise
         data = resp.json()
 
         events: list[NormalizedEvent] = []
