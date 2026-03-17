@@ -56,15 +56,15 @@ function getTroutPixelArt() {
     var map = [
 [_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,N,N,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_],
 [_,_,_,_,_,_,_,_,_,_,O,O,O,O,O,O,O,O,N,O,O,N,O,O,O,O,O,O,O,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_],
-[_,_,_,_,_,_,_,_,O,G,G,G,X,G,G,G,G,G,G,G,G,G,G,X,G,G,G,G,G,O,O,_,_,_,_,_,_,_,_,_,_,_,_,_],
-[_,_,_,_,_,_,_,O,G,G,G,G,G,X,G,G,X,G,G,G,X,G,G,G,G,G,X,G,G,G,G,O,O,_,_,_,_,_,_,_,_,_,_,_],
+[_,_,_,_,_,_,_,O,G,G,G,X,G,G,G,G,G,G,G,G,G,G,X,G,G,G,G,G,O,O,_,_,_,_,_,_,_,_,_,_,_,_,_],
+[_,_,_,_,_,_,O,G,G,G,G,G,X,G,G,X,G,G,G,X,G,G,G,G,G,X,G,G,G,G,O,O,_,_,_,_,_,_,_,_,_,_,_],
 [_,_,N,N,_,_,O,G,G,X,G,G,G,G,G,G,G,G,X,G,G,G,G,G,X,G,G,G,G,G,G,G,G,O,_,_,_,_,_,_,_,_,_,_],
 [_,N,T,N,_,O,G,G,G,G,G,X,G,G,G,G,G,G,G,G,G,X,G,G,G,G,G,G,G,G,G,G,Q,E,O,_,_,_,_,H,H,_,_,_],
 [N,T,T,N,O,G,G,G,G,G,G,G,G,X,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,S,S,S,G,G,G,O,_,_,H,L,L,H,_,_],
 [_,N,T,N,O,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,S,S,S,G,O,O,_,_,H,L,H,_,_],
 [_,_,N,N,_,O,S,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,S,S,S,O,O,_,_,_,H,L,L,H,_,_],
-[_,_,_,_,_,_,O,K,K,W,W,K,K,W,K,K,W,W,K,K,W,W,K,K,W,W,K,K,K,O,O,N,N,_,_,_,_,_,_,H,H,_,_,_],
-[_,_,_,_,_,_,_,O,W,W,W,W,W,W,W,W,W,W,W,W,W,W,W,W,W,W,O,O,O,_,N,T,_,_,_,_,_,_,_,_,C,_,_,_],
+[_,_,_,_,_,_,O,K,K,W,W,K,K,W,K,K,W,W,K,K,W,W,K,K,W,W,K,K,K,O,O,N,N,_,_,_,_,_,_,_,_,_,C,_,_,_],
+[_,_,_,_,_,_,_,O,W,W,W,W,W,W,W,W,W,W,W,W,W,W,W,W,W,W,O,O,O,_,N,T,_,_,_,_,_,_,_,_,_,C,_,_,_],
 [_,_,_,_,_,_,_,_,O,O,W,W,W,W,W,W,W,W,W,W,W,W,W,O,O,O,_,_,_,_,_,_,_,_,_,_,_,_,_,_,C,_,_,_],
 [_,_,_,_,_,_,_,_,_,_,O,O,O,O,O,O,O,O,O,O,O,O,O,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,C,_,_,_],
 [D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D],
@@ -96,9 +96,8 @@ function getLobsterPixelArt() {
         [_,_,_,_,_,D,R,R,R,R,D,_,_,_,_,_],
         [_,_,_,_,_,D,R,R,R,R,D,_,_,_,_,_],
         [_,_,_,_,_,_,D,R,R,D,_,_,_,_,_,_],
-        [_,_,_,_,_,R,_,D,D,_,R,_,_,_,_,_],
-        [_,_,_,_,R,_,_,D,D,_,_,R,_,_,_,_],
-        [_,_,_,R,_,_,_,_,_,_,_,_,R,_,_,_],
+        [_,_,_,_,R,_,D,D,_,R,_,_,_,_,_],
+        [_,_,_,R,_,_,D,D,_,_,R,_,_,_,_],
         [_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_],
         [_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_]
     ];
@@ -205,6 +204,9 @@ function triggerScan() {
 }
 
 // === WEBSOCKET ===
+let retryCount = 0;
+let maxRetries = 5;
+
 function connectArbWs() {
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     arbWs = new WebSocket(proto + '//' + location.host + '/api/arbitrage/ws');
@@ -218,11 +220,17 @@ function connectArbWs() {
         }
     };
 
-    arbWs.onclose = function() {
-        if (arbMode === 'arbitrout') {
-            setTimeout(connectArbWs, 3000);
-        }
-    };
+    arbWs.onclose = reconnectArbWs;
+    arbWs.onerror = reconnectArbWs;
+}
+
+function reconnectArbWs() {
+    if (retryCount < maxRetries) {
+        retryCount++;
+        setTimeout(connectArbWs, 3000);
+    } else {
+        console.error('Max retries exceeded. Giving up on WebSocket connection.');
+    }
 }
 
 // === OPPORTUNITIES ===
