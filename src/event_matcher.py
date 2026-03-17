@@ -248,8 +248,6 @@ def _passes_quick_filter(ent_a: dict, ent_b: dict, title_a: str, title_b: str) -
             ratio = min(pa, pb) / max(pa, pb)
             if ratio < 0.90:
                 return False
-        elif pa or pb:
-            return False
         return True
 
     if ent_a["crypto_ticker"] or ent_b["crypto_ticker"]:
