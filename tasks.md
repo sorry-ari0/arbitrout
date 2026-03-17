@@ -265,7 +265,7 @@
    - Ensure `reconnectArbWs` properly handles the `retryCount` and `maxRetries` to implement exponential backoff.
    - File: src/static/js/arbitrout.js
 
-45. TODO - Frontend JS: Add sorting controls and logic to Arbitrout opportunities list
+45. COMPLETED - Frontend JS: Add sorting controls and logic to Arbitrout opportunities list
    - The UI for the arbitrage opportunities list is missing sorting controls, and the `renderOpportunities` function lacks client-side sorting logic, despite Tasks #5 and #18 being marked COMPLETED/BLOCKED.
    - Add a dropdown UI element (e.g., `<select>`) to the opportunities panel header for sorting.
    - Provide options for sorting criteria: "Profit High-Low", "Profit Low-High", "Platform A-Z", "Newest First" (using `matched_event.last_updated` or similar timestamp).
@@ -285,6 +285,7 @@
    - Configure for approximately 3 retries with increasing delays (e.g., 2s, 4s, 8s).
    - Log warnings on retries and an error if the request ultimately fails after all retries.
    - File: src/adapters/polymarket.py
+
 
 
 
