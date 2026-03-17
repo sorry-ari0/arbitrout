@@ -3,6 +3,7 @@ import json
 import logging
 import time
 from pathlib import Path
+from itertools import combinations
 
 from adapters.models import NormalizedEvent, MatchedEvent, ArbitrageOpportunity
 from adapters.registry import AdapterRegistry
@@ -34,41 +35,54 @@ def find_arbitrage(matched: list[MatchedEvent],
             continue
 
         markets = match.markets
-        # Find cheapest YES and cheapest NO across different platforms
-        best_yes_market = min(markets, key=lambda m: m.yes_price)
-        best_no_market = min(markets, key=lambda m: m.no_price)
+        platforms = set(m.platform for m in markets)
+        max_spread = 0
+        best_yes_market = None
+        best_no_market = None
 
-        # Skip if both are on the same platform (no arbitrage)
-        if best_yes_market.platform == best_no_market.platform:
-            # Try second-best on other platform
-            other_yes = [m for m in markets if m.platform != best_no_market.platform]
-            other_no = [m for m in markets if m.platform != best_yes_market.platform]
-            if other_yes:
-                best_yes_market = min(other_yes, key=lambda m: m.yes_price)
-            elif other_no:
-                best_no_market = min(other_no, key=lambda m: m.no_price)
-            else:
+        for platform1, platform2 in combinations(platforms, 2):
+            yes_markets = [m for m in markets if m.platform == platform1]
+            no_markets = [m for m in markets if m.platform == platform2]
+            if yes_markets and no_markets:
+                best_yes = min(yes_markets, key=lambda m: m.yes_price)
+                best_no = min(no_markets, key=lambda m: m.no_price)
+                spread = 1.0 - (best_yes.yes_price + best_no.no_price)
+                if spread > max_spread:
+                    max_spread = spread
+                    best_yes_market = best_yes
+                    best_no_market = best_no
+
+            # Check the other way around
+            yes_markets = [m for m in markets if m.platform == platform2]
+            no_markets = [m for m in markets if m.platform == platform1]
+            if yes_markets and no_markets:
+                best_yes = min(yes_markets, key=lambda m: m.yes_price)
+                best_no = min(no_markets, key=lambda m: m.no_price)
+                spread = 1.0 - (best_yes.yes_price + best_no.no_price)
+                if spread > max_spread:
+                    max_spread = spread
+                    best_yes_market = best_yes
+                    best_no_market = best_no
+
+        if best_yes_market and best_no_market:
+            profit_pct = max_spread * 100.0
+            combined_vol = sum(m.volume for m in markets)
+
+            if max_spread < min_spread:
+                continue
+            if combined_vol < min_volume:
                 continue
 
-        spread = 1.0 - (best_yes_market.yes_price + best_no_market.no_price)
-        profit_pct = spread * 100.0
-        combined_vol = sum(m.volume for m in markets)
-
-        if spread < min_spread:
-            continue
-        if combined_vol < min_volume:
-            continue
-
-        opportunities.append(ArbitrageOpportunity(
-            matched_event=match,
-            buy_yes_platform=best_yes_market.platform,
-            buy_yes_price=best_yes_market.yes_price,
-            buy_no_platform=best_no_market.platform,
-            buy_no_price=best_no_market.no_price,
-            spread=spread,
-            profit_pct=profit_pct,
-            combined_volume=combined_vol,
-        ))
+            opportunities.append(ArbitrageOpportunity(
+                matched_event=match,
+                buy_yes_platform=best_yes_market.platform,
+                buy_yes_price=best_yes_market.yes_price,
+                buy_no_platform=best_no_market.platform,
+                buy_no_price=best_no_market.no_price,
+                spread=max_spread,
+                profit_pct=profit_pct,
+                combined_volume=combined_vol,
+            ))
 
     # Sort by profit descending
     opportunities.sort(key=lambda o: o.profit_pct, reverse=True)
