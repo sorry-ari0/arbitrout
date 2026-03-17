@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from adapters.registry import AdapterRegistry
 from arbitrage_engine import ArbitrageScanner, load_saved, save_market, unsave_market
 from event_matcher import add_manual_link, remove_manual_link
+from cross_asset_matcher import CrossAssetMatcher
 
 logger = logging.getLogger("arbitrage_router")
 
@@ -18,19 +19,27 @@ router = APIRouter(prefix="/api/arbitrage", tags=["arbitrage"])
 # ============================================================
 _scanner: ArbitrageScanner | None = None
 _registry: AdapterRegistry | None = None
+_cross_asset_matcher: CrossAssetMatcher | None = None
 
 
 def init_scanner(registry: AdapterRegistry):
     """Called by server.py to initialize the scanner."""
-    global _scanner, _registry
+    global _scanner, _registry, _cross_asset_matcher
     _registry = registry
     _scanner = ArbitrageScanner(registry)
+    _cross_asset_matcher = CrossAssetMatcher(registry)
 
 
 def get_scanner() -> ArbitrageScanner:
     if _scanner is None:
         raise RuntimeError("Scanner not initialized")
     return _scanner
+
+
+def get_cross_asset_matcher() -> CrossAssetMatcher:
+    if _cross_asset_matcher is None:
+        raise RuntimeError("Cross asset matcher not initialized")
+    return _cross_asset_matcher
 
 
 # ============================================================
@@ -120,6 +129,13 @@ async def delete_saved(match_id: str):
     """Remove a bookmark."""
     saved = unsave_market(match_id)
     return JSONResponse(content=saved)
+
+
+@router.get("/cross-asset")
+async def get_cross_asset_opportunities():
+    """Current cross-asset arbitrage opportunities."""
+    matcher = get_cross_asset_matcher()
+    return JSONResponse(content=matcher.get_opportunities())
 
 
 # ============================================================
