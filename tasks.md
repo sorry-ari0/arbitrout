@@ -154,7 +154,7 @@
    - Map HKEX tickers to company names for Wikipedia research lookups
    - File: src/research/stock_universe.py
 
-25. TODO - Add CEO/founder/investor detail endpoint to Bloomberg Terminal API
+25. COMPLETED - Add CEO/founder/investor detail endpoint to Bloomberg Terminal API
    - Add GET `/api/research/company/{ticker}` endpoint that returns detailed company research
    - Call `company_researcher.research_company(ticker)` and return the scraped data as JSON
    - Include fields: ceo, founders (list), key_investors (list), founding_year, headquarters, industry, board_members (list), wikipedia_url
@@ -218,6 +218,7 @@
    - Store findings in `data/strategy_research.json` with: strategy_name, description, expected_edge_pct, risk_factors, sources
    - This research should inform the implementation of tasks 27-30 above
    - File: src/research/arbitrage_strategies.py (new)
+
 
 
 
