@@ -134,7 +134,7 @@
    - Add a `research_batch(tickers: list) -> list[dict]` function that processes multiple tickers with 1-2 second delays between requests
    - File: src/research/company_researcher.py (new)
 
-23. TODO - Expand stock universe to full NASDAQ and NYSE listings
+23. COMPLETED - Expand stock universe to full NASDAQ and NYSE listings
    - The current swarm_engine.py MOCK_UNIVERSE has only 103 hardcoded tickers with synthetic fundamentals
    - Create `src/research/stock_universe.py` that downloads full ticker lists from public sources:
      - NASDAQ: use the NASDAQ FTP file at `ftp.nasdaqtrader.com/symboldirectory/nasdaqtraded.txt` or the SEC EDGAR company tickers JSON at `https://www.sec.gov/files/company_tickers.json`
@@ -218,6 +218,7 @@
    - Store findings in `data/strategy_research.json` with: strategy_name, description, expected_edge_pct, risk_factors, sources
    - This research should inform the implementation of tasks 27-30 above
    - File: src/research/arbitrage_strategies.py (new)
+
 
 
 
