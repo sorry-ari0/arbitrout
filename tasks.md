@@ -226,7 +226,7 @@
    - Add these calculated percentages to the `ArbitrageOpportunity` object before appending it to the results.
    - File: src/arbitrage_engine.py
 
-39. TODO - Arbitrage Router: Implement `min_profit` filter for opportunities endpoint
+39. COMPLETED - Arbitrage Router: Implement `min_profit` filter for opportunities endpoint
    - The `/api/arbitrage/opportunities` endpoint in `src/arbitrage_router.py` does not currently accept or apply a `min_profit` query parameter, despite Tasks #9 and #24 being marked COMPLETED.
    - Modify the `/api/arbitrage/opportunities` endpoint to accept an optional `min_profit: float = 0.0` query parameter.
    - Pass this `min_profit` value (converted to `min_spread = min_profit / 100.0`) to `scanner.get_opportunities()`.
@@ -285,6 +285,7 @@
    - Configure for approximately 3 retries with increasing delays (e.g., 2s, 4s, 8s).
    - Log warnings on retries and an error if the request ultimately fails after all retries.
    - File: src/adapters/polymarket.py
+
 
 
 
