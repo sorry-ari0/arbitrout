@@ -1,7 +1,9 @@
 """Polymarket adapter — Gamma API (no auth) + CLOB for prices."""
 from .base import BaseAdapter
 from .models import NormalizedEvent
-
+import logging
+import asyncio
+import random
 
 # ============================================================
 # CATEGORY MAPPING
@@ -49,7 +51,22 @@ class PolymarketAdapter(BaseAdapter):
         events: list[NormalizedEvent] = []
 
         # Gamma API — get active markets
-        resp = await client.get(
+        async def fetch_with_retry(url, params, retry_count=0):
+            try:
+                resp = await client.get(url, params=params)
+                resp.raise_for_status()
+                return resp.json()
+            except Exception as e:
+                if retry_count < 3 and (hasattr(e, 'status') and e.status in [429, 500, 502, 503, 504]):
+                    delay = 2 ** retry_count + random.uniform(0, 1)
+                    logging.warning(f"Retry {retry_count+1} in {delay:.2f}s: {e}")
+                    await asyncio.sleep(delay)
+                    return await fetch_with_retry(url, params, retry_count + 1)
+                else:
+                    logging.error(f"Failed after {retry_count+1} retries: {e}")
+                    raise
+
+        markets = await fetch_with_retry(
             f"{self.BASE_URL}/markets",
             params={
                 "closed": "false",
@@ -58,9 +75,6 @@ class PolymarketAdapter(BaseAdapter):
                 "ascending": "false",
             },
         )
-        resp.raise_for_status()
-        markets = resp.json()
-
         if not isinstance(markets, list):
             markets = markets.get("data", markets.get("markets", []))
 
