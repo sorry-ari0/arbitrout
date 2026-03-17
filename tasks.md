@@ -193,7 +193,7 @@
    - Relocate the `import asyncio` statement from inside the `_fetch` method to the top of the `src/adapters/limitless.py` file, adhering to standard Python practices.
    - File: src/adapters/limitless.py
 
-34. TODO - Limitless Adapter: Enhance price parsing robustness in `_normalize`
+34. COMPLETED - Limitless Adapter: Enhance price parsing robustness in `_normalize`
    - The `_normalize` method in `src/adapters/limitless.py` still uses direct `m["probability"]` and `m["yes_price"]` access without sufficient `get` checks or `try-except` blocks, despite Task #32 being marked COMPLETED.
    - Modify the `_normalize` method to use `m.get('key', default_value)` for `probability` and `yes_price` (and derived `no_price`) to safely handle potentially missing keys.
    - Wrap `float()` conversions in `try-except ValueError` blocks to catch non-numeric values gracefully, defaulting to 0.0 if conversion fails.
@@ -285,4 +285,5 @@
    - Configure for approximately 3 retries with increasing delays (e.g., 2s, 4s, 8s).
    - Log warnings on retries and an error if the request ultimately fails after all retries.
    - File: src/adapters/polymarket.py
+
 
