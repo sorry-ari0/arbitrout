@@ -57,7 +57,7 @@
    - Pass the received `min_profit` value (converted to `min_spread`) to `scanner.get_opportunities()`, which will then need to accept this parameter.
    - File: src/arbitrage_router.py
 
-10. TODO - Frontend CSS: Implement mobile responsiveness for Arbitrout layout
+10. COMPLETED - Frontend CSS: Implement mobile responsiveness for Arbitrout layout
    - Task #8, "Make arbitrout layout responsive on mobile," is marked COMPLETED, but `src/static/css/arbitrout.css` currently lacks the necessary `@media` queries to stack the 4-pane grid into a single column or hide the detail pane on mobile until an opportunity is clicked.
    - Add `@media (max-width: 768px)` queries to implement the specified responsive layout changes.
    - File: src/static/css/arbitrout.css
@@ -82,4 +82,5 @@
    - The `_previous_prices` dictionary in `src/arbitrage_engine.py` is used to track historical prices for `compute_feed`. This dictionary is never explicitly pruned, which means it will continue to grow indefinitely as new events are encountered, potentially leading to unbounded memory consumption over long periods.
    - Implement a mechanism to periodically prune `_previous_prices`, for example, by removing entries for events that are no longer active or have not been updated for a very long time.
    - File: src/arbitrage_engine.py
+
 
