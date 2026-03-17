@@ -117,31 +117,40 @@ def unsave_market(match_id: str) -> list[dict]:
 # ============================================================
 # FEED: RECENT PRICE CHANGES
 # ============================================================
-_previous_prices: dict[str, float] = {}  # "platform:event_id" -> yes_price
+_previous_prices: dict[str, tuple[float, float]] = {}  # "platform:event_id" -> (yes_price, last_seen_timestamp)
+PRUNING_THRESHOLD_SECONDS = 48 * 3600  # 48 hours
 
-
-def compute_feed(events: list[NormalizedEvent], max_items: int = 50) -> list[dict]:
+def compute_feed(events: list[NormalizedEvent], current_scan_time: float, max_items: int = 50) -> list[dict]:
     """Compute recent price changes for the live feed pane."""
     global _previous_prices
     feed: list[dict] = []
 
     for ev in events:
         key = f"{ev.platform}:{ev.event_id}"
-        prev = _previous_prices.get(key)
-        _previous_prices[key] = ev.yes_price
+        prev_data = _previous_prices.get(key)
+        prev_price = prev_data[0] if prev_data else None
 
-        if prev is not None and prev != ev.yes_price:
-            change = ev.yes_price - prev
+        _previous_prices[key] = (ev.yes_price, current_scan_time)
+
+        if prev_price is not None and prev_price != ev.yes_price:
+            change = ev.yes_price - prev_price
             feed.append({
                 "platform": ev.platform,
                 "event_id": ev.event_id,
                 "title": ev.title[:80],
                 "yes_price": ev.yes_price,
-                "previous": prev,
+                "previous": prev_price,
                 "change": round(change, 4),
-                "change_pct": round(change / prev * 100, 2) if prev > 0 else 0,
+                "change_pct": round(change / prev_price * 100, 2) if prev_price > 0 else 0,
                 "timestamp": ev.last_updated,
             })
+
+    # Prune old entries
+    pruning_time_limit = current_scan_time - PRUNING_THRESHOLD_SECONDS
+    keys_to_delete = [key for key, (_, last_seen) in _previous_prices.items() if last_seen < pruning_time_limit]
+
+    for key in keys_to_delete:
+        del _previous_prices[key]
 
     # Sort by absolute change descending
     feed.sort(key=lambda f: abs(f["change"]), reverse=True)
@@ -177,10 +186,9 @@ class ArbitrageScanner:
         self._last_opportunities = opportunities
 
         # 4. Compute feed
-        feed = compute_feed(events)
-        self._last_feed = feed
-
         self._last_scan_time = time.time()
+        feed = compute_feed(events, self._last_scan_time)
+        self._last_feed = feed
 
         # 5. Cache to disk
         self._save_cache(events)
