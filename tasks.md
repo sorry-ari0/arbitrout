@@ -126,7 +126,7 @@
 
 ## Stock Analysis & Portfolio Research (Bloomberg Terminal)
 
-22. TODO - Add scrapling-based company research module
+22. BLOCKED - Add scrapling-based company research module
    - Create a new module `src/research/company_researcher.py` that uses the scrapling library (already installed v0.4.1)
    - Implement `research_company(ticker: str) -> dict` that scrapes Wikipedia for: CEO name, founders, founding year, headquarters, industry, key investors, board members, recent controversies
    - Use the existing `_COMPANY_NAMES` mapping in swarm_engine.py (maps ~50 tickers to Wikipedia article titles) as a starting point, but also support looking up unknown tickers by searching Wikipedia for "{company_name} company"
@@ -218,6 +218,7 @@
    - Store findings in `data/strategy_research.json` with: strategy_name, description, expected_edge_pct, risk_factors, sources
    - This research should inform the implementation of tasks 27-30 above
    - File: src/research/arbitrage_strategies.py (new)
+
 
 
 
