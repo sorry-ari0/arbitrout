@@ -3,6 +3,7 @@ import json
 import logging
 import time
 from pathlib import Path
+from itertools import combinations
 
 from adapters.models import NormalizedEvent, MatchedEvent, ArbitrageOpportunity
 from adapters.registry import AdapterRegistry
@@ -34,41 +35,48 @@ def find_arbitrage(matched: list[MatchedEvent],
             continue
 
         markets = match.markets
-        # Find cheapest YES and cheapest NO across different platforms
-        best_yes_market = min(markets, key=lambda m: m.yes_price)
-        best_no_market = min(markets, key=lambda m: m.no_price)
+        platforms = set(m.platform for m in markets)
+        best_spread = 0
+        best_yes_market = None
+        best_no_market = None
+        best_combined_vol = 0
 
-        # Skip if both are on the same platform (no arbitrage)
-        if best_yes_market.platform == best_no_market.platform:
-            # Try second-best on other platform
-            other_yes = [m for m in markets if m.platform != best_no_market.platform]
-            other_no = [m for m in markets if m.platform != best_yes_market.platform]
-            if other_yes:
-                best_yes_market = min(other_yes, key=lambda m: m.yes_price)
-            elif other_no:
-                best_no_market = min(other_no, key=lambda m: m.no_price)
-            else:
-                continue
+        for platform1, platform2 in combinations(platforms, 2):
+            yes_markets = [m for m in markets if m.platform in (platform1, platform2)]
+            yes_market1 = min([m for m in yes_markets if m.platform == platform1], key=lambda m: m.yes_price, default=None)
+            yes_market2 = min([m for m in yes_markets if m.platform == platform2], key=lambda m: m.yes_price, default=None)
+            no_markets = [m for m in markets if m.platform in (platform1, platform2)]
+            no_market1 = min([m for m in no_markets if m.platform == platform1], key=lambda m: m.no_price, default=None)
+            no_market2 = min([m for m in no_markets if m.platform == platform2], key=lambda m: m.no_price, default=None)
 
-        spread = 1.0 - (best_yes_market.yes_price + best_no_market.no_price)
-        profit_pct = spread * 100.0
-        combined_vol = sum(m.volume for m in markets)
+            if yes_market1 and yes_market2 and no_market1 and no_market2:
+                spread1 = 1.0 - (yes_market1.yes_price + no_market2.no_price)
+                spread2 = 1.0 - (yes_market2.yes_price + no_market1.no_price)
+                combined_vol1 = yes_market1.volume + no_market2.volume
+                combined_vol2 = yes_market2.volume + no_market1.volume
 
-        if spread < min_spread:
-            continue
-        if combined_vol < min_volume:
-            continue
+                if spread1 > best_spread and combined_vol1 >= min_volume:
+                    best_spread = spread1
+                    best_yes_market = yes_market1
+                    best_no_market = no_market2
+                    best_combined_vol = combined_vol1
+                if spread2 > best_spread and combined_vol2 >= min_volume:
+                    best_spread = spread2
+                    best_yes_market = yes_market2
+                    best_no_market = no_market1
+                    best_combined_vol = combined_vol2
 
-        opportunities.append(ArbitrageOpportunity(
-            matched_event=match,
-            buy_yes_platform=best_yes_market.platform,
-            buy_yes_price=best_yes_market.yes_price,
-            buy_no_platform=best_no_market.platform,
-            buy_no_price=best_no_market.no_price,
-            spread=spread,
-            profit_pct=profit_pct,
-            combined_volume=combined_vol,
-        ))
+        if best_spread > min_spread:
+            opportunities.append(ArbitrageOpportunity(
+                matched_event=match,
+                buy_yes_platform=best_yes_market.platform,
+                buy_yes_price=best_yes_market.yes_price,
+                buy_no_platform=best_no_market.platform,
+                buy_no_price=best_no_market.no_price,
+                spread=best_spread,
+                profit_pct=best_spread * 100.0,
+                combined_volume=best_combined_vol,
+            ))
 
     # Sort by profit descending
     opportunities.sort(key=lambda o: o.profit_pct, reverse=True)
