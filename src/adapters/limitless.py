@@ -1,7 +1,7 @@
 """Limitless Exchange adapter — public REST API, no auth."""
 from .base import BaseAdapter
 from .models import NormalizedEvent
-
+import logging
 
 # ============================================================
 # CATEGORY MAPPING
@@ -44,11 +44,27 @@ class LimitlessAdapter(BaseAdapter):
         # API max limit is 25 per page, paginate to get more
         for page in range(1, 9):  # up to 200 markets (8 pages x 25)
             import asyncio
-            resp = await client.get(
-                f"{self.BASE_URL}/markets/active",
-                params={"limit": 25, "page": page},
-            )
-            resp.raise_for_status()
+            retries = 0
+            max_retries = 3
+            delay = 2
+            while retries <= max_retries:
+                try:
+                    resp = await client.get(
+                        f"{self.BASE_URL}/markets/active",
+                        params={"limit": 25, "page": page},
+                    )
+                    resp.raise_for_status()
+                    break
+                except Exception as e:
+                    if retries < max_retries:
+                        logging.warning(f"Retry {retries+1}/{max_retries} for page {page}: {str(e)}")
+                        await asyncio.sleep(delay)
+                        delay *= 2
+                        retries += 1
+                    else:
+                        logging.error(f"Failed to fetch page {page}: {str(e)}")
+                        return events
+
             raw = resp.json()
 
             if not isinstance(raw, list):
