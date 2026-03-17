@@ -314,7 +314,7 @@
    - Log warnings on retries and an error if the request ultimately fails after all retries.
    - File: src/adapters/polymarket.py
 
-53. TODO - PredictIt Adapter: Improve `no_price` normalization to use actual order book data
+53. COMPLETED - PredictIt Adapter: Improve `no_price` normalization to use actual order book data
    - The `_normalize` method in `src/adapters/predictit.py` still falls back to `1.0 - yes_price` for `no_price` when `bestBuyNoCost` is zero, which can lead to inaccuracies.
    - In the `_fetch` method's loop over contracts, prioritize using `contract.get("bestBuyNoCost", 0)` for `no_price`.
    - If `bestBuyNoCost` is `0` or unavailable, consider if there's an alternative *actual* order book value for selling NO shares that could be used consistently as a bid/ask pair.
@@ -392,6 +392,7 @@
    - In the `find_arbitrage` function, calculate `yes_allocation_pct` and `no_allocation_pct` based on the `buy_yes_price` and `buy_no_price` to achieve a guaranteed fixed payout.
    - Add these calculated percentages to the `ArbitrageOpportunity` object before appending it to the results (assuming `ArbitrageOpportunity` model can accept them).
    - File: src/arbitrage_engine.py
+
 
 
 
