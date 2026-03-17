@@ -125,10 +125,18 @@ def compute_feed(events: list[NormalizedEvent], max_items: int = 50) -> list[dic
     global _previous_prices
     feed: list[dict] = []
 
+    # Create a new dictionary to store prices from the current scan.
+    # This will effectively prune _previous_prices to only active events.
+    current_scan_prices: dict[str, float] = {}
+
     for ev in events:
         key = f"{ev.platform}:{ev.event_id}"
+        
+        # Get the previous price from the global _previous_prices
         prev = _previous_prices.get(key)
-        _previous_prices[key] = ev.yes_price
+        
+        # Store the current price in the dictionary for the next iteration
+        current_scan_prices[key] = ev.yes_price
 
         if prev is not None and prev != ev.yes_price:
             change = ev.yes_price - prev
@@ -142,6 +150,9 @@ def compute_feed(events: list[NormalizedEvent], max_items: int = 50) -> list[dic
                 "change_pct": round(change / prev * 100, 2) if prev > 0 else 0,
                 "timestamp": ev.last_updated,
             })
+
+    # Prune _previous_prices to only include events from the current scan
+    _previous_prices = current_scan_prices
 
     # Sort by absolute change descending
     feed.sort(key=lambda f: abs(f["change"]), reverse=True)
