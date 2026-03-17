@@ -136,7 +136,7 @@
    - Modify `arbWs.onclose` and `arbWs.onerror` to call `reconnectArbWs` instead of `connectArbWs` directly.
    - File: src/static/js/arbitrout.js
 
-24. TODO - Arbitrage Router: Implement `min_profit` filter for opportunities endpoint
+24. COMPLETED - Arbitrage Router: Implement `min_profit` filter for opportunities endpoint
    - The `/api/arbitrage/opportunities` endpoint in `src/arbitrage_router.py` does not currently accept or apply a `min_profit` query parameter, despite Task #9 being marked as COMPLETED.
    - Modify the `/api/arbitrage/opportunities` endpoint to accept an optional `min_profit: float = 0.0` query parameter.
    - Pass this `min_profit` value (converted to `min_spread`) to `scanner.get_opportunities()`.
@@ -187,5 +187,6 @@
    - The `_normalize` method in `src/adapters/limitless.py` could be more robust in handling potentially missing or malformed price data, specifically for `probability` and `yes_price` fields which are accessed via `m["key"]` or `float(m["key"])` without sufficient `get` checks or `try-except` blocks.
    - Ensure all price extractions (`yes_price`, `no_price`) use safe access (e.g., `m.get('key', default_value)`) and robust type conversion with appropriate error handling (e.g., `try-except ValueError`) to prevent crashes from unexpected API responses.
    - File: src/adapters/limitless.py
+
 
 
