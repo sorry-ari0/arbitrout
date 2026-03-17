@@ -1,6 +1,6 @@
 """Arbitrage API router — all /api/arbitrage/* endpoints."""
 import logging
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -50,10 +50,12 @@ class SaveRequest(BaseModel):
 # ENDPOINTS
 # ============================================================
 @router.get("/opportunities")
-async def get_opportunities():
+async def get_opportunities(min_profit: float = Query(0, ge=0)):
     """Current arbitrage opportunities, sorted by profit %."""
     scanner = get_scanner()
-    return JSONResponse(content=scanner.get_opportunities())
+    opportunities = scanner.get_opportunities()
+    filtered_opportunities = [op for op in opportunities if op['profit_pct'] >= min_profit]
+    return JSONResponse(content=filtered_opportunities)
 
 
 @router.get("/events")
