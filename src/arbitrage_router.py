@@ -50,10 +50,10 @@ class SaveRequest(BaseModel):
 # ENDPOINTS
 # ============================================================
 @router.get("/opportunities")
-async def get_opportunities():
+async def get_opportunities(min_profit: float = 0.0):
     """Current arbitrage opportunities, sorted by profit %."""
     scanner = get_scanner()
-    return JSONResponse(content=scanner.get_opportunities())
+    return JSONResponse(content=scanner.get_opportunities(min_spread=min_profit))
 
 
 @router.get("/events")
