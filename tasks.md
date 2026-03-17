@@ -197,7 +197,7 @@
    - Add a `/api/arbitrage/theta` endpoint that returns theta opportunities sorted by days_to_expiry and edge_pct
    - File: src/theta_scanner.py (new), src/arbitrage_router.py
 
-30. TODO - Add prediction-to-real-asset arbitrage matching
+30. COMPLETED - Add prediction-to-real-asset arbitrage matching
    - Create `src/cross_asset_matcher.py` that finds combinations where prediction market contracts can be hedged with real tradeable assets
    - Example: Polymarket has "BTC > $100k by July" at $0.40 -> buy YES at $0.40 + short BTC futures at $100k strike = guaranteed profit if spread exceeds transaction costs
    - Example: Kalshi has "S&P 500 above 5500 by Q3" at $0.55 -> buy YES + buy SPY puts at 5500 strike = hedged position
@@ -218,6 +218,7 @@
    - Store findings in `data/strategy_research.json` with: strategy_name, description, expected_edge_pct, risk_factors, sources
    - This research should inform the implementation of tasks 27-30 above
    - File: src/research/arbitrage_strategies.py (new)
+
 
 
 
