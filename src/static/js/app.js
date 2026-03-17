@@ -283,6 +283,33 @@ function renderChart(data) {
         color: macdResult.histogram[i] > 0 ? 'rgba(0, 230, 118, 0.3)' : 'rgba(255, 23, 68, 0.3)',
     })));
 
+    // Calculate Bollinger Bands (20-period SMA, 2x StdDev)
+    const bbPeriod = 20;
+    const bbStdDevMultiplier = 2;
+    const bbData = calculateBollingerBands(closePrices, bbPeriod, bbStdDevMultiplier);
+
+    const bbMiddleSeries = chart.addLineSeries({
+        color: 'rgba(255, 140, 0, 0.5)', // Orange, semi-transparent
+        lineWidth: 1,
+        title: `SMA(${bbPeriod})`,
+    });
+    bbMiddleSeries.setData(bbData.middle.map((v, i) => ({ time: data[i].time, value: v })));
+
+    const bbUpperSeries = chart.addLineSeries({
+        color: 'rgba(66, 135, 245, 0.5)', // Blue, semi-transparent
+        lineWidth: 1,
+        title: `BB Upper(${bbPeriod})`,
+    });
+    bbUpperSeries.setData(bbData.upper.map((v, i) => ({ time: data[i].time, value: v })));
+
+    const bbLowerSeries = chart.addLineSeries({
+        color: 'rgba(245, 66, 66, 0.5)', // Red, semi-transparent
+        lineWidth: 1,
+        title: `BB Lower(${bbPeriod})`,
+    });
+    bbLowerSeries.setData(bbData.lower.map((v, i) => ({ time: data[i].time, value: v })));
+
+
     chart.timeScale().fitContent();
 
     state.chart = chart;
@@ -292,6 +319,9 @@ function renderChart(data) {
     state.macdLineSeries = macdLineSeries;
     state.signalLineSeries = signalLineSeries;
     state.macdHistogramSeries = macdHistogramSeries;
+    state.bbUpperSeries = bbUpperSeries;
+    state.bbMiddleSeries = bbMiddleSeries;
+    state.bbLowerSeries = bbLowerSeries;
 
     // I3 fix: disconnect previous observer before creating new one
     if (state.resizeObserver) state.resizeObserver.disconnect();
@@ -349,6 +379,47 @@ function calculateMACD(values, fastPeriod, slowPeriod, signalPeriod) {
     const signalLine = calculateEMA(macdLine, signalPeriod);
     const histogram = macdLine.map((v, i) => v - signalLine[i]);
     return { macd: macdLine, signal: signalLine, histogram };
+}
+
+function calculateSMA(data, period) {
+    const sma = new Array(data.length).fill(null);
+    for (let i = period - 1; i < data.length; i++) {
+        let sum = 0;
+        for (let j = 0; j < period; j++) {
+            sum += data[i - j];
+        }
+        sma[i] = sum / period;
+    }
+    return sma;
+}
+
+function calculateStdDev(data, period, smaValues) {
+    const stdDev = new Array(data.length).fill(null);
+    for (let i = period - 1; i < data.length; i++) {
+        if (smaValues[i] === null) continue;
+        let sumOfSquares = 0;
+        for (let j = 0; j < period; j++) {
+            sumOfSquares += Math.pow(data[i - j] - smaValues[i], 2);
+        }
+        stdDev[i] = Math.sqrt(sumOfSquares / period);
+    }
+    return stdDev;
+}
+
+function calculateBollingerBands(prices, period, stdDevMultiplier) {
+    const middleBand = calculateSMA(prices, period);
+    const stdDev = calculateStdDev(prices, period, middleBand);
+
+    const upperBand = new Array(prices.length).fill(null);
+    const lowerBand = new Array(prices.length).fill(null);
+
+    for (let i = period - 1; i < prices.length; i++) {
+        if (middleBand[i] !== null && stdDev[i] !== null) {
+            upperBand[i] = middleBand[i] + (stdDev[i] * stdDevMultiplier);
+            lowerBand[i] = middleBand[i] - (stdDev[i] * stdDevMultiplier);
+        }
+    }
+    return { middle: middleBand, upper: upperBand, lower: lowerBand };
 }
 
 function setupPeriodButtons() {
