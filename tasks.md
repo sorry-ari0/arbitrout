@@ -160,7 +160,7 @@
      - Initially hide the event detail pane (`#event-detail`) on mobile, making it visible only when an opportunity is clicked.
    - File: src/static/css/arbitrout.css
 
-28. TODO - Arbitrage Engine: Refactor `find_arbitrage` for optimal distinct platform pairing
+28. COMPLETED - Arbitrage Engine: Refactor `find_arbitrage` for optimal distinct platform pairing
    - The `find_arbitrage` function in `src/arbitrage_engine.py` still uses a "second-best" logic when `best_yes_market.platform == best_no_market.platform`, which does not guarantee distinct platforms or the highest possible spread. This directly contradicts the resolution described in tasks #13 and #15 (marked COMPLETED).
    - Refactor `find_arbitrage` to systematically iterate through all unique pairs of distinct platforms for a `MatchedEvent`.
    - For each pair of platforms, identify the best `buy_yes_price` and `buy_no_price`.
@@ -187,6 +187,7 @@
    - The `_normalize` method in `src/adapters/limitless.py` could be more robust in handling potentially missing or malformed price data, specifically for `probability` and `yes_price` fields which are accessed via `m["key"]` or `float(m["key"])` without sufficient `get` checks or `try-except` blocks.
    - Ensure all price extractions (`yes_price`, `no_price`) use safe access (e.g., `m.get('key', default_value)`) and robust type conversion with appropriate error handling (e.g., `try-except ValueError`) to prevent crashes from unexpected API responses.
    - File: src/adapters/limitless.py
+
 
 
 
