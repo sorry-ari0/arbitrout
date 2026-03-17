@@ -32,7 +32,7 @@
    - Sort feedItems array based on selection before rendering
    - File: src/static/js/arbitrout.js
 
-6. TODO - Add Bollinger Bands to Lobsterminal chart
+6. COMPLETED - Add Bollinger Bands to Lobsterminal chart
    - Calculate 20-period SMA and 2x standard deviation bands
    - Add upper band, lower band, and middle SMA as line series on the chart
    - Use semi-transparent colors so they dont obscure candles
@@ -50,6 +50,7 @@
    - Stack the 4-pane grid into single column
    - Hide detail pane on mobile until an opportunity is clicked
    - File: src/static/css/arbitrout.css
+
 
 
 
