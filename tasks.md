@@ -1,9 +1,9 @@
-# Arbitrout Tasks
+﻿# Arbitrout Tasks
 # Status: TODO | IN_PROGRESS | COMPLETED | BLOCKED
 
 ## Arbitrage Scanner Improvements
 
-1. TODO - Add retry logic to Polymarket adapter
+1. COMPLETED - Add retry logic to Polymarket adapter
    - Add exponential backoff retry on 429/500 status codes (3 retries, 2s/4s/8s delays)
    - Wrap the httpx.get call in a retry loop
    - Log warning on retry, error on final failure
@@ -50,3 +50,4 @@
    - Stack the 4-pane grid into single column
    - Hide detail pane on mobile until an opportunity is clicked
    - File: src/static/css/arbitrout.css
+
