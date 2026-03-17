@@ -238,7 +238,7 @@
    - If `_registry` is `None`, send an empty list or appropriate default.
    - File: src/arbitrage_router.py
 
-41. TODO - PredictIt Adapter: Improve `no_price` normalization to use actual order book data
+41. COMPLETED - PredictIt Adapter: Improve `no_price` normalization to use actual order book data
    - The `_normalize` method in `src/adapters/predictit.py` still falls back to `1.0 - yes_price` for `no_price` when `bestBuyNoCost` is zero, which was explicitly identified as an inaccuracy to be resolved in Tasks #21 and #26 (both marked COMPLETED).
    - In the `_fetch` method's loop over contracts, prioritize using `contract.get("bestBuyNoCost", 0)` for `no_price`.
    - If `bestBuyNoCost` is `0` or unavailable, consider if there's an alternative *actual* order book value for selling NO shares (e.g., `bestSellNoCost`) that could be used consistently as a bid/ask pair.
@@ -285,6 +285,7 @@
    - Configure for approximately 3 retries with increasing delays (e.g., 2s, 4s, 8s).
    - Log warnings on retries and an error if the request ultimately fails after all retries.
    - File: src/adapters/polymarket.py
+
 
 
 
