@@ -106,7 +106,7 @@
    - Implement client-side sorting logic within `renderOpportunities` or a helper function, allowing users to sort by criteria such as "Profit High-Low", "Profit Low-High", "Platform A-Z", and "Newest First" (using `matched_event.last_updated` or similar).
    - File: src/static/js/arbitrout.js
 
-19. TODO - Frontend JS: Enhance WebSocket client to process all server-sent data.
+19. COMPLETED - Frontend JS: Enhance WebSocket client to process all server-sent data.
    - The `arbWs.onmessage` handler only processes `opportunities` and `feed` messages, ignoring `init` and `scan_result` messages that provide `events_count`, `platforms`, and `summary`.
    - Modify `arbWs.onmessage` to handle `init` and `scan_result` message types.
    - Update the `opp-count` element with `data.events_count` (from `init` or `scan_result`).
@@ -123,6 +123,7 @@
    - The `PredictItAdapter` sometimes derives the `no_price` as `1.0 - yes_price` when `bestBuyNoCost` is zero. This is a heuristic and not an actual order book price, which can lead to inaccuracies in arbitrage calculations.
    - Adjust the `_normalize` method to preferentially use `bestBuyNoCost` for the `no_price` (representing the cost to buy NO shares). If `bestBuyNoCost` is unavailable or zero, consider if `bestSellNoCost` (price to sell NO shares) might be relevant if used consistently with `bestBuyYesCost` as bid/ask pairs, or log a warning if actual 'buy no' price cannot be found.
    - File: src/adapters/predictit.py
+
 
 
 
