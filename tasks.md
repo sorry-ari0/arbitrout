@@ -335,7 +335,7 @@
    - Implement logic to update the platform status display (e.g., using `arb-status` dots) based on `data.platforms` received in these messages.
    - File: src/static/js/arbitrout.js
 
-56. TODO - Frontend JS: Implement retry logic for WebSocket reconnections
+56. COMPLETED - Frontend JS: Implement retry logic for WebSocket reconnections
    - The `arbWs.onclose` and `arbWs.onerror` functions in `src/static/js/arbitrout.js` currently call `connectArbWs` directly, leading to infinite retries without backoff. The `reconnectArbWs` function (which defines retry logic) is defined but not called.
    - Modify `arbWs.onclose` and `arbWs.onerror` functions to call a `reconnectArbWs` function instead of `connectArbWs` directly.
    - Define a `reconnectArbWs` function that properly handles `retryCount` and `maxRetries` to implement exponential backoff.
@@ -392,6 +392,7 @@
    - In the `find_arbitrage` function, calculate `yes_allocation_pct` and `no_allocation_pct` based on the `buy_yes_price` and `buy_no_price` to achieve a guaranteed fixed payout.
    - Add these calculated percentages to the `ArbitrageOpportunity` object before appending it to the results (assuming `ArbitrageOpportunity` model can accept them).
    - File: src/arbitrage_engine.py
+
 
 
 
