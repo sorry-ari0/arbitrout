@@ -1,4 +1,4 @@
-# Arbitrout Tasks
+﻿# Arbitrout Tasks
 # Status: TODO | IN_PROGRESS | COMPLETED | BLOCKED
 
 ## Arbitrage Scanner Improvements
@@ -188,7 +188,7 @@
    - Ensure all price extractions (`yes_price`, `no_price`) use safe access (e.g., `m.get('key', default_value)`) and robust type conversion with appropriate error handling (e.g., `try-except ValueError`) to prevent crashes from unexpected API responses.
    - File: src/adapters/limitless.py
 
-33. TODO - Limitless Adapter: Move `import asyncio` to module level
+33. COMPLETED - Limitless Adapter: Move `import asyncio` to module level
    - The `import asyncio` statement is currently inside the `_fetch` method in `src/adapters/limitless.py`, despite Task #31 being marked COMPLETED.
    - Relocate the `import asyncio` statement from inside the `_fetch` method to the top of the `src/adapters/limitless.py` file, adhering to standard Python practices.
    - File: src/adapters/limitless.py
@@ -285,3 +285,4 @@
    - Configure for approximately 3 retries with increasing delays (e.g., 2s, 4s, 8s).
    - Log warnings on retries and an error if the request ultimately fails after all retries.
    - File: src/adapters/polymarket.py
+
