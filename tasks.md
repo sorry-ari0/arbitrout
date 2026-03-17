@@ -1,4 +1,4 @@
-# Arbitrout Tasks
+﻿# Arbitrout Tasks
 # Status: TODO | IN_PROGRESS | COMPLETED | BLOCKED
 
 ## Arbitrage Scanner Improvements
@@ -124,7 +124,7 @@
    - Adjust the `_normalize` method to preferentially use `bestBuyNoCost` for the `no_price` (representing the cost to buy NO shares). If `bestBuyNoCost` is unavailable or zero, consider if `bestSellNoCost` (price to sell NO shares) might be relevant if used consistently with `bestBuyYesCost` as bid/ask pairs, or log a warning if actual 'buy no' price cannot be found.
    - File: src/adapters/predictit.py
 
-22. TODO - Frontend JS: Correctly implement processing for all WebSocket message types
+22. COMPLETED - Frontend JS: Correctly implement processing for all WebSocket message types
    - The `arbWs.onmessage` handler in `src/static/js/arbitrout.js` still only processes `opportunities` and `feed` message types. Logic for `init` and `scan_result` messages (which update `opp-count` and platform status) is missing, despite being marked as completed in Task #19.
    - Add logic within `arbWs.onmessage` to handle `init` and `scan_result` message types.
    - Update the `opp-count` element with `data.events_count` from these messages.
@@ -187,3 +187,4 @@
    - The `_normalize` method in `src/adapters/limitless.py` could be more robust in handling potentially missing or malformed price data, specifically for `probability` and `yes_price` fields which are accessed via `m["key"]` or `float(m["key"])` without sufficient `get` checks or `try-except` blocks.
    - Ensure all price extractions (`yes_price`, `no_price`) use safe access (e.g., `m.get('key', default_value)`) and robust type conversion with appropriate error handling (e.g., `try-except ValueError`) to prevent crashes from unexpected API responses.
    - File: src/adapters/limitless.py
+
