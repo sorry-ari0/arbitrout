@@ -1,4 +1,4 @@
-﻿# Arbitrout Tasks
+# Arbitrout Tasks
 # Status: TODO | IN_PROGRESS | COMPLETED | BLOCKED
 
 ## Arbitrage Scanner Improvements
@@ -83,8 +83,43 @@
    - Implement a mechanism to periodically prune `_previous_prices`, for example, by removing entries for events that are no longer active or have not been updated for a very long time.
    - File: src/arbitrage_engine.py
 
+15. TODO - Arbitrage Engine: Fix `find_arbitrage` to guarantee distinct platforms and optimal spread.
+   - The current logic attempts a "second-best" fix if the initially chosen best YES and NO markets are on the same platform, but this does not guarantee distinct platforms for the final `buy_yes_market` and `buy_no_market`, nor does it ensure the highest possible spread between *any* two distinct platforms.
+   - Refactor `find_arbitrage` to systematically iterate through all unique pairs of platforms for a `MatchedEvent`, identify the best `buy_yes_price` and `buy_no_price` for each platform, and then select the pair of *distinct* platforms that yields the maximum spread.
+   - File: src/arbitrage_engine.py
 
+16. TODO - Arbitrage Engine: Implement pruning for `_previous_prices` dictionary.
+   - The `_previous_prices` dictionary in `src/arbitrage_engine.py` grows indefinitely, leading to potential memory issues over time.
+   - Modify the `compute_feed` or `scan` method to periodically remove entries from `_previous_prices` that correspond to events that are no longer active, have expired, or have not been updated for a configurable period (e.g., 24-48 hours).
+   - File: src/arbitrage_engine.py
 
+17. TODO - Frontend CSS: Implement mobile responsiveness for Arbitrout layout.
+   - The `src/static/css/arbitrout.css` file currently lacks `@media` queries to adapt the layout for mobile screens.
+   - Add `@media (max-width: 768px)` queries to:
+     - Change `.arbitrout-container` to a single column layout (e.g., `grid-template-columns: 1fr; grid-template-rows: auto;`).
+     - Initially hide the event detail pane (`#event-detail`) on mobile, making it visible only when an opportunity is clicked.
+   - File: src/static/css/arbitrout.css
 
+18. TODO - Frontend JS: Add sorting controls and logic to Arbitrout opportunities list.
+   - The UI is missing a dropdown to select sorting preferences for the arbitrage opportunities. The `renderOpportunities` function also lacks the logic to apply sorting client-side.
+   - Add a dropdown UI element (e.g., `<select>`) in the opportunities panel header.
+   - Implement client-side sorting logic within `renderOpportunities` or a helper function, allowing users to sort by criteria such as "Profit High-Low", "Profit Low-High", "Platform A-Z", and "Newest First" (using `matched_event.last_updated` or similar).
+   - File: src/static/js/arbitrout.js
 
+19. TODO - Frontend JS: Enhance WebSocket client to process all server-sent data.
+   - The `arbWs.onmessage` handler only processes `opportunities` and `feed` messages, ignoring `init` and `scan_result` messages that provide `events_count`, `platforms`, and `summary`.
+   - Modify `arbWs.onmessage` to handle `init` and `scan_result` message types.
+   - Update the `opp-count` element with `data.events_count` (from `init` or `scan_result`).
+   - Update the platform status display (e.g., `arb-status`) with `data.platforms` (from `init` or `scan_result`).
+   - File: src/static/js/arbitrout.js
 
+20. TODO - Arbitrage Engine: Calculate optimal capital allocation for arbitrage opportunities.
+   - The frontend currently defaults to 50/50 capital allocation, which is not optimal for maximizing guaranteed profit. The backend should calculate and provide `yes_allocation_pct` and `no_allocation_pct`.
+   - Modify the `find_arbitrage` function to calculate the optimal capital allocation percentages for buying YES and NO contracts, considering their respective prices, to guarantee a fixed payout.
+   - Add these `yes_allocation_pct` and `no_allocation_pct` fields to the `ArbitrageOpportunity` model (assuming it exists or would be created).
+   - File: src/arbitrage_engine.py
+
+21. TODO - PredictIt Adapter: Improve price normalization for NO side using actual order book data.
+   - The `PredictItAdapter` sometimes derives the `no_price` as `1.0 - yes_price` when `bestBuyNoCost` is zero. This is a heuristic and not an actual order book price, which can lead to inaccuracies in arbitrage calculations.
+   - Adjust the `_normalize` method to preferentially use `bestBuyNoCost` for the `no_price` (representing the cost to buy NO shares). If `bestBuyNoCost` is unavailable or zero, consider if `bestSellNoCost` (price to sell NO shares) might be relevant if used consistently with `bestBuyYesCost` as bid/ask pairs, or log a warning if actual 'buy no' price cannot be found.
+   - File: src/adapters/predictit.py
