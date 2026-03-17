@@ -381,7 +381,7 @@
    - Select the pair of platforms that yields the maximum spread, ensuring `buy_yes_platform` and `buy_no_platform` are always different.
    - File: src/arbitrage_engine.py
 
-63. TODO - Arbitrage Engine: Implement pruning for `_previous_prices` dictionary
+63. BLOCKED - Arbitrage Engine: Implement pruning for `_previous_prices` dictionary
    - The `_previous_prices` dictionary in `src/arbitrage_engine.py` is used to track historical prices but grows indefinitely, leading to potential memory issues.
    - Modify the `compute_feed` or `scan` method to periodically remove entries from the `_previous_prices` dictionary.
    - Prune entries for events that are no longer active, have expired, or have not been updated for a configurable period (e.g., 24-48 hours).
@@ -392,6 +392,7 @@
    - In the `find_arbitrage` function, calculate `yes_allocation_pct` and `no_allocation_pct` based on the `buy_yes_price` and `buy_no_price` to achieve a guaranteed fixed payout.
    - Add these calculated percentages to the `ArbitrageOpportunity` object before appending it to the results (assuming `ArbitrageOpportunity` model can accept them).
    - File: src/arbitrage_engine.py
+
 
 
 
