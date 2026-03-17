@@ -8,6 +8,13 @@ let arbWs = null;
 let selectedOpp = null;
 let feedItems = [];
 
+// Global variable for current sort order
+let arbSortOrder = 'profit_desc'; // Default sort order
+// Cache for opportunities, allowing re-sorting without re-fetching
+let arbOpportunitiesCache = [];
+// Reference to the sorting select element
+let arbSortSelect = null;
+
 // === PIXEL ART (CSS grid of div cells) ===
 function createPixelGrid(colorMap, scale) {
     // colorMap: 2D array of hex colors (null = transparent)
@@ -66,7 +73,7 @@ function getTroutPixelArt() {
 [_,_,_,_,_,_,O,K,K,W,W,K,K,W,K,K,W,W,K,K,W,W,K,K,W,W,K,K,K,O,O,N,N,_,_,_,_,_,_,H,H,_,_,_],
 [_,_,_,_,_,_,_,O,W,W,W,W,W,W,W,W,W,W,W,W,W,W,W,W,W,W,O,O,O,_,N,T,_,_,_,_,_,_,_,_,C,_,_,_],
 [_,_,_,_,_,_,_,_,O,O,W,W,W,W,W,W,W,W,W,W,W,W,W,O,O,O,_,_,_,_,_,_,_,_,_,_,_,_,_,_,C,_,_,_],
-[_,_,_,_,_,_,_,_,_,_,O,O,O,O,O,O,O,O,O,O,O,O,O,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,C,_,_,_],
+    [_,_,_,_,_,_,_,_,_,_,O,O,O,O,O,O,O,O,O,O,O,O,O,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,C,_,_,_],
 [D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D],
 [_,_,I,I,I,I,I,I,I,I,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,J,J,J,J,J,J,J,J,_,_,_,_],
 [_,_,I,B,B,B,B,B,B,I,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,J,H,H,C,H,H,H,J,_,_,_,_],
@@ -225,6 +232,63 @@ function connectArbWs() {
     };
 }
 
+// === SORTING CONTROLS ===
+function initSortingControls() {
+    if (arbSortSelect) {
+        // Controls already initialized, just ensure the correct option is selected
+        if (arbSortSelect.value !== arbSortOrder) {
+            arbSortSelect.value = arbSortOrder;
+        }
+        return;
+    }
+
+    const oppListContainer = document.getElementById('opp-list');
+    if (!oppListContainer || !oppListContainer.parentNode) {
+        return; // Cannot initialize if opp-list or its parent is not available
+    }
+
+    const controlsDiv = document.createElement('div');
+    controlsDiv.id = 'opp-controls-header';
+    controlsDiv.style.cssText = 'padding: 8px; border-bottom: 1px solid var(--arb-border); display: flex; justify-content: flex-end; align-items: center; background: var(--arb-bg-dark);';
+
+    const label = document.createElement('span');
+    label.textContent = 'Sort by: ';
+    label.style.marginRight = '8px';
+    label.style.fontSize = '12px';
+    label.style.color = 'var(--arb-muted)';
+    controlsDiv.appendChild(label);
+
+    arbSortSelect = document.createElement('select');
+    arbSortSelect.style.cssText = 'background: var(--arb-bg); border: 1px solid var(--arb-border); color: var(--arb-text); padding: 4px; border-radius: 3px; font-size: 11px;';
+
+    const options = [
+        { value: 'profit_desc', text: 'Profit High-Low' },
+        { value: 'profit_asc', text: 'Profit Low-High' },
+        { value: 'platform_asc', text: 'Platform A-Z' }, // Sorting by canonical title
+        { value: 'newest_desc', text: 'Newest First' }
+    ];
+
+    options.forEach(opt => {
+        const optionEl = document.createElement('option');
+        optionEl.value = opt.value;
+        optionEl.textContent = opt.text;
+        if (opt.value === arbSortOrder) {
+            optionEl.selected = true;
+        }
+        arbSortSelect.appendChild(optionEl);
+    });
+
+    arbSortSelect.addEventListener('change', function() {
+        arbSortOrder = this.value;
+        renderOpportunities(arbOpportunitiesCache); // Re-render with new sort order
+    });
+
+    controlsDiv.appendChild(arbSortSelect);
+
+    // Insert the controls div right before the opp-list container
+    oppListContainer.parentNode.insertBefore(controlsDiv, oppListContainer);
+}
+
 // === OPPORTUNITIES ===
 function loadOpportunities() {
     fetch('/api/arbitrage/opportunities')
@@ -234,6 +298,10 @@ function loadOpportunities() {
 }
 
 function renderOpportunities(opps) {
+    arbOpportunitiesCache = opps; // Cache the raw opportunities
+
+    initSortingControls(); // Ensure controls are initialized before rendering
+
     var container = document.getElementById('opp-list');
     if (!container) return;
 
@@ -250,7 +318,32 @@ function renderOpportunities(opps) {
         return;
     }
 
-    opps.forEach(function(opp) {
+    // Apply sorting based on arbSortOrder
+    const sortedOpps = [...opps].sort((a, b) => {
+        const profitA = a.profit_pct || (a.spread * 100);
+        const profitB = b.profit_pct || (b.spread * 100);
+
+        switch (arbSortOrder) {
+            case 'profit_asc':
+                return profitA - profitB;
+            case 'profit_desc':
+                return profitB - profitA;
+            case 'platform_asc':
+                // Using canonical_title for "Platform A-Z" sort as a general alphabetical sort
+                const titleA = (a.canonical_title || (a.matched_event && a.matched_event.canonical_title) || '').toLowerCase();
+                const titleB = (b.canonical_title || (b.matched_event && b.matched_event.canonical_title) || '').toLowerCase();
+                return titleA.localeCompare(titleB);
+            case 'newest_desc':
+                // Using last_updated timestamp from matched_event
+                const dateA = new Date(a.matched_event?.last_updated || 0);
+                const dateB = new Date(b.matched_event?.last_updated || 0);
+                return dateB.getTime() - dateA.getTime();
+            default:
+                return 0; // Maintain original order if sortOrder is unrecognized
+        }
+    });
+
+    sortedOpps.forEach(function(opp) {
         var row = document.createElement('div');
         row.className = 'opp-row';
         row.addEventListener('click', function() { showEventDetail(opp); });
