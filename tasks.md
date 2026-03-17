@@ -88,7 +88,7 @@
    - Refactor `find_arbitrage` to systematically iterate through all unique pairs of platforms for a `MatchedEvent`, identify the best `buy_yes_price` and `buy_no_price` for each platform, and then select the pair of *distinct* platforms that yields the maximum spread.
    - File: src/arbitrage_engine.py
 
-16. TODO - Arbitrage Engine: Implement pruning for `_previous_prices` dictionary.
+16. COMPLETED - Arbitrage Engine: Implement pruning for `_previous_prices` dictionary.
    - The `_previous_prices` dictionary in `src/arbitrage_engine.py` grows indefinitely, leading to potential memory issues over time.
    - Modify the `compute_feed` or `scan` method to periodically remove entries from `_previous_prices` that correspond to events that are no longer active, have expired, or have not been updated for a configurable period (e.g., 24-48 hours).
    - File: src/arbitrage_engine.py
@@ -123,4 +123,5 @@
    - The `PredictItAdapter` sometimes derives the `no_price` as `1.0 - yes_price` when `bestBuyNoCost` is zero. This is a heuristic and not an actual order book price, which can lead to inaccuracies in arbitrage calculations.
    - Adjust the `_normalize` method to preferentially use `bestBuyNoCost` for the `no_price` (representing the cost to buy NO shares). If `bestBuyNoCost` is unavailable or zero, consider if `bestSellNoCost` (price to sell NO shares) might be relevant if used consistently with `bestBuyYesCost` as bid/ask pairs, or log a warning if actual 'buy no' price cannot be found.
    - File: src/adapters/predictit.py
+
 
