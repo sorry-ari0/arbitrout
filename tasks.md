@@ -21,7 +21,7 @@
    - Log warning on retry, error on final failure
    - File: src/adapters/limitless.py
 
-4. TODO - Add profit threshold filter to opportunities endpoint
+4. COMPLETED - Add profit threshold filter to opportunities endpoint
    - Add optional query param min_profit to GET /api/arbitrage/opportunities
    - Filter results where profit_pct >= min_profit before returning
    - Default to 0 (show all) if not provided
@@ -50,6 +50,7 @@
    - Stack the 4-pane grid into single column
    - Hide detail pane on mobile until an opportunity is clicked
    - File: src/static/css/arbitrout.css
+
 
 
 
