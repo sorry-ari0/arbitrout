@@ -348,7 +348,7 @@
    - Implement client-side sorting logic within the `renderOpportunities` function to re-sort the `opps` array based on the selected criteria before rendering.
    - File: src/static/js/arbitrout.js
 
-58. TODO - Frontend JS: Implement platform status display in the UI
+58. BLOCKED - Frontend JS: Implement platform status display in the UI
    - The UI concept for `arb-status` and `status-dot` exists in `arbitrout.css`, but `arbitrout.js` does not populate or update the platform status based on WebSocket `platforms` data.
    - Create or update a section in the UI (e.g., in the status bar) to display the connection status for each platform.
    - Use the `platforms` data received from `init` and `scan_result` WebSocket messages to update the status dots (online, offline, stale).
@@ -392,6 +392,7 @@
    - In the `find_arbitrage` function, calculate `yes_allocation_pct` and `no_allocation_pct` based on the `buy_yes_price` and `buy_no_price` to achieve a guaranteed fixed payout.
    - Add these calculated percentages to the `ArbitrageOpportunity` object before appending it to the results (assuming `ArbitrageOpportunity` model can accept them).
    - File: src/arbitrage_engine.py
+
 
 
 
