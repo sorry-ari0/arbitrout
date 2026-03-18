@@ -25,7 +25,7 @@ MIN_TRADE_SIZE = 25.0        # Min $25 per trade
 MAX_CONCURRENT = 10          # Max 10 open packages
 MAX_TOTAL_EXPOSURE = 2000.0  # Max $2000 total
 SCAN_INTERVAL = 300          # 5 minutes between scans
-MIN_SPREAD_PCT = 2.0         # Minimum 2% spread to trade
+MIN_SPREAD_PCT = 5.0         # Minimum 5% spread (must exceed ~4% round-trip fees)
 
 
 class AutoTrader:
