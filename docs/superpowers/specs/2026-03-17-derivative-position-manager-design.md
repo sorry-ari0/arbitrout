@@ -450,10 +450,12 @@ src/execution/              # EXISTING package -- platform-specific executors
   coinbase_spot_executor.py (~130 lines)  -- Coinbase Advanced Trade (NOT the prediction adapter)
   predictit_executor.py     (~120 lines)  -- session auth, 850-share cap validation
   robinhood_advisor.py      (~80 lines)   -- Scrapling price fetch + recommend()
+  paper_executor.py         (~120 lines)  -- wraps any executor for paper trading simulation
 
 data/
-  positions.json            (runtime, created on first package)
-  execution_log.json        (runtime, created on first trade)
+  positions.json            (runtime, live positions)
+  paper_portfolio.json      (runtime, paper trading state + performance stats)
+  execution_log.json        (runtime, append-only trade audit)
 ```
 
 **Total: ~1,860-2,060 lines across 13 files** (revised estimates, issue #16)
@@ -483,3 +485,119 @@ data/
 - Platform outage (3+ consecutive errors): freeze platform exits, alert user
 - Stock advisory legs: never auto-sold, recommendation only
 - PredictIt 850-share cap: validated at creation time, rejected if exceeded (issue #12)
+
+## Paper Trading Mode
+
+Test the full system with fake money before risking real capital. Everything runs identically — real market prices, real AI decisions, real exit triggers — but trades are simulated.
+
+### Configuration
+
+- `PAPER_TRADING=true` env var (default: `true` — must explicitly set `false` for live)
+- `PAPER_STARTING_BALANCE=10000` — fake USD balance per platform (default $10,000)
+- Paper mode is the **default** — you must opt-in to live trading
+
+### PaperExecutor (`src/execution/paper_executor.py`, ~120 lines)
+
+Wraps any real executor. Uses the real executor's `get_current_price()` for live market data but simulates all buys and sells:
+
+```python
+class PaperExecutor:
+    def __init__(self, real_executor: BaseExecutor, starting_balance: float = 10000.0):
+        self.real = real_executor          # for get_current_price() only
+        self.balance = starting_balance    # fake USD
+        self.positions = {}                # asset_id -> {quantity, avg_entry_price}
+        self.trade_history = []            # all paper trades
+
+    async def buy(self, asset_id, amount_usd) -> ExecutionResult:
+        price = await self.real.get_current_price(asset_id)
+        quantity = amount_usd / price
+        self.balance -= amount_usd
+        # update positions, log trade
+        return ExecutionResult(success=True, filled_price=price, filled_quantity=quantity, fees=0, tx_id=f"paper_{uuid}")
+
+    async def sell(self, asset_id, quantity) -> ExecutionResult:
+        price = await self.real.get_current_price(asset_id)
+        proceeds = quantity * price
+        self.balance += proceeds
+        # update positions, log trade
+        return ExecutionResult(success=True, filled_price=price, filled_quantity=quantity, fees=0, tx_id=f"paper_{uuid}")
+
+    async def get_current_price(self, asset_id) -> float:
+        return await self.real.get_current_price(asset_id)  # real prices always
+
+    async def get_balance(self) -> BalanceResult:
+        return BalanceResult(available=self.balance, total=self.balance + sum(pos values))
+
+    def is_configured(self) -> bool:
+        return True  # paper mode always works
+```
+
+### How It Integrates
+
+`position_manager.py` checks `PAPER_TRADING` at startup:
+```python
+if os.environ.get("PAPER_TRADING", "true").lower() == "true":
+    executors = {name: PaperExecutor(real_exec) for name, real_exec in real_executors.items()}
+```
+
+Everything downstream (exit_engine, ai_advisor, position_router, UI) is completely unaware. Same code path, same triggers, same AI review — just fake money.
+
+### Paper Portfolio State
+
+Stored separately in `data/paper_portfolio.json`:
+```python
+{
+    "mode": "paper",
+    "starting_balance": 10000.0,
+    "started_at": "2026-03-17T12:00:00Z",
+    "platforms": {
+        "polymarket": {"balance": 9200.0, "starting": 10000.0},
+        "kalshi": {"balance": 10350.0, "starting": 10000.0},
+        "coinbase_spot": {"balance": 9800.0, "starting": 10000.0}
+    },
+    "total_pnl": 350.0,
+    "total_pnl_pct": 1.17,
+    "total_trades": 42,
+    "win_rate": 0.64,
+    "best_trade": {"package_id": "pkg_abc", "pnl": 45.20, "pnl_pct": 18.1},
+    "worst_trade": {"package_id": "pkg_def", "pnl": -12.30, "pnl_pct": -8.2},
+    "sharpe_ratio": 1.42,
+    "daily_pnl_history": [{"date": "2026-03-17", "pnl": 12.50}, ...]
+}
+```
+
+### Performance Tracking
+
+The paper executor tracks comprehensive stats:
+- **Win rate** — % of closed packages with positive P&L
+- **Total P&L** — absolute and percentage from starting balance
+- **Best/worst trade** — for learning what works
+- **Sharpe ratio** — risk-adjusted return (daily P&L stddev)
+- **Daily P&L curve** — for the UI to chart performance over time
+- **Trade count** — by strategy type, by platform, by exit trigger
+
+### UI Indicators
+
+- Green blinking banner: `PAPER MODE — $10,000 starting balance — Not real money`
+- Performance card: win rate, total P&L, Sharpe ratio, trade count
+- Daily P&L chart (sparkline in terminal theme)
+- When switching to live: confirmation dialog with paper trading stats shown as reference
+
+### Going Live
+
+When ready to trade real money:
+1. Set `PAPER_TRADING=false`
+2. Configure real API keys (`POLYMARKET_PRIVATE_KEY`, etc.)
+3. System checks all executors are `is_configured()` before allowing live trades
+4. Paper trading history preserved in `data/paper_portfolio.json` for comparison
+5. Live positions stored in separate `data/positions.json`
+
+## Dexter Integration (Financial Datasets API)
+
+The AI advisor's Claude API calls are enriched with fundamental data from the Financial Datasets API (already configured in the codebase as `FINANCIAL_DATASETS_API_KEY`):
+
+- When reviewing exit decisions on stock-related prediction markets: include company financials, insider trades, analyst estimates
+- When reviewing crypto hedge positions: include historical price data and volatility metrics
+- When assessing theta decay: include news events that could accelerate contract resolution
+
+This data is optional — the AI advisor works without it, but makes better decisions with it. The Financial Datasets API free tier covers AAPL, NVDA, MSFT; paid tier covers the full market.
