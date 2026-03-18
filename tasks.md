@@ -269,7 +269,7 @@
 
 ## Stub Rewrites (broken code from dispatcher)
 
-38. TODO - Rewrite commodities adapter to use correct BaseAdapter pattern
+38. COMPLETED - Rewrite commodities adapter to use correct BaseAdapter pattern
    - Current `src/adapters/commodities.py` has wrong imports (uses `from adapters.registry import BaseAdapter` instead of `from adapters.base`)
    - Has custom NormalizedEvent Pydantic model instead of using the dataclass from `adapters.models`
    - Uses `random.uniform()` for price noise instead of real implied probabilities
@@ -343,6 +343,7 @@
    - Add `/api/arbitrage/hedge-packages` endpoint returning available hedged positions with P&L scenarios
    - Add UI section in arbitrout.js showing hedge packages with visual payoff diagrams
    - File: src/execution/crypto_hedger.py (new), src/arbitrage_router.py, src/static/js/arbitrout.js
+
 
 
 
