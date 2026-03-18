@@ -51,6 +51,24 @@ except ImportError as _arb_err:
     logger.warning("Arbitrage modules not available: %s", _arb_err)
     _ARBITRAGE_AVAILABLE = False
 
+# --- Position system imports ---
+try:
+    from positions.position_router import router as position_router, init_position_system
+    from positions.position_manager import PositionManager
+    from positions.exit_engine import ExitEngine
+    from positions.ai_advisor import AIAdvisor
+    from positions.wallet_config import is_paper_mode, get_paper_balance, get_configured_platforms
+    from execution.base_executor import BaseExecutor
+    from execution.paper_executor import PaperExecutor
+    from execution.polymarket_executor import PolymarketExecutor
+    from execution.kalshi_executor import KalshiExecutor
+    from execution.coinbase_spot_executor import CoinbaseSpotExecutor
+    from execution.predictit_executor import PredictItExecutor
+    _POSITIONS_AVAILABLE = True
+except ImportError as _pos_err:
+    logger.warning("Position system not available: %s", _pos_err)
+    _POSITIONS_AVAILABLE = False
+
 # --- C1 fix: API Key Authentication ---
 API_KEY = os.environ.get("LOBSTERMINAL_API_KEY", "dev-local-only")
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -148,9 +166,47 @@ async def lifespan(app: FastAPI):
         logger.info("Arbitrage subsystem initialized with %d adapters", len(arb_registry.list_platforms()))
         # Start auto-scan background task
         scan_task = asyncio.create_task(_auto_scan_loop())
+    # Init Position system
+    _exit_task = None
+    if _POSITIONS_AVAILABLE:
+        try:
+            executors = {}
+            poly_exec = PolymarketExecutor()
+            if poly_exec.is_configured(): executors["polymarket"] = poly_exec
+            kalshi_exec = KalshiExecutor()
+            if kalshi_exec.is_configured(): executors["kalshi"] = kalshi_exec
+            coinbase_exec = CoinbaseSpotExecutor()
+            if coinbase_exec.is_configured(): executors["coinbase_spot"] = coinbase_exec
+            predictit_exec = PredictItExecutor()
+            if predictit_exec.is_configured(): executors["predictit"] = predictit_exec
+
+            if is_paper_mode():
+                # Wrap all executors in PaperExecutor
+                paper_executors = {}
+                for name, exec_ in executors.items():
+                    paper_executors[name] = PaperExecutor(exec_, starting_balance=get_paper_balance())
+                # If no real executors configured, create a paper-only executor with a dummy
+                if not paper_executors:
+                    paper_executors["polymarket"] = PaperExecutor(PolymarketExecutor(), starting_balance=get_paper_balance())
+                executors = paper_executors
+                logger.info("Position system running in PAPER TRADING mode (balance=$%.2f)", get_paper_balance())
+
+            pm = PositionManager(data_dir=DATA_DIR / "positions", executors=executors)
+            ai = AIAdvisor() if os.environ.get("ANTHROPIC_API_KEY") else None
+            exit_engine = ExitEngine(pm, ai_advisor=ai)
+            init_position_system(pm, exit_engine, ai)
+            exit_engine.start()
+            _exit_task = True
+            logger.info("Position system initialized with %d executors", len(executors))
+        except Exception as e:
+            logger.error("Position system init failed: %s", e)
+
     logger.info("Lobsterminal started on port 8500")
     yield
-    # Shutdown scheduler on app exit
+    # Shutdown
+    if _POSITIONS_AVAILABLE and _exit_task:
+        try: exit_engine.stop()
+        except: pass
     if scheduler:
         scheduler.shutdown(wait=False)
     if _ARBITRAGE_AVAILABLE:
@@ -165,7 +221,7 @@ app = FastAPI(title="Lobsterminal", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://127.0.0.1:8500", "http://localhost:8500"],
-    allow_methods=["GET", "POST", "DELETE"],
+    allow_methods=["GET", "POST", "DELETE", "PATCH"],
     allow_headers=["X-API-Key"],
 )
 
@@ -193,6 +249,9 @@ app.include_router(strategy_router)
 
 if _ARBITRAGE_AVAILABLE:
     app.include_router(arbitrage_router)
+
+if _POSITIONS_AVAILABLE:
+    app.include_router(position_router)
 
 # --- Research API Routes ---
 try:
