@@ -245,88 +245,99 @@ class AutoTrader:
 
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
-                # Search for active crypto markets
-                for keyword in crypto_keywords[:4]:  # Limit to avoid rate limiting
+                # Fetch high-volume active markets in bulk, then filter for crypto
+                seen_ids = set()
+                all_markets = []
+                for offset in [0, 50]:
                     try:
                         r = await client.get(f"{GAMMA_API}/markets", params={
                             "closed": "false",
-                            "limit": "20",
+                            "limit": "100",
+                            "offset": str(offset),
                             "order": "volume",
                             "ascending": "false",
-                            "tag": keyword,
                         })
-                        if r.status_code != 200:
-                            continue
+                        if r.status_code == 200:
+                            batch = r.json()
+                            if isinstance(batch, list):
+                                all_markets.extend(batch)
+                    except Exception:
+                        pass
+                    await asyncio.sleep(1)
 
-                        markets = r.json()
-                        if not isinstance(markets, list):
-                            continue
+                logger.info("Auto trader: fetched %d markets from Polymarket", len(all_markets))
 
-                        for market in markets:
-                            # Filter for ones with reasonable prices (not 0 or 1)
-                            outcomes = market.get("outcomePrices", [])
-                            if not outcomes or len(outcomes) < 1:
-                                continue
+                for market in all_markets:
+                    question = (market.get("question") or "").lower()
+                    # Filter: must contain crypto keyword
+                    if not any(kw in question for kw in crypto_keywords):
+                        continue
 
-                            try:
-                                yes_price = float(outcomes[0]) if outcomes[0] else 0.5
-                            except (ValueError, TypeError):
-                                yes_price = 0.5
+                    mid = market.get("conditionId") or market.get("id", "")
+                    if not mid or mid in seen_ids:
+                        continue
+                    seen_ids.add(mid)
 
-                            no_price = 1.0 - yes_price
+                    # Parse outcomePrices — it's a JSON string like '["0.475", "0.525"]'
+                    raw_prices = market.get("outcomePrices", "[]")
+                    if isinstance(raw_prices, str):
+                        try:
+                            import json as _json
+                            parsed = _json.loads(raw_prices)
+                        except Exception:
+                            parsed = []
+                    else:
+                        parsed = raw_prices
 
-                            # Skip if too close to resolved (>0.95 or <0.05)
-                            if yes_price > 0.95 or yes_price < 0.05:
-                                continue
+                    if not parsed or len(parsed) < 1:
+                        continue
 
-                            # Calculate potential profit from mispricing
-                            # In paper mode, we simulate buying at current price
-                            # Profit comes from price movement toward resolution
-                            title = market.get("question", market.get("title", ""))
-                            market_id = market.get("conditionId", market.get("id", ""))
-                            end_date = market.get("endDate", market.get("expirationDate", ""))
+                    try:
+                        yes_price = float(parsed[0]) if parsed[0] else 0.5
+                    except (ValueError, TypeError):
+                        yes_price = 0.5
 
-                            if not market_id:
-                                continue
+                    no_price = 1.0 - yes_price
 
-                            # Check expiry
-                            days_to_expiry = 999
-                            if end_date:
-                                try:
-                                    exp = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
-                                    days_to_expiry = (exp.date() - date.today()).days
-                                except (ValueError, TypeError):
-                                    pass
+                    # Skip if too close to resolved (>0.95 or <0.05)
+                    if yes_price > 0.95 or yes_price < 0.05:
+                        continue
 
-                            # Score based on how far from 0.5 (stronger conviction = more profit potential)
-                            conviction = abs(yes_price - 0.5)
-                            volume = float(market.get("volume", 0) or 0)
+                    title = market.get("question", market.get("title", ""))
+                    end_date = market.get("endDate", market.get("expirationDate", ""))
 
-                            # Calculate "spread" as profit potential
-                            # If YES is 0.7, buying YES could profit 0.3 (30%) if it resolves YES
-                            # If YES is 0.3, buying NO could profit 0.3 (30%) if it resolves NO
-                            profit_potential = max(1.0 - yes_price, yes_price) - 0.5  # Excess over coin flip
+                    # Check expiry
+                    days_to_expiry = 999
+                    if end_date:
+                        try:
+                            exp = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+                            days_to_expiry = (exp.date() - date.today()).days
+                        except (ValueError, TypeError):
+                            pass
 
-                            opp = {
-                                "title": title,
-                                "canonical_title": title,
-                                "buy_yes_platform": "polymarket",
-                                "buy_yes_price": yes_price,
-                                "buy_no_platform": "polymarket",
-                                "buy_no_price": no_price,
-                                "buy_yes_market_id": market_id,
-                                "buy_no_market_id": market_id,
-                                "profit_pct": round(profit_potential * 100, 1),
-                                "expiry": end_date[:10] if end_date else "",
-                                "days_to_expiry": days_to_expiry,
-                                "volume": volume,
-                                "conviction": round(conviction, 3),
-                            }
-                            opportunities.append(opp)
+                    # Score based on conviction (distance from 0.5)
+                    conviction = abs(yes_price - 0.5)
+                    volume = float(market.get("volumeNum", 0) or market.get("volume", 0) or 0)
 
-                    except Exception as e:
-                        logger.debug("Auto trader: Polymarket query for '%s' failed: %s", keyword, e)
-                    await asyncio.sleep(1)  # Rate limit between queries
+                    # Profit potential: how much can be gained if market resolves in the favored direction
+                    profit_potential = max(1.0 - yes_price, yes_price) - 0.5
+
+                    opp = {
+                        "title": title,
+                        "canonical_title": title,
+                        "buy_yes_platform": "polymarket",
+                        "buy_yes_price": yes_price,
+                        "buy_no_platform": "polymarket",
+                        "buy_no_price": no_price,
+                        "buy_yes_market_id": mid,
+                        "buy_no_market_id": mid,
+                        "profit_pct": round(profit_potential * 100, 1),
+                        "expiry": end_date[:10] if end_date else "",
+                        "days_to_expiry": days_to_expiry,
+                        "volume": volume,
+                        "conviction": round(conviction, 3),
+                    }
+                    opportunities.append(opp)
 
         except Exception as e:
             logger.warning("Auto trader: Polymarket scan failed: %s", e)
