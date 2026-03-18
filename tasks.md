@@ -260,7 +260,7 @@
    - Never log or expose private keys in responses
    - File: src/execution/wallet_config.py, src/server.py
 
-37. TODO - Generate pixel art for Arbitrout using Groq API
+37. BLOCKED - Generate pixel art for Arbitrout using Groq API
    - Use Groq's image generation API to create pixel art logo/mascot for the Arbitrout dashboard
    - Terminal-style pixel art aesthetic matching the green-on-black theme
    - Generate: logo, favicon, loading animation sprites
@@ -343,6 +343,7 @@
    - Add `/api/arbitrage/hedge-packages` endpoint returning available hedged positions with P&L scenarios
    - Add UI section in arbitrout.js showing hedge packages with visual payoff diagrams
    - File: src/execution/crypto_hedger.py (new), src/arbitrage_router.py, src/static/js/arbitrout.js
+
 
 
 
