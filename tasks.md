@@ -252,7 +252,7 @@
    - Show execution status: pending → verifying → executing → completed/failed
    - File: src/arbitrage_router.py, src/static/js/arbitrout.js
 
-36. TODO - Add wallet/account configuration and balance management
+36. BLOCKED - Add wallet/account configuration and balance management
    - Create `src/execution/wallet_config.py` for managing API keys and wallet credentials
    - Support env vars: POLYMARKET_PRIVATE_KEY, POLYMARKET_FUNDER_ADDRESS, KALSHI_API_KEY, KALSHI_RSA_PRIVATE_KEY
    - Add `/api/execution/balances` endpoint showing available balance on each platform
@@ -343,6 +343,7 @@
    - Add `/api/arbitrage/hedge-packages` endpoint returning available hedged positions with P&L scenarios
    - Add UI section in arbitrout.js showing hedge packages with visual payoff diagrams
    - File: src/execution/crypto_hedger.py (new), src/arbitrage_router.py, src/static/js/arbitrout.js
+
 
 
 
