@@ -300,7 +300,7 @@
    - Prevent race conditions between auto-scan loop and manual scan triggers
    - File: src/arbitrage_engine.py
 
-42. TODO - Add integration tests for adapter fetch cycles
+42. BLOCKED - Add integration tests for adapter fetch cycles
    - Create `tests/test_adapters_integration.py`
    - Test each adapter's fetch_events() returns valid NormalizedEvent list (or gracefully fails)
    - Mock HTTP responses for deterministic testing
@@ -343,6 +343,7 @@
    - Add `/api/arbitrage/hedge-packages` endpoint returning available hedged positions with P&L scenarios
    - Add UI section in arbitrout.js showing hedge packages with visual payoff diagrams
    - File: src/execution/crypto_hedger.py (new), src/arbitrage_router.py, src/static/js/arbitrout.js
+
 
 
 
