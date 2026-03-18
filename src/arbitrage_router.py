@@ -1,6 +1,6 @@
 """Arbitrage API router — all /api/arbitrage/* endpoints."""
 import logging
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -44,6 +44,11 @@ class SaveRequest(BaseModel):
     match_id: str
     canonical_title: str = ""
     category: str = ""
+
+class ExecuteRequest(BaseModel):
+    opportunity_id: str
+    amount_usd: float
+    auto_confirm: bool = False
 
 
 # ============================================================
@@ -120,6 +125,46 @@ async def delete_saved(match_id: str):
     """Remove a bookmark."""
     saved = unsave_market(match_id)
     return JSONResponse(content=saved)
+
+
+@router.post("/execute")
+async def execute_arbitrage(req: ExecuteRequest):
+    """Execute an arbitrage opportunity."""
+    scanner = get_scanner()
+    # Placeholder for re-fetching prices, verifying spread, calculating profit after fees
+    # In a real implementation, this would involve more complex logic to
+    # interact with platform adapters to get current prices, check liquidity,
+    # calculate exact allocations, and then place trades.
+    opportunity = next((o for o in scanner.get_opportunities() if o.get('id') == req.opportunity_id), None)
+
+    if not opportunity:
+        raise HTTPException(status_code=404, detail="Opportunity not found or no longer valid.")
+
+    # Simulate pre-flight check and execution
+    logger.info(f"Pre-flight check for opportunity {req.opportunity_id} with amount ${req.amount_usd:.2f}")
+    current_profit_pct = opportunity.get('profit_pct', 0)
+    expected_profit_usd = req.amount_usd * (current_profit_pct / 100)
+
+    if current_profit_pct <= 0:
+        raise HTTPException(status_code=400, detail="Spread no longer exists or is negative.")
+
+    if not req.auto_confirm:
+        # In a real scenario, this would return a confirmation prompt to the user
+        # or require a separate confirmation step in a multi-step execution flow.
+        logger.info("Manual confirmation required, but not implemented in this mock.")
+
+    # Simulate execution
+    logger.info(f"Executing trade for opportunity {req.opportunity_id} with ${req.amount_usd:.2f}...")
+    # This is where actual trade placement would happen via platform adapters.
+
+    return JSONResponse(content={
+        "status": "completed",
+        "opportunity_id": req.opportunity_id,
+        "amount_usd": req.amount_usd,
+        "expected_profit_pct": current_profit_pct,
+        "expected_profit_usd": expected_profit_usd,
+        "message": "Trade execution simulated successfully."
+    })
 
 
 # ============================================================
