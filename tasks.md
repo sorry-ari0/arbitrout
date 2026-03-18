@@ -206,7 +206,7 @@
    - Add `/api/arbitrage/cross-asset` endpoint returning matched opportunities with hedge instructions
    - File: src/cross_asset_matcher.py (new), src/arbitrage_router.py
 
-31. TODO - Research best arbitrage strategies before implementation
+31. BLOCKED - Research best arbitrage strategies before implementation
    - Create `src/research/arbitrage_strategies.py` that uses scrapling to research and document the best approaches for:
      - Prediction market arbitrage (academic papers, blog posts from experienced traders)
      - Crypto spot vs prediction market hedging
@@ -218,6 +218,7 @@
    - Store findings in `data/strategy_research.json` with: strategy_name, description, expected_edge_pct, risk_factors, sources
    - This research should inform the implementation of tasks 27-30 above
    - File: src/research/arbitrage_strategies.py (new)
+
 
 
 
