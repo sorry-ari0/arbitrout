@@ -625,6 +625,226 @@ function removeSaved(matchId) {
     }).then(function() { loadSavedMarkets(); });
 }
 
+// === POSITIONS DASHBOARD ===
+var positionsData = { packages: [], dashboard: {}, alerts: [], config: {} };
+var posWs = null;
+
+function loadPositionsConfig() {
+    fetch('/api/derivatives/config').then(function(r) { return r.json(); }).then(function(data) {
+        positionsData.config = data;
+        var banner = document.getElementById('pos-paper-banner');
+        if (banner) {
+            banner.style.display = data.paper_mode ? 'block' : 'none';
+        }
+    }).catch(function() {});
+}
+
+function loadPositionsDashboard() {
+    fetch('/api/derivatives/dashboard').then(function(r) { return r.json(); }).then(function(data) {
+        positionsData.dashboard = data;
+        renderPortfolioBar(data);
+    }).catch(function() {});
+}
+
+function loadPositionsPackages() {
+    fetch('/api/derivatives/packages').then(function(r) { return r.json(); }).then(function(data) {
+        positionsData.packages = data.packages || [];
+        renderPackages(positionsData.packages);
+    }).catch(function() {});
+}
+
+function loadPositionsAlerts() {
+    fetch('/api/derivatives/dashboard/alerts').then(function(r) { return r.json(); }).then(function(data) {
+        positionsData.alerts = data.alerts || [];
+        renderAlerts(positionsData.alerts);
+    }).catch(function() {});
+}
+
+function renderPortfolioBar(stats) {
+    var bar = document.getElementById('pos-portfolio-stats');
+    if (!bar) return;
+    while (bar.firstChild) bar.removeChild(bar.firstChild);
+
+    var items = [
+        { label: 'OPEN', value: stats.open_packages || 0 },
+        { label: 'INVESTED', value: '$' + (stats.total_invested || 0).toFixed(2) },
+        { label: 'P&L', value: '$' + (stats.unrealized_pnl || 0).toFixed(2), cls: (stats.unrealized_pnl || 0) >= 0 ? 'positive' : 'negative' },
+        { label: 'WIN RATE', value: ((stats.win_rate || 0) * 100).toFixed(0) + '%' }
+    ];
+
+    items.forEach(function(item) {
+        var stat = document.createElement('div');
+        stat.className = 'pos-stat';
+        var label = document.createElement('div');
+        label.className = 'pos-stat-label';
+        label.textContent = item.label;
+        var val = document.createElement('div');
+        val.className = 'pos-stat-value' + (item.cls ? ' ' + item.cls : '');
+        val.textContent = item.value;
+        stat.appendChild(label);
+        stat.appendChild(val);
+        bar.appendChild(stat);
+    });
+}
+
+function renderPackages(packages) {
+    var container = document.getElementById('pos-packages-list');
+    if (!container) return;
+    while (container.firstChild) container.removeChild(container.firstChild);
+
+    if (!packages.length) {
+        var empty = document.createElement('div');
+        empty.className = 'arb-empty';
+        empty.textContent = 'No active positions';
+        container.appendChild(empty);
+        return;
+    }
+
+    packages.forEach(function(pkg) {
+        var card = document.createElement('div');
+        card.className = 'pos-package';
+
+        // Header
+        var header = document.createElement('div');
+        header.className = 'pos-pkg-header';
+        var name = document.createElement('span');
+        name.className = 'pos-pkg-name';
+        name.textContent = pkg.name || pkg.id;
+        var pnl = document.createElement('span');
+        pnl.className = 'pos-pkg-pnl';
+        var pnlVal = pkg.unrealized_pnl || 0;
+        pnl.textContent = (pnlVal >= 0 ? '+' : '') + '$' + pnlVal.toFixed(2);
+        pnl.style.color = pnlVal >= 0 ? 'var(--arb-green)' : 'var(--arb-red)';
+        var badge = document.createElement('span');
+        badge.className = 'pos-badge ' + (pkg.itm_status || 'atm').toLowerCase();
+        badge.textContent = pkg.itm_status || 'ATM';
+        header.appendChild(name);
+        header.appendChild(badge);
+        header.appendChild(pnl);
+        card.appendChild(header);
+
+        // Legs
+        (pkg.legs || []).forEach(function(leg) {
+            var row = document.createElement('div');
+            row.className = 'pos-leg-row';
+            var platform = document.createElement('span');
+            platform.className = 'pos-leg-platform';
+            platform.textContent = leg.platform;
+            var label = document.createElement('span');
+            label.className = 'pos-leg-label';
+            label.textContent = leg.asset_label || leg.asset_id;
+            var entry = document.createElement('span');
+            entry.textContent = '$' + (leg.entry_price || 0).toFixed(4);
+            var current = document.createElement('span');
+            current.textContent = '$' + (leg.current_price || 0).toFixed(4);
+            current.style.color = (leg.current_price || 0) >= (leg.entry_price || 0) ? 'var(--arb-green)' : 'var(--arb-red)';
+            var status = document.createElement('span');
+            status.className = 'pos-badge ' + (leg.leg_status || 'atm').toLowerCase();
+            status.textContent = leg.leg_status || 'ATM';
+            row.appendChild(platform);
+            row.appendChild(label);
+            row.appendChild(entry);
+            row.appendChild(current);
+            row.appendChild(status);
+            card.appendChild(row);
+        });
+
+        // Actions
+        var actions = document.createElement('div');
+        actions.className = 'pos-pkg-actions';
+        var exitBtn = document.createElement('button');
+        exitBtn.className = 'pos-btn danger';
+        exitBtn.textContent = 'EXIT ALL';
+        exitBtn.addEventListener('click', function() { exitPackage(pkg.id); });
+        actions.appendChild(exitBtn);
+        card.appendChild(actions);
+
+        container.appendChild(card);
+    });
+}
+
+function renderAlerts(alerts) {
+    var container = document.getElementById('pos-alerts-list');
+    if (!container) return;
+    while (container.firstChild) container.removeChild(container.firstChild);
+
+    if (!alerts.length) {
+        var empty = document.createElement('div');
+        empty.className = 'arb-empty';
+        empty.textContent = 'No pending alerts';
+        container.appendChild(empty);
+        return;
+    }
+
+    alerts.forEach(function(alert) {
+        var row = document.createElement('div');
+        row.className = 'pos-alert';
+        var text = document.createElement('span');
+        text.className = 'pos-alert-text';
+        text.textContent = alert.trigger_name + ': ' + (alert.details ? (alert.details.details || '') : '');
+        var btns = document.createElement('div');
+        btns.className = 'pos-alert-actions';
+        var approveBtn = document.createElement('button');
+        approveBtn.className = 'pos-btn';
+        approveBtn.textContent = 'APPROVE';
+        approveBtn.addEventListener('click', function() { approveAlert(alert.id); });
+        var rejectBtn = document.createElement('button');
+        rejectBtn.className = 'pos-btn danger';
+        rejectBtn.textContent = 'REJECT';
+        rejectBtn.addEventListener('click', function() { rejectAlert(alert.id); });
+        btns.appendChild(approveBtn);
+        btns.appendChild(rejectBtn);
+        row.appendChild(text);
+        row.appendChild(btns);
+        container.appendChild(row);
+    });
+}
+
+function exitPackage(pkgId) {
+    fetch('/api/derivatives/packages/' + pkgId + '/exit', { method: 'POST' })
+        .then(function() { loadPositionsPackages(); loadPositionsDashboard(); });
+}
+
+function approveAlert(alertId) {
+    fetch('/api/derivatives/dashboard/alerts/' + alertId + '/approve', { method: 'POST' })
+        .then(function() { loadPositionsAlerts(); loadPositionsPackages(); });
+}
+
+function rejectAlert(alertId) {
+    fetch('/api/derivatives/dashboard/alerts/' + alertId + '/reject', { method: 'POST' })
+        .then(function() { loadPositionsAlerts(); });
+}
+
+function connectPositionsWs() {
+    var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    posWs = new WebSocket(proto + '//' + location.host + '/api/derivatives/ws');
+    posWs.onmessage = function(e) {
+        try {
+            var data = JSON.parse(e.data);
+            if (data.event === 'position_update' || data.event === 'package_created' || data.event === 'package_closed') {
+                loadPositionsPackages();
+                loadPositionsDashboard();
+            }
+            if (data.event === 'escalation') {
+                loadPositionsAlerts();
+            }
+        } catch (err) {}
+    };
+    posWs.onclose = function() { setTimeout(connectPositionsWs, 5000); };
+}
+
+function initPositionsDashboard() {
+    loadPositionsConfig();
+    loadPositionsDashboard();
+    loadPositionsPackages();
+    loadPositionsAlerts();
+    connectPositionsWs();
+    setInterval(function() {
+        loadPositionsDashboard();
+        loadPositionsPackages();
+    }, 30000);
+}
+
 // === INIT ===
 document.addEventListener('DOMContentLoaded', function() {
     var tabLob = document.getElementById('tab-lobsterminal');
@@ -635,5 +855,10 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     if (tabArb) {
         tabArb.addEventListener('click', function() { switchMode('arbitrout'); });
+    }
+
+    // Init positions dashboard if container exists
+    if (document.getElementById('pos-packages-list')) {
+        initPositionsDashboard();
     }
 });

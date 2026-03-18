@@ -326,3 +326,148 @@
     background: var(--arb-border);
     border-radius: 2px;
 }
+
+/* === POSITIONS DASHBOARD === */
+.pos-paper-banner {
+    background: rgba(255, 140, 0, 0.15);
+    border: 1px solid rgba(255, 140, 0, 0.4);
+    color: #ffa726;
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    padding: 6px 12px;
+    text-align: center;
+    letter-spacing: 1px;
+}
+
+.pos-portfolio-bar {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    padding: 8px;
+    border-bottom: 1px solid var(--arb-border);
+}
+
+.pos-stat {
+    text-align: center;
+    font-family: 'Courier New', monospace;
+}
+
+.pos-stat-label {
+    font-size: 9px;
+    color: var(--arb-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.pos-stat-value {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--arb-text);
+}
+
+.pos-stat-value.positive { color: var(--arb-green); }
+.pos-stat-value.negative { color: var(--arb-red); }
+
+/* Package Cards */
+.pos-package {
+    background: var(--arb-card);
+    border: 1px solid var(--arb-border);
+    border-radius: 4px;
+    margin: 6px 0;
+    overflow: hidden;
+}
+
+.pos-pkg-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--arb-border);
+    cursor: pointer;
+}
+
+.pos-pkg-name {
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--arb-text);
+}
+
+.pos-pkg-pnl {
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.pos-badge {
+    display: inline-block;
+    font-family: 'Courier New', monospace;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 3px;
+    letter-spacing: 1px;
+}
+
+.pos-badge.itm { background: rgba(0, 230, 118, 0.15); color: var(--arb-green); }
+.pos-badge.otm { background: rgba(255, 23, 68, 0.15); color: var(--arb-red); }
+.pos-badge.atm { background: rgba(255, 167, 38, 0.15); color: #ffa726; }
+
+/* Leg Rows */
+.pos-leg-row {
+    display: grid;
+    grid-template-columns: 80px 1fr auto auto auto;
+    gap: 8px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--arb-border);
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    color: var(--arb-text);
+}
+
+.pos-leg-platform { color: var(--arb-accent); font-weight: 700; }
+.pos-leg-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.pos-pkg-actions {
+    display: flex;
+    gap: 6px;
+    padding: 6px 12px;
+    justify-content: flex-end;
+}
+
+.pos-btn {
+    background: none;
+    border: 1px solid var(--arb-border);
+    color: var(--arb-text);
+    font-family: 'Courier New', monospace;
+    font-size: 10px;
+    padding: 4px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.pos-btn:hover { border-color: var(--arb-accent); background: rgba(0, 229, 204, 0.1); }
+.pos-btn.danger:hover { border-color: var(--arb-red); background: rgba(255, 23, 68, 0.1); }
+
+/* Alerts Panel */
+.pos-alert {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--arb-border);
+    background: rgba(255, 140, 0, 0.05);
+}
+
+.pos-alert-text {
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    color: #ffa726;
+    flex: 1;
+}
+
+.pos-alert-actions {
+    display: flex;
+    gap: 6px;
+}
