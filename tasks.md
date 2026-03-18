@@ -294,13 +294,13 @@
 
 ## Quality & Infrastructure
 
-41. COMPLETED - Add thread safety to arbitrage scanner shared state
+41. TODO - Add thread safety to arbitrage scanner shared state
    - `_previous_prices` dict and scanner state accessed from multiple async tasks without locks
    - Add asyncio.Lock for scanner state mutations
    - Prevent race conditions between auto-scan loop and manual scan triggers
    - File: src/arbitrage_engine.py
 
-42. BLOCKED - Add integration tests for adapter fetch cycles
+42. TODO - Add integration tests for adapter fetch cycles
    - Create `tests/test_adapters_integration.py`
    - Test each adapter's fetch_events() returns valid NormalizedEvent list (or gracefully fails)
    - Mock HTTP responses for deterministic testing
@@ -313,12 +313,12 @@
    - Use token-based similarity (Jaccard) instead of exact string match
    - File: src/adapters/registry.py or src/arbitrage_engine.py
 
-44. COMPLETED - Add localStorage persistence for arbitrout UI state
+44. TODO - Add localStorage persistence for arbitrout UI state
    - Save sort preference, selected filters, and last viewed opportunity to localStorage
    - Restore on page load so user doesn't lose their view on refresh
    - File: src/static/js/arbitrout.js
 
-45. TODO - Add RSI and MACD indicators to Lobsterminal chart
+45. BLOCKED - Add RSI and MACD indicators to Lobsterminal chart
    - Calculate RSI(14) and MACD(12,26,9) from price history
    - Add as separate panes below the main chart (not overlaid on candles)
    - Match existing Bollinger Bands color scheme
@@ -343,10 +343,6 @@
    - Add `/api/arbitrage/hedge-packages` endpoint returning available hedged positions with P&L scenarios
    - Add UI section in arbitrout.js showing hedge packages with visual payoff diagrams
    - File: src/execution/crypto_hedger.py (new), src/arbitrage_router.py, src/static/js/arbitrout.js
-
-
-
-
 
 
 

@@ -4,15 +4,19 @@ import json
 import logging
 import os
 
-# Load .env file if present
-_env_file = os.path.join(os.path.dirname(__file__), ".env")
-if os.path.exists(_env_file):
-    with open(_env_file) as _f:
-        for _line in _f:
-            _line = _line.strip()
-            if _line and not _line.startswith("#") and "=" in _line:
-                _k, _v = _line.split("=", 1)
-                os.environ.setdefault(_k.strip(), _v.strip())
+# Load .env file if present (keys for trading platforms, AI, etc.)
+try:
+    from positions.wallet_config import load_env_file
+    load_env_file()
+except ImportError:
+    _env_file = os.path.join(os.path.dirname(__file__), ".env")
+    if os.path.exists(_env_file):
+        with open(_env_file) as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if _line and not _line.startswith("#") and "=" in _line:
+                    _k, _v = _line.split("=", 1)
+                    os.environ.setdefault(_k.strip(), _v.strip())
 import random
 import re
 import tempfile
@@ -47,9 +51,30 @@ try:
     from adapters.coinbase import CoinbaseAdapter
     from adapters.crypto_spot import CryptoSpotAdapter
     _ARBITRAGE_AVAILABLE = True
-except ImportError as _arb_err:
+except (ImportError, SyntaxError) as _arb_err:
     logger.warning("Arbitrage modules not available: %s", _arb_err)
     _ARBITRAGE_AVAILABLE = False
+
+# --- Position system imports ---
+try:
+    from positions.position_router import router as position_router, init_position_system
+    from positions.position_manager import PositionManager
+    from positions.exit_engine import ExitEngine
+    from positions.ai_advisor import AIAdvisor
+    from positions.wallet_config import is_paper_mode, get_paper_balance, get_configured_platforms
+    from execution.base_executor import BaseExecutor
+    from execution.paper_executor import PaperExecutor
+    from execution.polymarket_executor import PolymarketExecutor
+    from execution.kalshi_executor import KalshiExecutor
+    from execution.coinbase_spot_executor import CoinbaseSpotExecutor
+    from execution.predictit_executor import PredictItExecutor
+    from positions.trade_journal import TradeJournal
+    from positions.auto_trader import AutoTrader
+    from positions.insider_tracker import InsiderTracker
+    _POSITIONS_AVAILABLE = True
+except (ImportError, SyntaxError) as _pos_err:
+    logger.warning("Position system not available: %s", _pos_err)
+    _POSITIONS_AVAILABLE = False
 
 # --- C1 fix: API Key Authentication ---
 API_KEY = os.environ.get("LOBSTERMINAL_API_KEY", "dev-local-only")
@@ -148,9 +173,87 @@ async def lifespan(app: FastAPI):
         logger.info("Arbitrage subsystem initialized with %d adapters", len(arb_registry.list_platforms()))
         # Start auto-scan background task
         scan_task = asyncio.create_task(_auto_scan_loop())
+    # Init Position system
+    _exit_task = None
+    if _POSITIONS_AVAILABLE:
+        try:
+            executors = {}
+            poly_exec = PolymarketExecutor()
+            if poly_exec.is_configured(): executors["polymarket"] = poly_exec
+            kalshi_exec = KalshiExecutor()
+            if kalshi_exec.is_configured(): executors["kalshi"] = kalshi_exec
+            coinbase_exec = CoinbaseSpotExecutor()
+            if coinbase_exec.is_configured(): executors["coinbase_spot"] = coinbase_exec
+            predictit_exec = PredictItExecutor()
+            if predictit_exec.is_configured(): executors["predictit"] = predictit_exec
+
+            if is_paper_mode():
+                # Wrap all executors in PaperExecutor
+                paper_executors = {}
+                for name, exec_ in executors.items():
+                    paper_executors[name] = PaperExecutor(exec_, starting_balance=get_paper_balance(), use_limit_orders=True)
+                # If no real executors configured, create a paper-only executor with a dummy
+                if not paper_executors:
+                    paper_executors["polymarket"] = PaperExecutor(PolymarketExecutor(), starting_balance=get_paper_balance(), use_limit_orders=True)
+                executors = paper_executors
+                logger.info("Position system running in PAPER TRADING mode (balance=$%.2f)", get_paper_balance())
+
+            journal = TradeJournal(data_dir=DATA_DIR / "positions")
+            pm = PositionManager(data_dir=DATA_DIR / "positions", executors=executors, trade_journal=journal)
+
+            # Rebuild PaperExecutor position state from loaded packages
+            # (PaperExecutor tracks positions in memory, lost on restart)
+            if is_paper_mode():
+                for pkg in pm.list_packages("open"):
+                    for leg in pkg.get("legs", []):
+                        if leg.get("status") != "open":
+                            continue
+                        executor = executors.get(leg.get("platform"))
+                        if executor and hasattr(executor, 'positions'):
+                            asset_id = leg.get("asset_id", "")
+                            qty = leg.get("quantity", 0)
+                            entry_price = leg.get("entry_price", 0)
+                            if asset_id and qty > 0 and entry_price > 0:
+                                if asset_id in executor.positions:
+                                    existing = executor.positions[asset_id]
+                                    total = existing["quantity"] + qty
+                                    existing["avg_entry_price"] = (
+                                        existing["avg_entry_price"] * existing["quantity"] + entry_price * qty
+                                    ) / total
+                                    existing["quantity"] = total
+                                else:
+                                    executor.positions[asset_id] = {
+                                        "quantity": qty, "avg_entry_price": entry_price
+                                    }
+                rebuilt = sum(len(e.positions) for e in executors.values() if hasattr(e, 'positions'))
+                logger.info("Rebuilt %d paper positions from %d open packages", rebuilt, len(pm.list_packages("open")))
+
+            ai = AIAdvisor() if os.environ.get("ANTHROPIC_API_KEY") else None
+            exit_engine = ExitEngine(pm, ai_advisor=ai)
+            exit_engine.start()
+            # Start auto trader (works with or without arbitrage scanner)
+            arb_scanner = get_scanner() if _ARBITRAGE_AVAILABLE else None
+            insider = InsiderTracker(data_dir=DATA_DIR / "positions")
+            insider.start()
+            _auto_trader = AutoTrader(pm, scanner=arb_scanner, insider_tracker=insider)
+            _auto_trader.start()
+            logger.info("Auto trader started — will scan for opportunities every 5 min")
+            init_position_system(pm, exit_engine, ai, trade_journal=journal, auto_trader=_auto_trader, insider_tracker=insider)
+            _exit_task = True
+            logger.info("Position system initialized with %d executors", len(executors))
+        except Exception as e:
+            logger.error("Position system init failed: %s", e)
+
     logger.info("Lobsterminal started on port 8500")
     yield
-    # Shutdown scheduler on app exit
+    # Shutdown
+    if _POSITIONS_AVAILABLE and _exit_task:
+        try:
+            exit_engine.stop()
+            if _auto_trader:
+                _auto_trader.stop()
+        except Exception:
+            pass
     if scheduler:
         scheduler.shutdown(wait=False)
     if _ARBITRAGE_AVAILABLE:
@@ -165,7 +268,7 @@ app = FastAPI(title="Lobsterminal", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://127.0.0.1:8500", "http://localhost:8500"],
-    allow_methods=["GET", "POST", "DELETE"],
+    allow_methods=["GET", "POST", "DELETE", "PATCH"],
     allow_headers=["X-API-Key"],
 )
 
@@ -193,6 +296,9 @@ app.include_router(strategy_router)
 
 if _ARBITRAGE_AVAILABLE:
     app.include_router(arbitrage_router)
+
+if _POSITIONS_AVAILABLE:
+    app.include_router(position_router)
 
 # --- Research API Routes ---
 try:

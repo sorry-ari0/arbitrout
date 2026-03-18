@@ -3,6 +3,8 @@ import json
 import logging
 import time
 from pathlib import Path
+import asyncio
+import threading
 
 from adapters.models import NormalizedEvent, MatchedEvent, ArbitrageOpportunity
 from adapters.registry import AdapterRegistry
@@ -118,6 +120,7 @@ def unsave_market(match_id: str) -> list[dict]:
 # FEED: RECENT PRICE CHANGES
 # ============================================================
 _previous_prices: dict[str, float] = {}  # "platform:event_id" -> yes_price
+_previous_prices_lock = threading.Lock()
 
 
 def compute_feed(events: list[NormalizedEvent], max_items: int = 50) -> list[dict]:
@@ -127,8 +130,9 @@ def compute_feed(events: list[NormalizedEvent], max_items: int = 50) -> list[dic
 
     for ev in events:
         key = f"{ev.platform}:{ev.event_id}"
-        prev = _previous_prices.get(key)
-        _previous_prices[key] = ev.yes_price
+        with _previous_prices_lock:
+            prev = _previous_prices.get(key)
+            _previous_prices[key] = ev.yes_price
 
         if prev is not None and prev != ev.yes_price:
             change = ev.yes_price - prev
@@ -161,26 +165,32 @@ class ArbitrageScanner:
         self._last_opportunities: list[ArbitrageOpportunity] = []
         self._last_feed: list[dict] = []
         self._last_scan_time: float = 0
+        self._lock = threading.Lock()
 
     async def scan(self) -> dict:
         """Run a full scan cycle. Returns summary."""
         # 1. Fetch from all platforms
         events = await self.registry.fetch_all()
-        self._last_events = events
+        with self._lock:
+            self._last_events = events
 
         # 2. Match events
         matched = match_events(events)
-        self._last_matched = matched
+        with self._lock:
+            self._last_matched = matched
 
         # 3. Find arbitrage
         opportunities = find_arbitrage(matched)
-        self._last_opportunities = opportunities
+        with self._lock:
+            self._last_opportunities = opportunities
 
         # 4. Compute feed
         feed = compute_feed(events)
-        self._last_feed = feed
+        with self._lock:
+            self._last_feed = feed
 
-        self._last_scan_time = time.time()
+        with self._lock:
+            self._last_scan_time = time.time()
 
         # 5. Cache to disk
         self._save_cache(events)
@@ -195,13 +205,16 @@ class ArbitrageScanner:
         }
 
     def get_opportunities(self) -> list[dict]:
-        return [o.to_dict() for o in self._last_opportunities]
+        with self._lock:
+            return [o.to_dict() for o in self._last_opportunities]
 
     def get_events(self) -> list[dict]:
-        return [m.to_dict() for m in self._last_matched]
+        with self._lock:
+            return [m.to_dict() for m in self._last_matched]
 
     def get_feed(self) -> list[dict]:
-        return self._last_feed
+        with self._lock:
+            return self._last_feed
 
     def _save_cache(self, events: list[NormalizedEvent]):
         """Persist latest events to disk for offline viewing."""
