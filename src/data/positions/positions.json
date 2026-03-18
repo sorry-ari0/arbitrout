@@ -1,0 +1,244 @@
+{
+  "packages": [
+    {
+      "id": "pkg_1237c1ec257b",
+      "name": "BTC 100k Hedge",
+      "strategy_type": "pure_prediction",
+      "status": "closed",
+      "legs": [
+        {
+          "leg_id": "leg_36108e44",
+          "platform": "polymarket",
+          "type": "prediction_yes",
+          "asset_id": "btc-100k-2026:BUY",
+          "asset_label": "BTC hits 100k by EOY",
+          "entry_price": 0.65,
+          "current_price": 0.65,
+          "quantity": 153.84615384615384,
+          "cost": 100.0,
+          "current_value": 100.0,
+          "expiry": "2026-12-31",
+          "status": "closed",
+          "leg_status": "OTM",
+          "tx_id": "paper_b97ae760ee44",
+          "exit_price": 0.65,
+          "exit_quantity": 153.84615384615384
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_3eb9155e",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 25
+          },
+          "active": true,
+          "created_at": 1773823105.0739322
+        },
+        {
+          "rule_id": "rule_52c6d2da",
+          "type": "stop_loss",
+          "params": {
+            "stop_pct": -20
+          },
+          "active": true,
+          "created_at": 1773823105.0739422
+        },
+        {
+          "rule_id": "rule_c61b3460",
+          "type": "trailing_stop",
+          "params": {
+            "current": 15
+          },
+          "active": true,
+          "created_at": 1773823105.0739677
+        }
+      ],
+      "ai_strategy": "balanced",
+      "execution_log": [
+        {
+          "action": "buy",
+          "leg_id": "leg_36108e44",
+          "platform": "polymarket",
+          "tx_id": "paper_b97ae760ee44",
+          "price": 0.65,
+          "quantity": 153.84615384615384,
+          "fees": 0.0,
+          "timestamp": 1773823106.4994013
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_36108e44",
+          "platform": "polymarket",
+          "tx_id": "paper_8bc323b352fb",
+          "price": 0.65,
+          "trigger": "manual_full_exit",
+          "timestamp": 1773823143.2661347
+        }
+      ],
+      "itm_status": "ATM",
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "total_cost": 100.0,
+      "current_value": 100.0,
+      "peak_value": 100.0,
+      "created_at": 1773823105.073893,
+      "updated_at": 1773823143.2661426,
+      "_platform_errors": 0,
+      "_neg_streak": 0
+    },
+    {
+      "id": "pkg_ac7f1b41557b",
+      "name": "Election Arb",
+      "strategy_type": "cross_platform_arb",
+      "status": "open",
+      "legs": [
+        {
+          "leg_id": "leg_282c4d1c",
+          "platform": "polymarket",
+          "type": "prediction_yes",
+          "asset_id": "election-2026:BUY",
+          "asset_label": "Election YES",
+          "entry_price": 0.55,
+          "current_price": 0.55,
+          "quantity": 90.9090909090909,
+          "cost": 50.0,
+          "current_value": 50.0,
+          "expiry": "2026-12-31",
+          "status": "open",
+          "leg_status": "OTM",
+          "tx_id": "paper_5a331ec2d0e1"
+        },
+        {
+          "leg_id": "leg_8ce1ecd4",
+          "platform": "polymarket",
+          "type": "prediction_no",
+          "asset_id": "election-2026:SELL",
+          "asset_label": "Election NO",
+          "entry_price": 0.38,
+          "current_price": 0.38,
+          "quantity": 131.57894736842104,
+          "cost": 50.0,
+          "current_value": 49.99999999999999,
+          "expiry": "2026-12-31",
+          "status": "open",
+          "leg_status": "OTM",
+          "tx_id": "paper_487831c367a4"
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_46b666d2",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 10
+          },
+          "active": true,
+          "created_at": 1773823142.010039
+        }
+      ],
+      "ai_strategy": "balanced",
+      "execution_log": [
+        {
+          "action": "buy",
+          "leg_id": "leg_282c4d1c",
+          "platform": "polymarket",
+          "tx_id": "paper_5a331ec2d0e1",
+          "price": 0.55,
+          "quantity": 90.9090909090909,
+          "fees": 0.0,
+          "timestamp": 1773823142.2920058
+        },
+        {
+          "action": "buy",
+          "leg_id": "leg_8ce1ecd4",
+          "platform": "polymarket",
+          "tx_id": "paper_487831c367a4",
+          "price": 0.38,
+          "quantity": 131.57894736842104,
+          "fees": 0.0,
+          "timestamp": 1773823142.4778578
+        }
+      ],
+      "itm_status": "ATM",
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "total_cost": 100.0,
+      "current_value": 100.0,
+      "peak_value": 100.0,
+      "created_at": 1773823142.010009,
+      "updated_at": 1773823835.420524,
+      "_platform_errors": 0,
+      "_neg_streak": 0
+    },
+    {
+      "id": "pkg_874e9c397c5e",
+      "name": "ETH Prediction",
+      "strategy_type": "pure_prediction",
+      "status": "closed",
+      "legs": [
+        {
+          "leg_id": "leg_2b477e9b",
+          "platform": "polymarket",
+          "type": "prediction_yes",
+          "asset_id": "eth-5k:BUY",
+          "asset_label": "ETH hits 5k",
+          "entry_price": 0.4,
+          "current_price": 0.4,
+          "quantity": 500.0,
+          "cost": 200.0,
+          "current_value": 200.0,
+          "expiry": "2026-12-31",
+          "status": "closed",
+          "leg_status": "ATM",
+          "tx_id": "paper_a79499592e13",
+          "exit_price": 0.4,
+          "exit_quantity": 500.0
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_e1c1d9ce",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 30
+          },
+          "active": true,
+          "created_at": 1773823286.517418
+        }
+      ],
+      "ai_strategy": "balanced",
+      "execution_log": [
+        {
+          "action": "buy",
+          "leg_id": "leg_2b477e9b",
+          "platform": "polymarket",
+          "tx_id": "paper_a79499592e13",
+          "price": 0.4,
+          "quantity": 500.0,
+          "fees": 0.0,
+          "timestamp": 1773823286.7717915
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_2b477e9b",
+          "platform": "polymarket",
+          "tx_id": "paper_26482760cfbd",
+          "price": 0.4,
+          "trigger": "manual_full_exit",
+          "timestamp": 1773823305.803789
+        }
+      ],
+      "itm_status": "ATM",
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "total_cost": 200.0,
+      "current_value": 200.0,
+      "peak_value": 200.0,
+      "created_at": 1773823286.517369,
+      "updated_at": 1773823305.8077857
+    }
+  ],
+  "alerts": [],
+  "saved_at": 1773823835.4207516
+}

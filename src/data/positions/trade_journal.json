@@ -1,0 +1,51 @@
+{
+  "entries": [
+    {
+      "id": "journal_f3e6cf1b",
+      "package_id": "pkg_874e9c397c5e",
+      "name": "ETH Prediction",
+      "strategy_type": "pure_prediction",
+      "ai_strategy": "balanced",
+      "mode": "paper",
+      "total_cost": 200.0,
+      "exit_value": 200.0,
+      "pnl": 0.0,
+      "pnl_pct": 0.0,
+      "outcome": "flat",
+      "exit_trigger": "manual_full_exit",
+      "legs": [
+        {
+          "leg_id": "leg_2b477e9b",
+          "platform": "polymarket",
+          "type": "prediction_yes",
+          "asset_id": "eth-5k:BUY",
+          "entry_price": 0.4,
+          "exit_price": 0.4,
+          "quantity": 500.0,
+          "cost": 200.0,
+          "exit_value": 200.0,
+          "leg_pnl": 0.0,
+          "leg_pnl_pct": 0.0,
+          "status": "closed"
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_e1c1d9ce",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 30
+          },
+          "active": true,
+          "created_at": 1773823286.517418
+        }
+      ],
+      "hold_duration_hours": 0.0,
+      "peak_value": 200.0,
+      "max_drawdown_from_peak": 0.0,
+      "created_at": 1773823286.517369,
+      "closed_at": 1773823305.8038497
+    }
+  ],
+  "saved_at": 1773823305.8044589
+}

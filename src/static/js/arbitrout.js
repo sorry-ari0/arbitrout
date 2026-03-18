@@ -1,12 +1,15 @@
 // === ARBITROUT FRONTEND ===
 // Prediction market arbitrage scanner UI
 
-let arbMode = 'lobsterminal';
+let arbMode = localStorage.getItem('arbMode') || 'lobsterminal';
 let arbPollingInterval = null;
 let arbScanInterval = null;
 let arbWs = null;
 let selectedOpp = null;
 let feedItems = [];
+
+let lastLoadedOpportunities = []; // To hold opportunities for restoring selected
+let lastSelectedOppId = localStorage.getItem('arbSelectedOppId') || null; // For restoring selected opportunity
 
 // === PIXEL ART (CSS grid of div cells) ===
 function createPixelGrid(colorMap, scale) {
@@ -144,6 +147,7 @@ function showSplash(mode) {
 function switchMode(mode) {
     if (mode === arbMode) return;
     arbMode = mode;
+    localStorage.setItem('arbMode', arbMode); // Save current mode
 
     showSplash(mode);
 
@@ -233,7 +237,7 @@ function loadOpportunities() {
         .catch(function(err) { console.error('Arb fetch error:', err); });
 }
 
-var currentSort = 'profit-high';
+var currentSort = localStorage.getItem('arbCurrentSort') || 'profit-high';
 
 function sortOpportunities(opps) {
     var sorted = opps.slice();
@@ -266,6 +270,7 @@ function createSortDropdown() {
     });
     select.addEventListener('change', function() {
         currentSort = this.value;
+        localStorage.setItem('arbCurrentSort', this.value); // Save sort preference
         loadOpportunities();
     });
     return select;
@@ -274,6 +279,8 @@ function createSortDropdown() {
 function renderOpportunities(opps) {
     var container = document.getElementById('opp-list');
     if (!container) return;
+
+    lastLoadedOpportunities = opps; // Store for potential re-selection
 
     // Clear existing
     while (container.firstChild) {
@@ -297,6 +304,10 @@ function renderOpportunities(opps) {
     opps.forEach(function(opp) {
         var row = document.createElement('div');
         row.className = 'opp-row';
+        row.dataset.matchId = opp.match_id || (opp.matched_event ? opp.matched_event.match_id : null); // Add match ID for selection
+        if (row.dataset.matchId === lastSelectedOppId) {
+            row.classList.add('selected');
+        }
         row.addEventListener('click', function() { showEventDetail(opp); });
 
         var titleEl = document.createElement('div');
@@ -328,11 +339,24 @@ function renderOpportunities(opps) {
 
         container.appendChild(row);
     });
+
+    restoreSelectedOpportunityView(); // Attempt to restore the detailed view
 }
 
 // === EVENT DETAIL ===
 function showEventDetail(opp) {
     selectedOpp = opp;
+    lastSelectedOppId = opp.match_id || (opp.matched_event ? opp.matched_event.match_id : null);
+    localStorage.setItem('arbSelectedOppId', lastSelectedOppId); // Save selected opportunity ID
+
+    // Update selected class on opportunity rows
+    document.querySelectorAll('.opp-row').forEach(function(rowElement) {
+        rowElement.classList.remove('selected');
+        if (rowElement.dataset.matchId === lastSelectedOppId) {
+            rowElement.classList.add('selected');
+        }
+    });
+
     var container = document.getElementById('event-detail');
     if (!container) return;
 
@@ -511,6 +535,20 @@ function showEventDetail(opp) {
     });
     container.appendChild(saveBtn);
 }
+
+// Function to restore the selected opportunity's detailed view
+function restoreSelectedOpportunityView() {
+    var savedOppId = localStorage.getItem('arbSelectedOppId');
+    if (savedOppId && lastLoadedOpportunities.length > 0) {
+        var oppToSelect = lastLoadedOpportunities.find(function(opp) {
+            return (opp.match_id || (opp.matched_event ? opp.matched_event.match_id : null)) === savedOppId;
+        });
+        if (oppToSelect) {
+            showEventDetail(oppToSelect);
+        }
+    }
+}
+
 
 // === FEED ===
 function addFeedItem(item) {
@@ -856,6 +894,9 @@ document.addEventListener('DOMContentLoaded', function() {
     if (tabArb) {
         tabArb.addEventListener('click', function() { switchMode('arbitrout'); });
     }
+
+    // Initialize mode based on saved preference, then load opportunities if in arbitrout mode
+    switchMode(arbMode);
 
     // Init positions dashboard if container exists
     if (document.getElementById('pos-packages-list')) {
