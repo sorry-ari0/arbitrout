@@ -214,6 +214,9 @@ async def lifespan(app: FastAPI):
                             qty = leg.get("quantity", 0)
                             entry_price = leg.get("entry_price", 0)
                             if asset_id and qty > 0 and entry_price > 0:
+                                # C7 fix: deduct leg cost from paper balance to prevent
+                                # inflated balance bypassing exposure limits
+                                leg_cost = leg.get("cost", qty * entry_price)
                                 if asset_id in executor.positions:
                                     existing = executor.positions[asset_id]
                                     total = existing["quantity"] + qty
@@ -225,6 +228,7 @@ async def lifespan(app: FastAPI):
                                     executor.positions[asset_id] = {
                                         "quantity": qty, "avg_entry_price": entry_price
                                     }
+                                executor.balance -= leg_cost
                 rebuilt = sum(len(e.positions) for e in executors.values() if hasattr(e, 'positions'))
                 logger.info("Rebuilt %d paper positions from %d open packages", rebuilt, len(pm.list_packages("open")))
 
@@ -252,6 +256,8 @@ async def lifespan(app: FastAPI):
             exit_engine.stop()
             if _auto_trader:
                 _auto_trader.stop()
+            if insider:
+                insider.stop()
         except Exception:
             pass
     if scheduler:
