@@ -1,0 +1,69 @@
+{
+  "packages": [
+    {
+      "id": "pkg_08820eb257a6",
+      "name": "BTC 100k Hedge",
+      "strategy_type": "pure_prediction",
+      "status": "rollback",
+      "legs": [
+        {
+          "leg_id": "leg_7760b2ee",
+          "platform": "polymarket",
+          "type": "prediction_yes",
+          "asset_id": "btc-100k-2026:BUY",
+          "asset_label": "BTC hits 100k by EOY",
+          "entry_price": 0.65,
+          "current_price": 0.65,
+          "quantity": 153.84615384615384,
+          "cost": 100.0,
+          "current_value": 100.0,
+          "expiry": "2026-12-31",
+          "status": "open",
+          "leg_status": "ATM",
+          "tx_id": null
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_d6556e57",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 25
+          },
+          "active": true,
+          "created_at": 1773821459.5266855
+        },
+        {
+          "rule_id": "rule_df5b45b9",
+          "type": "stop_loss",
+          "params": {
+            "stop_pct": -20
+          },
+          "active": true,
+          "created_at": 1773821459.5266955
+        },
+        {
+          "rule_id": "rule_a54ec249",
+          "type": "trailing_stop",
+          "params": {
+            "current": 15
+          },
+          "active": true,
+          "created_at": 1773821459.526702
+        }
+      ],
+      "ai_strategy": "balanced",
+      "execution_log": [],
+      "itm_status": "ATM",
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "total_cost": 0.0,
+      "current_value": 0.0,
+      "peak_value": 0.0,
+      "created_at": 1773821459.5266333,
+      "updated_at": 1773821461.722239
+    }
+  ],
+  "alerts": [],
+  "saved_at": 1773821461.7238433
+}

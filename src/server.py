@@ -47,7 +47,7 @@ try:
     from adapters.coinbase import CoinbaseAdapter
     from adapters.crypto_spot import CryptoSpotAdapter
     _ARBITRAGE_AVAILABLE = True
-except ImportError as _arb_err:
+except (ImportError, SyntaxError) as _arb_err:
     logger.warning("Arbitrage modules not available: %s", _arb_err)
     _ARBITRAGE_AVAILABLE = False
 
@@ -206,7 +206,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     if _POSITIONS_AVAILABLE and _exit_task:
         try: exit_engine.stop()
-        except: pass
+        except Exception: pass
     if scheduler:
         scheduler.shutdown(wait=False)
     if _ARBITRAGE_AVAILABLE:

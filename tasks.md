@@ -294,13 +294,13 @@
 
 ## Quality & Infrastructure
 
-41. TODO - Add thread safety to arbitrage scanner shared state
+41. COMPLETED - Add thread safety to arbitrage scanner shared state
    - `_previous_prices` dict and scanner state accessed from multiple async tasks without locks
    - Add asyncio.Lock for scanner state mutations
    - Prevent race conditions between auto-scan loop and manual scan triggers
    - File: src/arbitrage_engine.py
 
-42. TODO - Add integration tests for adapter fetch cycles
+42. BLOCKED - Add integration tests for adapter fetch cycles
    - Create `tests/test_adapters_integration.py`
    - Test each adapter's fetch_events() returns valid NormalizedEvent list (or gracefully fails)
    - Mock HTTP responses for deterministic testing
@@ -379,3 +379,8 @@
 
 
 
+<<<<<<< HEAD
+=======
+
+
+>>>>>>> c951ad3dd1d48cdeb82fc872faaf96aa4b8f124a

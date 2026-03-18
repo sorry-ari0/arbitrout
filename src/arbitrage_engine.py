@@ -122,7 +122,7 @@ _previous_prices: dict[str, float] = {}  # "platform:event_id" -> yes_price
 _previous_prices_lock = asyncio.Lock()
 
 
-def compute_feed(events: list[NormalizedEvent], max_items: int = 50) -> list[dict]:
+async def compute_feed(events: list[NormalizedEvent], max_items: int = 50) -> list[dict]:
     """Compute recent price changes for the live feed pane."""
     global _previous_prices
     feed: list[dict] = []
@@ -170,28 +170,26 @@ class ArbitrageScanner:
         """Run a full scan cycle. Returns summary."""
         # 1. Fetch from all platforms
         events = await self.registry.fetch_all()
-        async with self._lock:
-            self._last_events = events
 
         # 2. Match events
         matched = match_events(events)
-        async with self._lock:
-            self._last_matched = matched
 
         # 3. Find arbitrage
         opportunities = find_arbitrage(matched)
-        async with self._lock:
-            self._last_opportunities = opportunities
 
         # 4. Compute feed
-        feed = compute_feed(events)
-        async with self._lock:
-            self._last_feed = feed
+        feed = await compute_feed(events)
 
+        # Acquire lock to update all internal state in one go
         async with self._lock:
+            self._last_events = events
+            self._last_matched = matched
+            self._last_opportunities = opportunities
+            self._last_feed = feed
             self._last_scan_time = time.time()
 
-        # 5. Cache to disk
+        # 5. Cache to disk - this is a side effect using 'events' from this scan,
+        # no need to lock internal state access.
         self._save_cache(events)
 
         return {
@@ -203,15 +201,15 @@ class ArbitrageScanner:
             "scan_time": self._last_scan_time,
         }
 
-    def get_opportunities(self) -> list[dict]:
+    async def get_opportunities(self) -> list[dict]:
         async with self._lock:
             return [o.to_dict() for o in self._last_opportunities]
 
-    def get_events(self) -> list[dict]:
+    async def get_events(self) -> list[dict]:
         async with self._lock:
             return [m.to_dict() for m in self._last_matched]
 
-    def get_feed(self) -> list[dict]:
+    async def get_feed(self) -> list[dict]:
         async with self._lock:
             return self._last_feed
 

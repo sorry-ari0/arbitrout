@@ -258,16 +258,15 @@ class ExitEngine:
             await self._update_prices(pkg)
             self.pm.update_pnl(pkg["id"])
 
-            triggers = evaluate_heuristics(pkg)
-            if not triggers:
-                # Track negative streak
-                if pkg.get("unrealized_pnl", 0) < 0:
-                    pkg["_neg_streak"] = pkg.get("_neg_streak", 0) + 1
-                else:
-                    pkg["_neg_streak"] = 0
-                continue
+            # Track negative streak regardless of triggers
+            if pkg.get("unrealized_pnl", 0) < 0:
+                pkg["_neg_streak"] = pkg.get("_neg_streak", 0) + 1
+            else:
+                pkg["_neg_streak"] = 0
 
-            await self._process_triggers(pkg, triggers)
+            triggers = evaluate_heuristics(pkg)
+            if triggers:
+                await self._process_triggers(pkg, triggers)
 
     async def _update_prices(self, pkg: dict):
         """Fetch current prices for all open legs via their platform executors."""
@@ -282,6 +281,7 @@ class ExitEngine:
                 if price > 0:
                     leg["current_price"] = price
                     leg["current_value"] = leg["quantity"] * price
+                    pkg["_platform_errors"] = 0  # Reset on success
             except Exception as e:
                 logger.warning("Price fetch failed for %s: %s", leg["asset_id"], e)
                 pkg["_platform_errors"] = pkg.get("_platform_errors", 0) + 1

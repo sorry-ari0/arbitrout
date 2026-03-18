@@ -44,7 +44,9 @@ class PredictItExecutor(BaseExecutor):
         try:
             r = await (await self._get_http()).get("/Profile/Shares"); r.raise_for_status()
             return BalanceResult(float(r.json().get("availableBalance",0)), 0)
-        except: return BalanceResult(0,0)
+        except Exception as e:
+            logger.warning("PredictIt get_balance failed: %s", e)
+            return BalanceResult(0,0)
 
     async def get_positions(self) -> list[PositionInfo]: return []
 
@@ -56,7 +58,8 @@ class PredictItExecutor(BaseExecutor):
                 if r.status_code == 200:
                     contracts = r.json().get("contracts",[{}])
                     if contracts: return float(contracts[0].get("lastTradePrice",0.5))
-        except: pass
+        except Exception as e:
+            logger.warning("PredictIt get_current_price failed: %s", e)
         return 0.0
 
     async def close(self):

@@ -2,8 +2,10 @@
 import asyncio
 import json
 import logging
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
+import os
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.security import APIKeyHeader
+from pydantic import BaseModel, Field
 from typing import Optional
 
 logger = logging.getLogger("positions.router")
@@ -15,6 +17,17 @@ _pm = None  # PositionManager
 _exit_engine = None  # ExitEngine
 _ai_advisor = None  # AIAdvisor
 _ws_clients: list[WebSocket] = []
+
+# ── Auth ────────────────────────────────────────────────────────────────────
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+async def _verify_api_key(api_key: str = Depends(_api_key_header)):
+    """Verify API key. Skip in dev mode."""
+    configured_key = os.environ.get("LOBSTERMINAL_API_KEY", "dev-local-only")
+    if configured_key == "dev-local-only":
+        return
+    if not api_key or api_key != configured_key:
+        raise HTTPException(401, "Invalid or missing API key")
 
 
 def init_position_system(pm, exit_engine=None, ai_advisor=None):
@@ -33,36 +46,68 @@ def _require_pm():
 
 # ── Pydantic models ─────────────────────────────────────────────────────────
 
+VALID_STRATEGY_TYPES = {"spot_plus_hedge", "cross_platform_arb", "pure_prediction"}
+VALID_LEG_TYPES = {"spot_buy", "spot_sell", "prediction_yes", "prediction_no", "stock_advisory"}
+VALID_PLATFORMS = {"polymarket", "kalshi", "coinbase_spot", "predictit", "robinhood"}
+
+class LegRequest(BaseModel):
+    platform: str = Field(..., description="Platform name")
+    type: str = Field(..., description="Leg type")
+    asset_id: str = Field(..., min_length=1)
+    asset_label: str = ""
+    entry_price: float = Field(..., gt=0)
+    cost: float = Field(..., gt=0)
+    expiry: str = "2026-12-31"
+
+class RuleRequest(BaseModel):
+    type: str = Field(..., min_length=1)
+    params: dict = Field(default_factory=dict)
+
 class CreatePackageRequest(BaseModel):
-    name: str
+    name: str = Field(..., min_length=1, max_length=200)
     strategy_type: str
-    legs: list[dict]
-    exit_rules: list[dict] = []
+    legs: list[LegRequest] = Field(..., min_length=1)
+    exit_rules: list[RuleRequest] = []
     ai_strategy: str = "balanced"
 
 class UpdatePackageRequest(BaseModel):
     name: Optional[str] = None
-    exit_rules: Optional[list[dict]] = None
+    exit_rules: Optional[list[RuleRequest]] = None
     ai_strategy: Optional[str] = None
 
 class CreateRuleRequest(BaseModel):
-    type: str
-    params: dict
+    type: str = Field(..., min_length=1)
+    params: dict = Field(default_factory=dict)
 
 class UpdateRuleRequest(BaseModel):
     params: Optional[dict] = None
     active: Optional[bool] = None
 
+class ConfirmStockRequest(BaseModel):
+    entry_price: float = Field(..., gt=0)
+    quantity: float = Field(..., gt=0)
+
+
+def _validate_create_request(req: CreatePackageRequest):
+    """Validate package creation inputs."""
+    if req.strategy_type not in VALID_STRATEGY_TYPES:
+        raise HTTPException(400, f"Invalid strategy_type: {req.strategy_type}. Must be one of {VALID_STRATEGY_TYPES}")
+    for i, leg in enumerate(req.legs):
+        if leg.platform not in VALID_PLATFORMS:
+            raise HTTPException(400, f"Leg {i}: invalid platform '{leg.platform}'. Must be one of {VALID_PLATFORMS}")
+        if leg.type not in VALID_LEG_TYPES:
+            raise HTTPException(400, f"Leg {i}: invalid type '{leg.type}'. Must be one of {VALID_LEG_TYPES}")
+
 
 # ── Package CRUD ─────────────────────────────────────────────────────────────
 
 @router.get("/packages")
-async def list_packages(status: Optional[str] = None):
+async def list_packages(status: Optional[str] = None, _=Depends(_verify_api_key)):
     pm = _require_pm()
     return {"packages": pm.list_packages(status)}
 
 @router.get("/packages/{pkg_id}")
-async def get_package(pkg_id: str):
+async def get_package(pkg_id: str, _=Depends(_verify_api_key)):
     pm = _require_pm()
     pkg = pm.get_package(pkg_id)
     if not pkg:
@@ -70,8 +115,9 @@ async def get_package(pkg_id: str):
     return pkg
 
 @router.post("/packages")
-async def create_package(req: CreatePackageRequest):
+async def create_package(req: CreatePackageRequest, _=Depends(_verify_api_key)):
     pm = _require_pm()
+    _validate_create_request(req)
     from .position_manager import create_package as _create, create_leg, create_exit_rule
 
     pkg = _create(req.name, req.strategy_type)
@@ -79,18 +125,18 @@ async def create_package(req: CreatePackageRequest):
 
     for leg_data in req.legs:
         leg = create_leg(
-            platform=leg_data["platform"],
-            leg_type=leg_data["type"],
-            asset_id=leg_data["asset_id"],
-            asset_label=leg_data.get("asset_label", leg_data["asset_id"]),
-            entry_price=leg_data["entry_price"],
-            cost=leg_data["cost"],
-            expiry=leg_data.get("expiry", "2026-12-31"),
+            platform=leg_data.platform,
+            leg_type=leg_data.type,
+            asset_id=leg_data.asset_id,
+            asset_label=leg_data.asset_label or leg_data.asset_id,
+            entry_price=leg_data.entry_price,
+            cost=leg_data.cost,
+            expiry=leg_data.expiry,
         )
         pkg["legs"].append(leg)
 
     for rule_data in req.exit_rules:
-        rule = create_exit_rule(rule_data["type"], rule_data.get("params", {}))
+        rule = create_exit_rule(rule_data.type, rule_data.params)
         pkg["exit_rules"].append(rule)
 
     result = await pm.execute_package(pkg)
@@ -99,7 +145,7 @@ async def create_package(req: CreatePackageRequest):
     return result
 
 @router.patch("/packages/{pkg_id}")
-async def update_package(pkg_id: str, req: UpdatePackageRequest):
+async def update_package(pkg_id: str, req: UpdatePackageRequest, _=Depends(_verify_api_key)):
     pm = _require_pm()
     pkg = pm.get_package(pkg_id)
     if not pkg:
@@ -108,19 +154,18 @@ async def update_package(pkg_id: str, req: UpdatePackageRequest):
         pkg["name"] = req.name
     if req.exit_rules is not None:
         from .position_manager import create_exit_rule
-        pkg["exit_rules"] = [create_exit_rule(r["type"], r.get("params", {})) for r in req.exit_rules]
+        pkg["exit_rules"] = [create_exit_rule(r.type, r.params) for r in req.exit_rules]
     if req.ai_strategy is not None:
         pkg["ai_strategy"] = req.ai_strategy
     pm.save()
     return {"success": True}
 
 @router.delete("/packages/{pkg_id}")
-async def delete_package(pkg_id: str):
+async def delete_package(pkg_id: str, _=Depends(_verify_api_key)):
     pm = _require_pm()
     pkg = pm.get_package(pkg_id)
     if not pkg:
         raise HTTPException(404, "Package not found")
-    # Force-close all legs
     for leg in pkg["legs"]:
         if leg["status"] == "open":
             await pm.exit_leg(pkg_id, leg["leg_id"], trigger="force_close")
@@ -132,7 +177,7 @@ async def delete_package(pkg_id: str):
 # ── Exit actions ─────────────────────────────────────────────────────────────
 
 @router.post("/packages/{pkg_id}/exit")
-async def full_exit(pkg_id: str):
+async def full_exit(pkg_id: str, _=Depends(_verify_api_key)):
     pm = _require_pm()
     pkg = pm.get_package(pkg_id)
     if not pkg:
@@ -146,14 +191,14 @@ async def full_exit(pkg_id: str):
     return {"results": results}
 
 @router.post("/packages/{pkg_id}/exit-leg/{leg_id}")
-async def exit_leg(pkg_id: str, leg_id: str):
+async def exit_leg(pkg_id: str, leg_id: str, _=Depends(_verify_api_key)):
     pm = _require_pm()
     result = await pm.exit_leg(pkg_id, leg_id, trigger="manual_leg_exit")
     await _broadcast({"event": "position_update", "package_id": pkg_id, "leg_id": leg_id})
     return result
 
 @router.post("/packages/{pkg_id}/confirm-stock")
-async def confirm_stock(pkg_id: str):
+async def confirm_stock(pkg_id: str, req: ConfirmStockRequest, _=Depends(_verify_api_key)):
     pm = _require_pm()
     pkg = pm.get_package(pkg_id)
     if not pkg:
@@ -161,6 +206,9 @@ async def confirm_stock(pkg_id: str):
     for leg in pkg["legs"]:
         if leg.get("status") == "advisory":
             leg["status"] = "confirmed"
+            leg["entry_price"] = req.entry_price
+            leg["quantity"] = req.quantity
+            leg["cost"] = req.entry_price * req.quantity
     pm.save()
     return {"success": True}
 
@@ -168,7 +216,7 @@ async def confirm_stock(pkg_id: str):
 # ── Rule CRUD ────────────────────────────────────────────────────────────────
 
 @router.get("/packages/{pkg_id}/rules")
-async def list_rules(pkg_id: str):
+async def list_rules(pkg_id: str, _=Depends(_verify_api_key)):
     pm = _require_pm()
     pkg = pm.get_package(pkg_id)
     if not pkg:
@@ -176,7 +224,7 @@ async def list_rules(pkg_id: str):
     return {"rules": pkg.get("exit_rules", [])}
 
 @router.post("/packages/{pkg_id}/rules")
-async def create_rule(pkg_id: str, req: CreateRuleRequest):
+async def create_rule(pkg_id: str, req: CreateRuleRequest, _=Depends(_verify_api_key)):
     pm = _require_pm()
     pkg = pm.get_package(pkg_id)
     if not pkg:
@@ -188,7 +236,7 @@ async def create_rule(pkg_id: str, req: CreateRuleRequest):
     return rule
 
 @router.patch("/packages/{pkg_id}/rules/{rule_id}")
-async def update_rule(pkg_id: str, rule_id: str, req: UpdateRuleRequest):
+async def update_rule(pkg_id: str, rule_id: str, req: UpdateRuleRequest, _=Depends(_verify_api_key)):
     pm = _require_pm()
     pkg = pm.get_package(pkg_id)
     if not pkg:
@@ -204,7 +252,7 @@ async def update_rule(pkg_id: str, rule_id: str, req: UpdateRuleRequest):
     return rule
 
 @router.delete("/packages/{pkg_id}/rules/{rule_id}")
-async def delete_rule(pkg_id: str, rule_id: str):
+async def delete_rule(pkg_id: str, rule_id: str, _=Depends(_verify_api_key)):
     pm = _require_pm()
     pkg = pm.get_package(pkg_id)
     if not pkg:
@@ -217,23 +265,22 @@ async def delete_rule(pkg_id: str, rule_id: str):
 # ── Dashboard ────────────────────────────────────────────────────────────────
 
 @router.get("/dashboard")
-async def dashboard():
+async def dashboard(_=Depends(_verify_api_key)):
     pm = _require_pm()
     return pm.get_dashboard_stats()
 
 @router.get("/dashboard/alerts")
-async def get_alerts():
+async def get_alerts(_=Depends(_verify_api_key)):
     pm = _require_pm()
     return {"alerts": [a for a in pm.alerts if a["status"] == "pending"]}
 
 @router.post("/dashboard/alerts/{alert_id}/approve")
-async def approve_alert(alert_id: str):
+async def approve_alert(alert_id: str, _=Depends(_verify_api_key)):
     pm = _require_pm()
     alert = next((a for a in pm.alerts if a["id"] == alert_id), None)
     if not alert:
         raise HTTPException(404, "Alert not found")
     alert["status"] = "approved"
-    # Execute the proposed action
     pkg = pm.get_package(alert["package_id"])
     if pkg:
         for leg in pkg["legs"]:
@@ -243,7 +290,7 @@ async def approve_alert(alert_id: str):
     return {"success": True}
 
 @router.post("/dashboard/alerts/{alert_id}/reject")
-async def reject_alert(alert_id: str):
+async def reject_alert(alert_id: str, _=Depends(_verify_api_key)):
     pm = _require_pm()
     alert = next((a for a in pm.alerts if a["id"] == alert_id), None)
     if not alert:
@@ -256,7 +303,7 @@ async def reject_alert(alert_id: str):
 # ── Balances & Config ────────────────────────────────────────────────────────
 
 @router.get("/balances")
-async def get_balances():
+async def get_balances(_=Depends(_verify_api_key)):
     pm = _require_pm()
     balances = {}
     for name, executor in pm.executors.items():
@@ -286,7 +333,6 @@ async def websocket_endpoint(ws: WebSocket):
     _ws_clients.append(ws)
     try:
         while True:
-            # Keep connection alive, listen for pings
             await ws.receive_text()
     except WebSocketDisconnect:
         pass

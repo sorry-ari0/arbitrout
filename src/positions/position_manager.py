@@ -18,7 +18,8 @@ STRATEGY_TYPES = ("spot_plus_hedge", "cross_platform_arb", "pure_prediction")
 
 def create_package(name: str, strategy_type: str) -> dict:
     """Create a new derivative package dict with all required fields."""
-    assert strategy_type in STRATEGY_TYPES, f"Invalid strategy: {strategy_type}"
+    if strategy_type not in STRATEGY_TYPES:
+        raise ValueError(f"Invalid strategy: {strategy_type}. Must be one of {STRATEGY_TYPES}")
     return {
         "id": f"pkg_{uuid.uuid4().hex[:12]}",
         "name": name,
@@ -80,6 +81,7 @@ class PositionManager:
         self.executors = executors  # platform_name -> executor instance
         self.packages: dict[str, dict] = {}
         self.alerts: list[dict] = []  # pending escalation alerts
+        self._lock = asyncio.Lock()
         self._load()
 
     def _load(self):
@@ -146,7 +148,7 @@ class PositionManager:
             current_value += leg_val
 
             # Per-leg ITM/OTM
-            if leg["type"] in ("prediction_yes", "crypto_spot"):
+            if leg["type"] in ("prediction_yes", "spot_buy"):
                 leg["leg_status"] = "ITM" if leg.get("current_price", 0) > leg["entry_price"] else "OTM"
             elif leg["type"] == "prediction_no":
                 leg["leg_status"] = "ITM" if leg.get("current_price", 0) < leg["entry_price"] else "OTM"
@@ -159,10 +161,10 @@ class PositionManager:
         pkg["unrealized_pnl_pct"] = (pkg["unrealized_pnl"] / total_cost * 100) if total_cost > 0 else 0
         pkg["peak_value"] = max(pkg.get("peak_value", 0), current_value)
 
-        # Package-level ITM/OTM
-        if pkg["unrealized_pnl"] > total_cost * 0.01:
+        # Package-level ITM/OTM — no dead zone, straight comparison
+        if pkg["unrealized_pnl"] > 0:
             pkg["itm_status"] = "ITM"
-        elif pkg["unrealized_pnl"] < -total_cost * 0.01:
+        elif pkg["unrealized_pnl"] < 0:
             pkg["itm_status"] = "OTM"
         else:
             pkg["itm_status"] = "ATM"
@@ -172,6 +174,10 @@ class PositionManager:
 
     async def execute_package(self, pkg: dict) -> dict:
         """Execute all legs of a package. Rolls back on failure."""
+        async with self._lock:
+            return await self._execute_package_locked(pkg)
+
+    async def _execute_package_locked(self, pkg: dict) -> dict:
         executed = []
         for leg in pkg["legs"]:
             platform = leg["platform"]
@@ -182,10 +188,14 @@ class PositionManager:
                     leg["status"] = "advisory"
                     leg["tx_id"] = "advisory_only"
                     continue
-                await self._rollback(executed)
+                await self._rollback(pkg, executed)
                 return {"success": False, "error": f"No executor for platform: {platform}"}
 
-            result = await executor.buy(leg["asset_id"], leg["cost"])
+            # Pass entry_price as fallback for paper mode when real feeds unavailable
+            buy_kwargs = {"asset_id": leg["asset_id"], "amount_usd": leg["cost"]}
+            if hasattr(executor, 'real'):  # PaperExecutor
+                buy_kwargs["fallback_price"] = leg["entry_price"]
+            result = await executor.buy(**buy_kwargs)
             if result.success:
                 leg["tx_id"] = result.tx_id
                 leg["entry_price"] = result.filled_price if result.filled_price > 0 else leg["entry_price"]
@@ -200,7 +210,7 @@ class PositionManager:
                 })
             else:
                 logger.error("Leg execution failed for %s: %s", leg["leg_id"], result.error)
-                await self._rollback(executed)
+                await self._rollback(pkg, executed)
                 return {"success": False, "error": f"Leg {leg['leg_id']} failed: {result.error}"}
 
         pkg["total_cost"] = sum(l["cost"] for l in pkg["legs"])
@@ -211,6 +221,10 @@ class PositionManager:
 
     async def exit_leg(self, pkg_id: str, leg_id: str, trigger: str = "manual") -> dict:
         """Exit (sell) a single leg."""
+        async with self._lock:
+            return await self._exit_leg_locked(pkg_id, leg_id, trigger)
+
+    async def _exit_leg_locked(self, pkg_id: str, leg_id: str, trigger: str) -> dict:
         pkg = self.packages.get(pkg_id)
         if not pkg:
             return {"success": False, "error": "Package not found"}
@@ -243,8 +257,8 @@ class PositionManager:
             return {"success": True, "tx_id": result.tx_id}
         return {"success": False, "error": result.error}
 
-    async def _rollback(self, executed_legs: list[dict]):
-        """Attempt to sell already-bought legs on failure."""
+    async def _rollback(self, pkg: dict, executed_legs: list[dict]):
+        """Attempt to sell already-bought legs on failure. Persists rollback status."""
         for leg in executed_legs:
             executor = self.executors.get(leg["platform"])
             if executor:
@@ -259,6 +273,10 @@ class PositionManager:
                 except Exception as e:
                     leg["status"] = "rollback_failed"
                     logger.error("Rollback exception for %s: %s", leg["leg_id"], e)
+        pkg["status"] = "rollback"
+        pkg["updated_at"] = time.time()
+        self.packages[pkg["id"]] = pkg
+        self.save()
 
     def add_alert(self, pkg_id: str, trigger_id: int, trigger_name: str, details: dict):
         """Add an escalation alert for human review."""
