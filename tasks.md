@@ -245,7 +245,7 @@
    - Track execution history in `data/execution_log.json`
    - File: src/execution/arbitrage_executor.py
 
-35. TODO - Add auto-execution API endpoint and UI controls
+35. COMPLETED - Add auto-execution API endpoint and UI controls
    - Add POST `/api/arbitrage/execute` endpoint accepting: `{opportunity_id, amount_usd, auto_confirm: bool}`
    - Pre-flight check: re-fetch prices, verify spread still exists, calculate expected profit after fees
    - Add execution controls to arbitrout.js: "Execute" button on each opportunity, amount input field, confirmation dialog
@@ -343,6 +343,7 @@
    - Add `/api/arbitrage/hedge-packages` endpoint returning available hedged positions with P&L scenarios
    - Add UI section in arbitrout.js showing hedge packages with visual payoff diagrams
    - File: src/execution/crypto_hedger.py (new), src/arbitrage_router.py, src/static/js/arbitrout.js
+
 
 
 
