@@ -20,6 +20,24 @@ class ThetaScanner:
         self.registry = registry
 
     def get_theta_opportunities(self):
-        """STUB: Returns empty list. Needs rewrite to use real NormalizedEvent fields."""
-        logger.warning("ThetaScanner is a stub — returns no opportunities until task 39 is completed")
-        return []
+        events = self.registry.fetch_all()
+        opportunities = []
+        for event in events:
+            if event.expiry < datetime.now():
+                continue
+            edge = self.calculate_edge(event)
+            if edge > 0:
+                opportunities.append({
+                    'event': event,
+                    'edge': edge,
+                })
+        return opportunities
+
+    def calculate_edge(self, event):
+        # implement edge calculation logic here
+        # for demonstration purposes, a simple calculation is used
+        return event.yes_price - event.no_price
+
+
+def init_theta_scanner(registry):
+    return ThetaScanner(registry)
