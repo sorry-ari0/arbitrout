@@ -198,12 +198,10 @@ async def lifespan(app: FastAPI):
             ai = AIAdvisor() if os.environ.get("ANTHROPIC_API_KEY") else None
             exit_engine = ExitEngine(pm, ai_advisor=ai)
             exit_engine.start()
-            # Start auto trader if scanner available
-            _auto_trader = None
-            if _ARBITRAGE_AVAILABLE:
-                _auto_trader = AutoTrader(pm, scanner=_scanner)
-                _auto_trader.start()
-                logger.info("Auto trader started — will scan for opportunities every 5 min")
+            # Start auto trader (works with or without arbitrage scanner)
+            _auto_trader = AutoTrader(pm, scanner=_scanner if _ARBITRAGE_AVAILABLE else None)
+            _auto_trader.start()
+            logger.info("Auto trader started — will scan for opportunities every 5 min")
             init_position_system(pm, exit_engine, ai, trade_journal=journal, auto_trader=_auto_trader)
             _exit_task = True
             logger.info("Position system initialized with %d executors", len(executors))

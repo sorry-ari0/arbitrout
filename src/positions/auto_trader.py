@@ -12,6 +12,11 @@ import logging
 import time
 from datetime import datetime, date, timedelta
 
+try:
+    import httpx
+except ImportError:
+    httpx = None
+
 logger = logging.getLogger("positions.auto_trader")
 
 # Position limits
@@ -72,20 +77,21 @@ class AutoTrader:
         remaining_budget = MAX_TOTAL_EXPOSURE - total_exposure
         remaining_slots = MAX_CONCURRENT - len(open_pkgs)
 
-        # Scan for opportunities
-        if not self.scanner:
-            logger.debug("Auto trader: no scanner available")
-            return
+        # Scan for opportunities — use scanner if available, else query Polymarket directly
+        opportunities = []
+        if self.scanner:
+            try:
+                result = await self.scanner.scan()
+                opportunities = result.get("opportunities", [])
+            except Exception as e:
+                logger.warning("Auto trader: scanner failed: %s", e)
 
-        try:
-            result = await self.scanner.scan()
-        except Exception as e:
-            logger.warning("Auto trader: scan failed: %s", e)
-            return
-
-        opportunities = result.get("opportunities", [])
         if not opportunities:
-            logger.info("Auto trader: no opportunities found")
+            # Direct Polymarket scan for crypto markets
+            opportunities = await self._scan_polymarket_crypto()
+
+        if not opportunities:
+            logger.info("Auto trader: no opportunities found this cycle")
             return
 
         logger.info("Auto trader: found %d opportunities, budget=$%.2f, slots=%d",
@@ -227,6 +233,118 @@ class AutoTrader:
 
         if trades_this_cycle > 0:
             logger.info("Auto trader: opened %d new positions this cycle", trades_this_cycle)
+
+    async def _scan_polymarket_crypto(self) -> list[dict]:
+        """Direct scan of Polymarket Gamma API for crypto prediction markets."""
+        if not httpx:
+            return []
+
+        GAMMA_API = "https://gamma-api.polymarket.com"
+        crypto_keywords = ["bitcoin", "btc", "ethereum", "eth", "solana", "sol", "crypto", "xrp", "doge"]
+        opportunities = []
+
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                # Search for active crypto markets
+                for keyword in crypto_keywords[:4]:  # Limit to avoid rate limiting
+                    try:
+                        r = await client.get(f"{GAMMA_API}/markets", params={
+                            "closed": "false",
+                            "limit": "20",
+                            "order": "volume",
+                            "ascending": "false",
+                            "tag": keyword,
+                        })
+                        if r.status_code != 200:
+                            continue
+
+                        markets = r.json()
+                        if not isinstance(markets, list):
+                            continue
+
+                        for market in markets:
+                            # Filter for ones with reasonable prices (not 0 or 1)
+                            outcomes = market.get("outcomePrices", [])
+                            if not outcomes or len(outcomes) < 1:
+                                continue
+
+                            try:
+                                yes_price = float(outcomes[0]) if outcomes[0] else 0.5
+                            except (ValueError, TypeError):
+                                yes_price = 0.5
+
+                            no_price = 1.0 - yes_price
+
+                            # Skip if too close to resolved (>0.95 or <0.05)
+                            if yes_price > 0.95 or yes_price < 0.05:
+                                continue
+
+                            # Calculate potential profit from mispricing
+                            # In paper mode, we simulate buying at current price
+                            # Profit comes from price movement toward resolution
+                            title = market.get("question", market.get("title", ""))
+                            market_id = market.get("conditionId", market.get("id", ""))
+                            end_date = market.get("endDate", market.get("expirationDate", ""))
+
+                            if not market_id:
+                                continue
+
+                            # Check expiry
+                            days_to_expiry = 999
+                            if end_date:
+                                try:
+                                    exp = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+                                    days_to_expiry = (exp.date() - date.today()).days
+                                except (ValueError, TypeError):
+                                    pass
+
+                            # Score based on how far from 0.5 (stronger conviction = more profit potential)
+                            conviction = abs(yes_price - 0.5)
+                            volume = float(market.get("volume", 0) or 0)
+
+                            # Calculate "spread" as profit potential
+                            # If YES is 0.7, buying YES could profit 0.3 (30%) if it resolves YES
+                            # If YES is 0.3, buying NO could profit 0.3 (30%) if it resolves NO
+                            profit_potential = max(1.0 - yes_price, yes_price) - 0.5  # Excess over coin flip
+
+                            opp = {
+                                "title": title,
+                                "canonical_title": title,
+                                "buy_yes_platform": "polymarket",
+                                "buy_yes_price": yes_price,
+                                "buy_no_platform": "polymarket",
+                                "buy_no_price": no_price,
+                                "buy_yes_market_id": market_id,
+                                "buy_no_market_id": market_id,
+                                "profit_pct": round(profit_potential * 100, 1),
+                                "expiry": end_date[:10] if end_date else "",
+                                "days_to_expiry": days_to_expiry,
+                                "volume": volume,
+                                "conviction": round(conviction, 3),
+                            }
+                            opportunities.append(opp)
+
+                    except Exception as e:
+                        logger.debug("Auto trader: Polymarket query for '%s' failed: %s", keyword, e)
+                    await asyncio.sleep(1)  # Rate limit between queries
+
+        except Exception as e:
+            logger.warning("Auto trader: Polymarket scan failed: %s", e)
+
+        # Sort by conviction * near-expiry bonus
+        for opp in opportunities:
+            score = opp["profit_pct"]
+            if opp.get("days_to_expiry", 999) <= 30:
+                score *= 1.5
+            if opp.get("days_to_expiry", 999) <= 7:
+                score *= 2.0
+            if opp.get("volume", 0) > 10000:
+                score *= 1.2
+            opp["_score"] = score
+
+        opportunities.sort(key=lambda o: o.get("_score", 0), reverse=True)
+        logger.info("Auto trader: found %d crypto markets on Polymarket", len(opportunities))
+        return opportunities[:10]  # Top 10
 
     def get_stats(self) -> dict:
         open_pkgs = self.pm.list_packages("open")
