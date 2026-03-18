@@ -307,7 +307,7 @@
    - Test AdapterRegistry.fetch_all() concurrent execution
    - File: tests/test_adapters_integration.py
 
-43. TODO - Optimize event matching with indexing
+43. BLOCKED - Optimize event matching with indexing
    - Current event matching is O(n²) comparing all events across platforms
    - Add title normalization and fuzzy matching index
    - Use token-based similarity (Jaccard) instead of exact string match
@@ -343,6 +343,7 @@
    - Add `/api/arbitrage/hedge-packages` endpoint returning available hedged positions with P&L scenarios
    - Add UI section in arbitrout.js showing hedge packages with visual payoff diagrams
    - File: src/execution/crypto_hedger.py (new), src/arbitrage_router.py, src/static/js/arbitrout.js
+
 
 
 
