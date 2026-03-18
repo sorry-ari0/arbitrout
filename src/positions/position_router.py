@@ -19,16 +19,18 @@ _ws_clients: list[WebSocket] = []
 
 
 _auto_trader = None  # AutoTrader
+_insider_tracker = None  # InsiderTracker
 
 
-def init_position_system(pm, exit_engine=None, ai_advisor=None, trade_journal=None, auto_trader=None):
+def init_position_system(pm, exit_engine=None, ai_advisor=None, trade_journal=None, auto_trader=None, insider_tracker=None):
     """Called by server.py lifespan to inject dependencies."""
-    global _pm, _exit_engine, _ai_advisor, _trade_journal, _auto_trader
+    global _pm, _exit_engine, _ai_advisor, _trade_journal, _auto_trader, _insider_tracker
     _pm = pm
     _exit_engine = exit_engine
     _ai_advisor = ai_advisor
     _trade_journal = trade_journal
     _auto_trader = auto_trader
+    _insider_tracker = insider_tracker
 
 
 def _require_pm():
@@ -275,13 +277,12 @@ async def get_balances():
 
 @router.get("/config")
 async def get_config():
-    from .wallet_config import is_paper_mode, get_configured_platforms, has_anthropic_key
-    return {
-        "paper_mode": is_paper_mode(),
-        "platforms": get_configured_platforms(),
-        "ai_enabled": has_anthropic_key(),
-        "exit_engine_running": _exit_engine is not None and _exit_engine._running if _exit_engine else False,
-    }
+    from .wallet_config import get_safe_config
+    config = get_safe_config()
+    config["exit_engine_running"] = _exit_engine is not None and _exit_engine._running if _exit_engine else False
+    config["auto_trader_running"] = _auto_trader is not None and _auto_trader._running if _auto_trader else False
+    config["insider_tracker_running"] = _insider_tracker is not None and _insider_tracker._running if _insider_tracker else False
+    return config
 
 
 # ── WebSocket ────────────────────────────────────────────────────────────────
@@ -337,3 +338,37 @@ async def get_auto_trader_stats():
     if not _auto_trader:
         return {"running": False, "message": "Auto trader not initialized"}
     return _auto_trader.get_stats()
+
+
+# ── Insider Tracker ──────────────────────────────────────────────────────────
+
+@router.get("/insiders")
+async def get_insider_stats():
+    if not _insider_tracker:
+        return {"running": False, "message": "Insider tracker not initialized"}
+    return _insider_tracker.get_stats()
+
+@router.get("/insiders/signals")
+async def get_insider_signals(condition_id: Optional[str] = None):
+    if not _insider_tracker:
+        return {"signals": {}, "message": "Insider tracker not initialized"}
+    if condition_id:
+        signal = _insider_tracker.get_insider_signal(condition_id)
+        return {"signals": {condition_id: signal} if signal["has_signal"] else {}}
+    return {"signals": _insider_tracker.get_market_signals()}
+
+@router.get("/insiders/alerts")
+async def get_insider_alerts():
+    if not _insider_tracker:
+        return {"alerts": [], "message": "Insider tracker not initialized"}
+    return {"alerts": _insider_tracker._movement_alerts[-20:]}
+
+@router.get("/insiders/accuracy")
+async def get_insider_accuracy():
+    if not _insider_tracker:
+        return {"wallets": [], "message": "Insider tracker not initialized"}
+    proven = sorted(
+        [a for a in _insider_tracker._wallet_accuracy.values() if a["total"] >= 3],
+        key=lambda a: a["accuracy"], reverse=True
+    )
+    return {"wallets": proven[:20], "total_tracked": len(_insider_tracker._wallet_accuracy)}

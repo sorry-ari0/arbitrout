@@ -25,15 +25,20 @@ MIN_TRADE_SIZE = 25.0        # Min $25 per trade
 MAX_CONCURRENT = 10          # Max 10 open packages
 MAX_TOTAL_EXPOSURE = 2000.0  # Max $2000 total
 SCAN_INTERVAL = 300          # 5 minutes between scans
-MIN_SPREAD_PCT = 5.0         # Minimum 5% spread (must exceed ~4% round-trip fees)
+MIN_SPREAD_PCT = 3.0         # Minimum 3% spread AFTER fees (lower threshold with limit orders)
+# Polymarket: 0% maker fee on limit orders. Use limit orders (maker) to enter,
+# taker to exit in worst case = ~2% one-way exit fee.
+# Conservative estimate: 0% entry + 2% exit = 2% round-trip
+ROUND_TRIP_FEE_PCT = 2.0     # Estimated round-trip fees with limit order entry
 
 
 class AutoTrader:
     """Autonomous paper trader that creates packages from scanner opportunities."""
 
-    def __init__(self, position_manager, scanner=None, interval: float = SCAN_INTERVAL):
+    def __init__(self, position_manager, scanner=None, insider_tracker=None, interval: float = SCAN_INTERVAL):
         self.pm = position_manager
         self.scanner = scanner
+        self.insider_tracker = insider_tracker
         self.interval = interval
         self._task = None
         self._running = False
@@ -62,6 +67,19 @@ class AutoTrader:
                 logger.error("Auto trader scan error: %s", e)
             await asyncio.sleep(self.interval)
 
+    def _get_open_market_ids(self, open_pkgs: list[dict]) -> set[str]:
+        """Get condition IDs of markets we already have open positions on."""
+        ids = set()
+        for pkg in open_pkgs:
+            for leg in pkg.get("legs", []):
+                if leg.get("status") == "open":
+                    asset_id = leg.get("asset_id", "")
+                    # asset_id format: "{conditionId}:YES" or "{conditionId}:NO"
+                    condition_id = asset_id.split(":")[0] if ":" in asset_id else asset_id
+                    if condition_id:
+                        ids.add(condition_id)
+        return ids
+
     async def _scan_and_trade(self):
         """One scan cycle: find opportunities, filter, create packages."""
         open_pkgs = self.pm.list_packages("open")
@@ -76,6 +94,7 @@ class AutoTrader:
 
         remaining_budget = MAX_TOTAL_EXPOSURE - total_exposure
         remaining_slots = MAX_CONCURRENT - len(open_pkgs)
+        open_market_ids = self._get_open_market_ids(open_pkgs)
 
         # Scan for opportunities — use scanner if available, else query Polymarket directly
         opportunities = []
@@ -109,6 +128,12 @@ class AutoTrader:
             if spread_pct < MIN_SPREAD_PCT:
                 continue
 
+            # Skip markets we already have positions on
+            market_id = opp.get("buy_yes_market_id", "")
+            if market_id and market_id in open_market_ids:
+                self._trades_skipped += 1
+                continue
+
             # Prioritize crypto-related and near-expiry
             title = (opp.get("title") or opp.get("canonical_title") or "").lower()
             is_crypto = any(kw in title for kw in ["btc", "bitcoin", "eth", "ethereum", "crypto", "solana", "sol", "xrp"])
@@ -116,13 +141,20 @@ class AutoTrader:
             # Check expiry
             expiry = opp.get("expiry") or opp.get("end_date") or ""
             is_near_expiry = False
+            days_to_expiry = 999
             if expiry:
                 try:
                     exp_date = datetime.strptime(expiry[:10], "%Y-%m-%d").date()
                     days_to_expiry = (exp_date - date.today()).days
-                    is_near_expiry = 0 < days_to_expiry <= 30
+                    is_near_expiry = 2 < days_to_expiry <= 30
                 except (ValueError, TypeError):
                     pass
+
+            # Skip markets expiring within 2 days — exit engine's time_24h safety
+            # would immediately close them, resulting in $0 P&L
+            if days_to_expiry <= 2:
+                self._trades_skipped += 1
+                continue
 
             # Score: crypto near-expiry > crypto > near-expiry > other
             score = spread_pct
@@ -130,6 +162,19 @@ class AutoTrader:
                 score *= 2.0
             if is_near_expiry:
                 score *= 1.5
+
+            # Insider signal boost: if whales/insiders have positions, boost score
+            insider_signal = None
+            market_id = opp.get("buy_yes_market_id", "")
+            if self.insider_tracker and market_id:
+                insider_signal = self.insider_tracker.get_insider_signal(market_id)
+                if insider_signal and insider_signal.get("has_signal"):
+                    strength = insider_signal.get("signal_strength", 0)
+                    # Strong insider signal = 2-3x score boost
+                    score *= (1.0 + strength * 2.0)
+                    if insider_signal.get("suspicious_count", 0) > 0:
+                        score *= 1.5  # Extra boost for suspicious insiders
+                    opp["insider_signal"] = insider_signal
 
             # Skip low-score opportunities
             if score < MIN_SPREAD_PCT:
@@ -158,6 +203,15 @@ class AutoTrader:
                     if m.get("platform") == buy_no_platform and not no_market_id:
                         no_market_id = m.get("market_id", m.get("id", ""))
 
+            if not yes_market_id and not no_market_id:
+                self._trades_skipped += 1
+                continue
+
+            # Skip legs at price ceiling (>= 0.95) — no upside
+            if buy_yes_price >= 0.95:
+                yes_market_id = ""  # don't create YES leg
+            if buy_no_price >= 0.95:
+                no_market_id = ""  # don't create NO leg
             if not yes_market_id and not no_market_id:
                 self._trades_skipped += 1
                 continue
@@ -222,6 +276,9 @@ class AutoTrader:
                     trades_this_cycle += 1
                     self._trades_opened += 1
                     remaining_budget -= trade_size
+                    # Track this market as open to prevent duplicates within same cycle
+                    if market_id:
+                        open_market_ids.add(market_id)
                     logger.info("Auto trader OPENED: %s (spread=%.1f%%, size=$%.2f, score=%.1f)",
                                 pkg_name, spread_pct, trade_size, score)
                 else:
@@ -319,8 +376,13 @@ class AutoTrader:
                     conviction = abs(yes_price - 0.5)
                     volume = float(market.get("volumeNum", 0) or market.get("volume", 0) or 0)
 
-                    # Profit potential: how much can be gained if market resolves in the favored direction
-                    profit_potential = max(1.0 - yes_price, yes_price) - 0.5
+                    # Profit potential: how much can be gained AFTER round-trip fees
+                    # Buy the favored side, if it resolves to 1.0 we get (1.0 - buy_price) profit
+                    # minus round-trip fees on the trade amount
+                    favored_price = min(yes_price, no_price)  # buy the cheaper side
+                    raw_profit_pct = ((1.0 - favored_price) / favored_price) * 100 if favored_price > 0 else 0
+                    # Deduct estimated round-trip fees
+                    net_profit_pct = raw_profit_pct - ROUND_TRIP_FEE_PCT
 
                     opp = {
                         "title": title,
@@ -331,7 +393,9 @@ class AutoTrader:
                         "buy_no_price": no_price,
                         "buy_yes_market_id": mid,
                         "buy_no_market_id": mid,
-                        "profit_pct": round(profit_potential * 100, 1),
+                        "profit_pct": round(net_profit_pct, 1),
+                        "raw_profit_pct": round(raw_profit_pct, 1),
+                        "estimated_fees_pct": ROUND_TRIP_FEE_PCT,
                         "expiry": end_date[:10] if end_date else "",
                         "days_to_expiry": days_to_expiry,
                         "volume": volume,

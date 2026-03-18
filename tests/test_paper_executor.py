@@ -23,7 +23,9 @@ class TestPaperBuy:
         r = _run(paper.buy("tok:YES", 100.0))
         assert r.success and r.filled_price == 0.65 and r.tx_id.startswith("paper_")
         b = _run(paper.get_balance())
-        assert b.available == pytest.approx(900.0)
+        # $100 buy + 2% taker fee ($2) = $102 deducted from $1000
+        expected = 1000.0 - 100.0 - (100.0 * paper.fee_rate)
+        assert b.available == pytest.approx(expected)
     def test_insufficient(self, paper):
         r = _run(paper.buy("BTC", 2000.0))
         assert not r.success

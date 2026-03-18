@@ -43,31 +43,44 @@ class TradeJournal:
         os.replace(tmp, str(path))
 
     def record_close(self, pkg: dict, exit_trigger: str = "manual"):
-        """Record a completed trade (package close) with full details."""
+        """Record a completed trade (package close) with full details including fees."""
         legs_detail = []
+        total_buy_fees = 0.0
+        total_sell_fees = 0.0
         for leg in pkg.get("legs", []):
-            entry = leg.get("entry_price", 0)
-            exit_p = leg.get("exit_price", leg.get("current_price", entry))
+            entry_p = leg.get("entry_price", 0)
+            exit_p = leg.get("exit_price", leg.get("current_price", entry_p))
             cost = leg.get("cost", 0)
             exit_val = leg.get("quantity", 0) * exit_p
+            buy_fees = leg.get("buy_fees", 0)
+            sell_fees = leg.get("sell_fees", 0)
+            total_buy_fees += buy_fees
+            total_sell_fees += sell_fees
+            # Leg P&L includes fees
+            leg_pnl = exit_val - cost - buy_fees - sell_fees
             legs_detail.append({
                 "leg_id": leg.get("leg_id"),
                 "platform": leg.get("platform"),
                 "type": leg.get("type"),
                 "asset_id": leg.get("asset_id"),
-                "entry_price": entry,
+                "entry_price": entry_p,
                 "exit_price": exit_p,
                 "quantity": leg.get("quantity", 0),
                 "cost": cost,
                 "exit_value": round(exit_val, 4),
-                "leg_pnl": round(exit_val - cost, 4),
-                "leg_pnl_pct": round((exit_val - cost) / cost * 100, 2) if cost > 0 else 0,
+                "buy_fees": round(buy_fees, 4),
+                "sell_fees": round(sell_fees, 4),
+                "leg_pnl": round(leg_pnl, 4),
+                "leg_pnl_pct": round(leg_pnl / cost * 100, 2) if cost > 0 else 0,
                 "status": leg.get("status"),
             })
 
         total_cost = pkg.get("total_cost", 0)
-        current_value = pkg.get("current_value", 0)
-        pnl = current_value - total_cost
+        total_fees = total_buy_fees + total_sell_fees
+        # Recalculate exit value from actual leg exit data (not stale pkg["current_value"])
+        current_value = sum(ld["exit_value"] for ld in legs_detail)
+        # P&L after all fees
+        pnl = current_value - total_cost - total_fees
 
         entry = {
             "id": f"journal_{uuid.uuid4().hex[:8]}",
@@ -78,12 +91,16 @@ class TradeJournal:
             "mode": "paper" if any("paper_" in (l.get("tx_id") or "") for l in pkg.get("legs", [])) else "live",
             "total_cost": round(total_cost, 4),
             "exit_value": round(current_value, 4),
+            "total_fees": round(total_fees, 4),
+            "buy_fees": round(total_buy_fees, 4),
+            "sell_fees": round(total_sell_fees, 4),
             "pnl": round(pnl, 4),
             "pnl_pct": round(pnl / total_cost * 100, 2) if total_cost > 0 else 0,
             "outcome": "win" if pnl > 0 else ("loss" if pnl < 0 else "flat"),
             "exit_trigger": exit_trigger,
             "legs": legs_detail,
             "exit_rules": pkg.get("exit_rules", []),
+            "execution_log": pkg.get("execution_log", []),
             "hold_duration_hours": round((time.time() - pkg.get("created_at", time.time())) / 3600, 1),
             "peak_value": pkg.get("peak_value", 0),
             "max_drawdown_from_peak": round(
@@ -114,6 +131,7 @@ class TradeJournal:
         losses = [e for e in filtered if e["outcome"] == "loss"]
         total_pnl = sum(e["pnl"] for e in filtered)
         total_invested = sum(e["total_cost"] for e in filtered)
+        total_fees = sum(e.get("total_fees", 0) for e in filtered)
         avg_hold = sum(e.get("hold_duration_hours", 0) for e in filtered) / len(filtered)
 
         # Best/worst trades
@@ -177,6 +195,8 @@ class TradeJournal:
             "win_rate": round(len(wins) / len(filtered), 3),
             "total_pnl": round(total_pnl, 2),
             "total_invested": round(total_invested, 2),
+            "total_fees": round(total_fees, 2),
+            "fee_drag_pct": round(total_fees / total_invested * 100, 2) if total_invested > 0 else 0,
             "roi_pct": round(total_pnl / total_invested * 100, 2) if total_invested > 0 else 0,
             "avg_pnl_per_trade": round(total_pnl / len(filtered), 2),
             "avg_win": round(sum(e["pnl"] for e in wins) / len(wins), 2) if wins else 0,

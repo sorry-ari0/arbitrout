@@ -311,10 +311,30 @@ class ExitEngine:
                 self.pm.add_alert(pkg["id"], 0, "ai_review_failed",
                     {"error": str(e), "triggers": [t["name"] for t in ai_triggers]})
         elif ai_triggers:
-            # No AI advisor — escalate all as alerts
+            # No AI advisor — auto-execute clear-cut triggers, escalate ambiguous ones
             for trigger in ai_triggers:
-                self.pm.add_alert(pkg["id"], trigger["trigger_id"], trigger["name"],
-                    {"details": trigger["details"], "action": trigger["action"]})
+                if trigger["name"] in ("target_hit", "stop_loss", "trailing_stop"):
+                    # These are mechanical rules — safe to auto-execute without AI review
+                    logger.info("Auto-executing %s on %s (no AI): %s",
+                                trigger["name"], pkg["id"], trigger["details"])
+                    if trigger.get("action") == "full_exit":
+                        for leg in pkg["legs"]:
+                            if leg["status"] == "open":
+                                await self.pm.exit_leg(pkg["id"], leg["leg_id"],
+                                    trigger=f"auto:{trigger['name']}")
+                elif trigger["name"] == "partial_profit":
+                    # Partial profit — exit first open leg
+                    logger.info("Auto-executing partial_profit on %s (no AI): %s",
+                                pkg["id"], trigger["details"])
+                    for leg in pkg["legs"]:
+                        if leg["status"] == "open":
+                            await self.pm.exit_leg(pkg["id"], leg["leg_id"],
+                                trigger=f"auto:{trigger['name']}")
+                            break
+                else:
+                    # Ambiguous triggers (correlation_break, vol_spike, etc.) — escalate
+                    self.pm.add_alert(pkg["id"], trigger["trigger_id"], trigger["name"],
+                        {"details": trigger["details"], "action": trigger["action"]})
 
     async def _apply_verdicts(self, pkg: dict, triggers: list[dict], verdicts: dict):
         """Apply AI verdicts — APPROVE=execute, MODIFY=adjust, REJECT=skip."""

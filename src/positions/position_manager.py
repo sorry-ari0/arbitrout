@@ -141,31 +141,51 @@ class PositionManager:
                     logger.warning("Failed to record trade journal: %s", e)
 
     def update_pnl(self, pkg_id: str):
-        """Recalculate P&L and ITM/OTM status for a package."""
+        """Recalculate P&L and ITM/OTM status for a package.
+
+        Accounts for estimated sell-side fees in unrealized P&L so the
+        displayed profit/loss reflects what you'd actually get if you closed now.
+        """
         pkg = self.packages.get(pkg_id)
         if not pkg:
             return
 
         total_cost = 0.0
         current_value = 0.0
+        total_buy_fees = 0.0
+        estimated_sell_fees = 0.0
         for leg in pkg["legs"]:
+            if leg["status"] != "open":
+                continue
             total_cost += leg["cost"]
-            leg_val = leg.get("current_value", leg["quantity"] * leg.get("current_price", leg["entry_price"]))
+            cur_price = leg.get("current_price", leg["entry_price"])
+            leg_val = leg["quantity"] * cur_price
+            leg["current_value"] = round(leg_val, 4)
             current_value += leg_val
+
+            # Track fees
+            total_buy_fees += leg.get("buy_fees", 0)
+            # Estimate sell fees: 2% taker worst-case, 0% if we use limit orders
+            # Use 1% as conservative middle ground (sometimes limit, sometimes market)
+            estimated_sell_fees += leg_val * 0.01
 
             # Per-leg ITM/OTM
             if leg["type"] in ("prediction_yes", "spot_buy"):
-                leg["leg_status"] = "ITM" if leg.get("current_price", 0) > leg["entry_price"] else "OTM"
+                leg["leg_status"] = "ITM" if cur_price > leg["entry_price"] else "OTM"
             elif leg["type"] == "prediction_no":
-                leg["leg_status"] = "ITM" if leg.get("current_price", 0) < leg["entry_price"] else "OTM"
+                leg["leg_status"] = "ITM" if cur_price < leg["entry_price"] else "OTM"
             else:
                 leg["leg_status"] = "ATM"
 
+        # Net value after estimated sell fees
+        net_value = current_value - estimated_sell_fees
         pkg["total_cost"] = total_cost
-        pkg["current_value"] = current_value
-        pkg["unrealized_pnl"] = current_value - total_cost
-        pkg["unrealized_pnl_pct"] = (pkg["unrealized_pnl"] / total_cost * 100) if total_cost > 0 else 0
-        pkg["peak_value"] = max(pkg.get("peak_value", 0), current_value)
+        pkg["current_value"] = round(current_value, 4)
+        pkg["total_buy_fees"] = round(total_buy_fees, 4)
+        pkg["estimated_sell_fees"] = round(estimated_sell_fees, 4)
+        pkg["unrealized_pnl"] = round(net_value - total_cost, 4)
+        pkg["unrealized_pnl_pct"] = round((pkg["unrealized_pnl"] / total_cost * 100), 2) if total_cost > 0 else 0
+        pkg["peak_value"] = max(pkg.get("peak_value", 0), net_value)
 
         # Package-level ITM/OTM — no dead zone
         if pkg["unrealized_pnl"] > 0:
@@ -204,6 +224,7 @@ class PositionManager:
                 leg["tx_id"] = result.tx_id
                 leg["entry_price"] = result.filled_price if result.filled_price > 0 else leg["entry_price"]
                 leg["quantity"] = result.filled_quantity if result.filled_quantity > 0 else leg["quantity"]
+                leg["buy_fees"] = result.fees
                 leg["status"] = "open"
                 executed.append(leg)
                 pkg["execution_log"].append({
@@ -241,18 +262,31 @@ class PositionManager:
         if not executor:
             return {"success": False, "error": f"No executor for {leg['platform']}"}
 
-        result = await executor.sell(leg["asset_id"], leg["quantity"])
+        # Pass last known price for paper executor fallback
+        if hasattr(executor, 'real'):
+            result = await executor.sell(leg["asset_id"], leg["quantity"],
+                                         last_known_price=leg.get("current_price", 0))
+        else:
+            result = await executor.sell(leg["asset_id"], leg["quantity"])
         if result.success:
             leg["status"] = "closed"
             leg["exit_price"] = result.filled_price
             leg["exit_quantity"] = result.filled_quantity
+            leg["sell_fees"] = result.fees
+            # Update leg's current_value to reflect actual exit
+            leg["current_value"] = round(result.filled_quantity * result.filled_price, 4)
             pkg["execution_log"].append({
                 "action": "sell", "leg_id": leg_id, "platform": leg["platform"],
                 "tx_id": result.tx_id, "price": result.filled_price,
-                "trigger": trigger, "timestamp": time.time(),
+                "fees": result.fees, "trigger": trigger, "timestamp": time.time(),
             })
             if all(l["status"] in ("closed", "advisory") for l in pkg["legs"]):
                 pkg["status"] = STATUS_CLOSED
+                # Recalculate current_value from actual exit data before journaling
+                pkg["current_value"] = round(sum(
+                    l.get("quantity", 0) * l.get("exit_price", l.get("current_price", l.get("entry_price", 0)))
+                    for l in pkg["legs"] if l.get("status") != "advisory"
+                ), 4)
                 if self.trade_journal:
                     try:
                         self.trade_journal.record_close(pkg, exit_trigger=trigger)
@@ -285,7 +319,14 @@ class PositionManager:
         self.save()
 
     def add_alert(self, pkg_id: str, trigger_id: int, trigger_name: str, details: dict):
-        """Add an escalation alert for human review."""
+        """Add an escalation alert for human review. Deduplicates: skips if a pending
+        alert already exists for the same package + trigger."""
+        # Skip if duplicate pending alert exists for this pkg + trigger
+        for existing in self.alerts:
+            if (existing["package_id"] == pkg_id
+                    and existing["trigger_name"] == trigger_name
+                    and existing["status"] == "pending"):
+                return existing
         alert = {
             "id": f"alert_{uuid.uuid4().hex[:8]}",
             "package_id": pkg_id,
