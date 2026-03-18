@@ -12,35 +12,11 @@ See: tasks.md task 38
 
 import yfinance as yf
 from datetime import datetime
-import random
 import logging
-from pydantic import BaseModel
+from adapters.base import BaseAdapter
+from adapters.models import NormalizedEvent
 
 logger = logging.getLogger(__name__)
-
-# STUB: This will be replaced with proper imports when rewritten
-# from adapters.base import BaseAdapter
-# from adapters.models import NormalizedEvent
-try:
-    from adapters.base import BaseAdapter
-except ImportError:
-    class BaseAdapter:
-        """Fallback stub — commodities adapter is non-functional until rewritten."""
-        platform_id: str = ""
-        platform_name: str = ""
-        async def fetch_events(self):
-            raise NotImplementedError("Commodities adapter needs rewrite — see task 38")
-
-class NormalizedEvent(BaseModel):
-    """STUB: Wrong model — will be replaced with adapters.models.NormalizedEvent."""
-    event_id: str
-    event_name: str
-    platform: str
-    url: str
-    yes_price: float
-    no_price: float
-    market_end_time: int
-
 
 # Commodity tickers and example price targets for hypothetical prediction events
 COMMODITY_TARGETS = {
@@ -83,55 +59,54 @@ class CommoditiesAdapter(BaseAdapter):
                     # This is a highly simplified model for demonstration.
 
                     # Event 1: "Price > TargetHigh by end_date"
-                    event_name_high = f"{data['name']} Price > ${target_high} by {end_date.strftime('%b %Y')}"
+                    title_high = f"{data['name']} Price > ${target_high} by {end_date.strftime('%b %Y')}"
                     
                     if current_price >= target_high:
-                        yes_p_high = 0.9 + random.uniform(-0.05, 0.05) # High probability
+                        yes_p_high = 0.9 
                     else:
                         # Scale based on difference, lower if far below
                         distance_ratio = (current_price - target_high) / target_high
                         yes_p_high = max(0.01, min(0.99, 0.5 + distance_ratio * 2))
-                        yes_p_high = round(yes_p_high * 0.5 + 0.05 + random.uniform(-0.02, 0.02), 2) # Make it generally low
+                        yes_p_high = round(yes_p_high * 0.5 + 0.05, 2) # Make it generally low
 
                     yes_p_high = max(0.01, min(0.99, yes_p_high))
                     no_p_high = 1.0 - yes_p_high
                     events.append(
                         NormalizedEvent(
                             event_id=f"commodities_{ticker_symbol}_high_{target_high}_{end_date.year}{end_date.month}",
-                            event_name=event_name_high,
+                            title=title_high,
                             platform=self.platform_name,
                             url=f"https://finance.yahoo.com/quote/{ticker_symbol}",
                             yes_price=yes_p_high,
                             no_price=no_p_high,
-                            market_end_time=int(end_date.timestamp()),
+                            expiry=int(end_date.timestamp()),
                         )
                     )
 
                     # Event 2: "Price < TargetLow by end_date"
-                    event_name_low = f"{data['name']} Price < ${target_low} by {end_date.strftime('%b %Y')}"
+                    title_low = f"{data['name']} Price < ${target_low} by {end_date.strftime('%b %Y')}"
                     if current_price <= target_low:
-                        yes_p_low = 0.9 + random.uniform(-0.05, 0.05) # High probability
+                        yes_p_low = 0.9 
                     else:
                         # Scale based on difference, lower if far above
                         distance_ratio = (target_low - current_price) / target_low
                         yes_p_low = max(0.01, min(0.99, 0.5 + distance_ratio * 2))
-                        yes_p_low = round(yes_p_low * 0.5 + 0.05 + random.uniform(-0.02, 0.02), 2) # Make it generally low
+                        yes_p_low = round(yes_p_low * 0.5 + 0.05, 2) # Make it generally low
 
                     yes_p_low = max(0.01, min(0.99, yes_p_low))
                     no_p_low = 1.0 - yes_p_low
                     events.append(
                         NormalizedEvent(
                             event_id=f"commodities_{ticker_symbol}_low_{target_low}_{end_date.year}{end_date.month}",
-                            event_name=event_name_low,
+                            title=title_low,
                             platform=self.platform_name,
                             url=f"https://finance.yahoo.com/quote/{ticker_symbol}",
                             yes_price=yes_p_low,
                             no_price=no_p_low,
-                            market_end_time=int(end_date.timestamp()),
+                            expiry=int(end_date.timestamp()),
                         )
                     )
 
             except Exception as e:
                 logger.error(f"Error fetching data for {data['name']} ({ticker_symbol}): {e}")
         return events
-
