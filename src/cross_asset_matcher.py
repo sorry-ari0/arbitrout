@@ -1,15 +1,24 @@
-from adapters.registry import AdapterRegistry
-from arbitrage_engine import load_saved
+"""Cross-asset matcher — STUB, needs full rewrite (task 40).
+
+KNOWN ISSUES (from audit):
+- Returns empty list always
+- Unused import of load_saved
+- No actual matching logic implemented
+
+DO NOT wire up to API endpoints until rewritten.
+See: tasks.md task 40
+"""
+
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class CrossAssetMatcher:
-    def __init__(self, registry: AdapterRegistry):
+    def __init__(self, registry):
         self.registry = registry
 
     def get_opportunities(self):
-        # Match prediction market events against real tradeable assets
-        # Calculate the net cost of the hedged position and the guaranteed profit/loss
-        opportunities = []
-        # Example: Polymarket has "BTC > $100k by July" at $0.40 -> buy YES at $0.40 + short BTC futures at $100k strike = guaranteed profit if spread exceeds transaction costs
-        # Example: Kalshi has "S&P 500 above 5500 by Q3" at $0.55 -> buy YES + buy SPY puts at 5500 strike = hedged position
-        # Match prediction market events against: crypto prices (via Coinbase adapter), stock prices (via Robinhood adapter), commodity prices (via commodities adapter)
-        return opportunities
+        """STUB: Returns empty list. Needs rewrite to match prediction events against real assets."""
+        logger.warning("CrossAssetMatcher is a stub — returns no opportunities until task 40 is completed")
+        return []

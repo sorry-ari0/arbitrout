@@ -266,7 +266,7 @@ function createSortDropdown() {
     });
     select.addEventListener('change', function() {
         currentSort = this.value;
-        fetchArbitrageData();
+        loadOpportunities();
     });
     return select;
 }

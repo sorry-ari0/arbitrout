@@ -1,26 +1,25 @@
+"""Theta decay scanner — STUB, needs full rewrite (task 39).
+
+KNOWN ISSUES (from audit):
+- Calls registry.get_all_events() which does not exist (should be fetch_all() or get_all_cached())
+- References non-existent event fields (implied_probability, current_price, end_date)
+- NormalizedEvent uses: expiry, yes_price, no_price — not the fields used here
+
+DO NOT wire up to API endpoints until rewritten.
+See: tasks.md task 39
+"""
+
 from datetime import datetime, timedelta
-from adapters.registry import AdapterRegistry
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class ThetaScanner:
-    def __init__(self, registry: AdapterRegistry):
+    def __init__(self, registry):
         self.registry = registry
 
     def get_theta_opportunities(self):
-        opportunities = []
-        for event in self.registry.get_all_events():
-            if event.get('end_date') or event.get('close_date'):
-                end_date = event.get('end_date') or event.get('close_date')
-                days_to_expiry = (datetime.strptime(end_date, '%Y-%m-%d') - datetime.now()).days
-                if days_to_expiry <= 7:
-                    implied_probability = event.get('implied_probability', 0)
-                    current_price = event.get('current_price', 0)
-                    edge = implied_probability - current_price
-                    edge_pct = (edge / current_price) * 100 if current_price > 0 else 0
-                    opportunities.append({
-                        'event_id': event['id'],
-                        'days_to_expiry': days_to_expiry,
-                        'edge_pct': edge_pct,
-                        'implied_probability': implied_probability,
-                        'current_price': current_price,
-                    })
-        return sorted(opportunities, key=lambda x: (x['days_to_expiry'], x['edge_pct']), reverse=True)
+        """STUB: Returns empty list. Needs rewrite to use real NormalizedEvent fields."""
+        logger.warning("ThetaScanner is a stub — returns no opportunities until task 39 is completed")
+        return []

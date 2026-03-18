@@ -22,16 +22,22 @@ CRYPTO_MAP = {
 }
 
 
-def _implied_probability(current_price: float, threshold: float, volatility: float = 0.6) -> float:
+def _implied_probability(current_price: float, threshold: float, volatility: float = 0.6, expiry_date: str = "2026-12-31") -> float:
     """Estimate probability of price exceeding threshold using log-normal model.
 
-    Simple Black-Scholes-esque estimate assuming ~6 month horizon.
     volatility is annualized (0.6 = 60% annual vol, typical for crypto).
+    expiry_date: ISO date string for the event expiry.
     """
     if current_price <= 0 or threshold <= 0:
         return 0.5
-    # Time horizon: ~0.5 years
-    t = 0.5
+    # Dynamic time horizon from current date to expiry
+    from datetime import datetime, date
+    try:
+        exp = datetime.strptime(expiry_date, "%Y-%m-%d").date()
+        days_remaining = (exp - date.today()).days
+        t = max(days_remaining / 365.0, 1 / 365.0)  # floor at 1 day
+    except (ValueError, TypeError):
+        t = 0.5  # fallback to 6 months
     sigma_sqrt_t = volatility * math.sqrt(t)
     if sigma_sqrt_t == 0:
         return 1.0 if current_price >= threshold else 0.0

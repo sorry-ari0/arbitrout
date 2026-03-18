@@ -857,10 +857,12 @@ async def screen_stocks(body: ScreenRequest) -> ScreenResponse:
     # Fallback: use company_researcher for remaining unresolved criteria
     if unresolved and tickers:
         try:
+            import asyncio as _aio
             from research.company_researcher import research_company
+            loop = _aio.get_running_loop()
             resolved_tickers = []
             for sym in tickers:
-                info = research_company(sym)
+                info = await loop.run_in_executor(None, research_company, sym)
                 if info:
                     blob = " ".join(str(v) for v in info.values() if v).lower()
                     matched_criteria = 0

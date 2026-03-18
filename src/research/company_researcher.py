@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,7 @@ logger = logging.getLogger("research.company")
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 CACHE_FILE = DATA_DIR / "company_research_cache.json"
+_cache_lock = threading.Lock()
 
 # Ticker -> Wikipedia article title (imported from swarm_engine at runtime,
 # but we keep a fallback copy here for standalone use)
@@ -35,22 +37,24 @@ _COMPANY_NAMES: dict[str, str] = {
 
 
 def _load_cache() -> dict[str, Any]:
-    """Load research cache from disk."""
-    if CACHE_FILE.exists():
-        try:
-            return json.loads(CACHE_FILE.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            pass
-    return {}
+    """Load research cache from disk (thread-safe)."""
+    with _cache_lock:
+        if CACHE_FILE.exists():
+            try:
+                return json.loads(CACHE_FILE.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                pass
+        return {}
 
 
 def _save_cache(cache: dict[str, Any]):
-    """Persist research cache to disk."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = str(CACHE_FILE) + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(cache, f, indent=2, ensure_ascii=False)
-    os.replace(tmp, str(CACHE_FILE))
+    """Persist research cache to disk (thread-safe)."""
+    with _cache_lock:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = str(CACHE_FILE) + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cache, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, str(CACHE_FILE))
 
 
 def _wiki_title_for_ticker(ticker: str) -> str:
@@ -235,13 +239,13 @@ def research_batch(tickers: list[str], delay: float = 1.5) -> list[dict[str, Any
 
 async def research_company_async(ticker: str) -> dict[str, Any]:
     """Async wrapper for research_company."""
-    return await asyncio.get_event_loop().run_in_executor(
+    return await asyncio.get_running_loop().run_in_executor(
         None, research_company, ticker
     )
 
 
 async def research_batch_async(tickers: list[str]) -> list[dict[str, Any]]:
     """Async wrapper for research_batch."""
-    return await asyncio.get_event_loop().run_in_executor(
+    return await asyncio.get_running_loop().run_in_executor(
         None, research_batch, tickers
     )

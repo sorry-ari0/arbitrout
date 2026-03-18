@@ -136,7 +136,11 @@ def research_strategies(force: bool = False) -> list[dict[str, Any]]:
         try:
             stat = STRATEGIES_FILE.stat()
             if time.time() - stat.st_mtime < 30 * 86400:
-                return json.loads(STRATEGIES_FILE.read_text(encoding="utf-8"))
+                cached = json.loads(STRATEGIES_FILE.read_text(encoding="utf-8"))
+                # Cache stores {"strategies": [...], ...} — return just the list
+                if isinstance(cached, dict) and "strategies" in cached:
+                    return cached["strategies"]
+                return cached
         except (json.JSONDecodeError, OSError):
             pass
 
@@ -177,6 +181,6 @@ def research_strategies(force: bool = False) -> list[dict[str, Any]]:
 
 async def research_strategies_async(force: bool = False) -> list[dict[str, Any]]:
     """Async wrapper for research_strategies."""
-    return await asyncio.get_event_loop().run_in_executor(
+    return await asyncio.get_running_loop().run_in_executor(
         None, research_strategies, force
     )

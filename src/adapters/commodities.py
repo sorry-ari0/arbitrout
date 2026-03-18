@@ -1,24 +1,45 @@
+"""Commodities adapter — STUB, needs full rewrite (task 38).
+
+KNOWN ISSUES (from audit):
+- Uses wrong NormalizedEvent (Pydantic BaseModel instead of dataclass from adapters.models)
+- Wrong import path (adapters.registry instead of adapters.base)
+- Uses random.uniform() for price noise instead of real implied probabilities
+- Wrong field names (event_name vs title, market_end_time vs expiry)
+
+DO NOT register this adapter in server.py until rewritten.
+See: tasks.md task 38
+"""
+
 import yfinance as yf
 from datetime import datetime
 import random
 import logging
 from pydantic import BaseModel
 
-# Assume BaseAdapter is available from adapters.registry
-from adapters.registry import BaseAdapter
-
 logger = logging.getLogger(__name__)
 
-# Minimal NormalizedEvent definition based on common usage and request fields.
-# We define it here to avoid assuming an exact internal path within external libraries.
+# STUB: This will be replaced with proper imports when rewritten
+# from adapters.base import BaseAdapter
+# from adapters.models import NormalizedEvent
+try:
+    from adapters.base import BaseAdapter
+except ImportError:
+    class BaseAdapter:
+        """Fallback stub — commodities adapter is non-functional until rewritten."""
+        platform_id: str = ""
+        platform_name: str = ""
+        async def fetch_events(self):
+            raise NotImplementedError("Commodities adapter needs rewrite — see task 38")
+
 class NormalizedEvent(BaseModel):
+    """STUB: Wrong model — will be replaced with adapters.models.NormalizedEvent."""
     event_id: str
     event_name: str
     platform: str
     url: str
-    yes_price: float  # Probability for 'Yes' outcome
-    no_price: float   # Probability for 'No' outcome
-    market_end_time: int  # Unix timestamp for market end
+    yes_price: float
+    no_price: float
+    market_end_time: int
 
 
 # Commodity tickers and example price targets for hypothetical prediction events

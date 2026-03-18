@@ -196,33 +196,38 @@ if _ARBITRAGE_AVAILABLE:
 
 # --- Research API Routes ---
 try:
+    import asyncio as _aio
     from research.company_researcher import research_company, research_batch
     from research.stock_universe import get_universe, get_ticker_count, refresh_us_universe
     from research.arbitrage_strategies import research_strategies
 
     @app.get("/api/research/company/{ticker}")
     async def get_company_research(ticker: str):
-        result = research_company(ticker.upper())
+        loop = _aio.get_running_loop()
+        result = await loop.run_in_executor(None, research_company, ticker.upper())
         if not result:
             return {"error": f"No research found for {ticker}"}
         return result
 
     @app.get("/api/research/batch")
     async def get_batch_research(tickers: str = ""):
-        ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()][:20]
+        ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()][:10]
         if not ticker_list:
             return {"error": "Provide tickers as comma-separated list"}
-        results = research_batch(ticker_list)
+        loop = _aio.get_running_loop()
+        results = await loop.run_in_executor(None, research_batch, ticker_list)
         return {"results": results, "count": len(results)}
 
     @app.get("/api/research/universe")
     async def get_stock_universe(exchange: str = None, cap_tier: str = None, include_hkex: bool = False):
-        universe = get_universe(exchange=exchange, cap_tier=cap_tier, include_hkex=include_hkex)
+        loop = _aio.get_running_loop()
+        universe = await loop.run_in_executor(None, lambda: get_universe(exchange=exchange, cap_tier=cap_tier, include_hkex=include_hkex))
         return {"tickers": universe[:500], "total": len(universe), "ticker_count": get_ticker_count()}
 
     @app.get("/api/research/strategies")
     async def get_strategies(force: bool = False):
-        strategies = research_strategies(force=force)
+        loop = _aio.get_running_loop()
+        strategies = await loop.run_in_executor(None, lambda: research_strategies(force=force))
         return {"strategies": strategies, "count": len(strategies)}
 
     logger.info("Research API endpoints registered")
