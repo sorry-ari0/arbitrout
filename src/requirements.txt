@@ -12,3 +12,7 @@ lxml>=5.0.0
 beautifulsoup4>=4.12.0
 scrapling>=0.4.0
 thefuzz>=0.22.0
+py-clob-client>=0.1.0
+kalshi-python>=1.0.0
+coinbase-advanced-py>=1.0.0
+anthropic>=0.40.0
