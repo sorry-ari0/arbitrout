@@ -65,6 +65,7 @@ try:
     from execution.coinbase_spot_executor import CoinbaseSpotExecutor
     from execution.predictit_executor import PredictItExecutor
     from positions.trade_journal import TradeJournal
+    from positions.auto_trader import AutoTrader
     _POSITIONS_AVAILABLE = True
 except (ImportError, SyntaxError) as _pos_err:
     logger.warning("Position system not available: %s", _pos_err)
@@ -196,8 +197,14 @@ async def lifespan(app: FastAPI):
             pm = PositionManager(data_dir=DATA_DIR / "positions", executors=executors, trade_journal=journal)
             ai = AIAdvisor() if os.environ.get("ANTHROPIC_API_KEY") else None
             exit_engine = ExitEngine(pm, ai_advisor=ai)
-            init_position_system(pm, exit_engine, ai, trade_journal=journal)
             exit_engine.start()
+            # Start auto trader if scanner available
+            _auto_trader = None
+            if _ARBITRAGE_AVAILABLE:
+                _auto_trader = AutoTrader(pm, scanner=_scanner)
+                _auto_trader.start()
+                logger.info("Auto trader started — will scan for opportunities every 5 min")
+            init_position_system(pm, exit_engine, ai, trade_journal=journal, auto_trader=_auto_trader)
             _exit_task = True
             logger.info("Position system initialized with %d executors", len(executors))
         except Exception as e:
@@ -207,8 +214,12 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
     if _POSITIONS_AVAILABLE and _exit_task:
-        try: exit_engine.stop()
-        except: pass
+        try:
+            exit_engine.stop()
+            if _auto_trader:
+                _auto_trader.stop()
+        except Exception:
+            pass
     if scheduler:
         scheduler.shutdown(wait=False)
     if _ARBITRAGE_AVAILABLE:

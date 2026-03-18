@@ -18,13 +18,17 @@ _trade_journal = None  # TradeJournal
 _ws_clients: list[WebSocket] = []
 
 
-def init_position_system(pm, exit_engine=None, ai_advisor=None, trade_journal=None):
+_auto_trader = None  # AutoTrader
+
+
+def init_position_system(pm, exit_engine=None, ai_advisor=None, trade_journal=None, auto_trader=None):
     """Called by server.py lifespan to inject dependencies."""
-    global _pm, _exit_engine, _ai_advisor, _trade_journal
+    global _pm, _exit_engine, _ai_advisor, _trade_journal, _auto_trader
     _pm = pm
     _exit_engine = exit_engine
     _ai_advisor = ai_advisor
     _trade_journal = trade_journal
+    _auto_trader = auto_trader
 
 
 def _require_pm():
@@ -324,3 +328,12 @@ async def get_journal_performance(mode: Optional[str] = None, strategy: Optional
     if not _trade_journal:
         return {"total_trades": 0, "message": "Trade journal not initialized"}
     return _trade_journal.get_performance(mode=mode, strategy=strategy)
+
+
+# ── Auto Trader ──────────────────────────────────────────────────────────────
+
+@router.get("/auto-trader")
+async def get_auto_trader_stats():
+    if not _auto_trader:
+        return {"running": False, "message": "Auto trader not initialized"}
+    return _auto_trader.get_stats()
