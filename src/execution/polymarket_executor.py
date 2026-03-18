@@ -1,11 +1,16 @@
 """Polymarket CLOB executor — async buy/sell via Polygon chain.
 
 Uses py_clob_client for order execution and Gamma API for price lookups.
-Supports both limit orders (maker, 0% fee) and market orders (taker, ~2% fee).
+All CLOB client calls are synchronous and wrapped in run_in_executor to
+avoid blocking the async event loop (critical for exit engine safety overrides).
+
+Buy and sell both use FOK market orders for guaranteed immediate fill.
 
 Asset IDs use format: "{conditionId}:YES" or "{conditionId}:NO"
 The CLOB uses token_ids (different from conditionId) — resolved via get_market().
 """
+import asyncio
+import functools
 import logging
 import os
 
@@ -49,6 +54,23 @@ class PolymarketExecutor(BaseExecutor):
             logger.info("Polymarket CLOB client initialized with Level 2 auth")
         return self._client
 
+    async def _run_sync(self, func, *args, **kwargs):
+        """Run a synchronous CLOB client method in a thread executor.
+
+        All py_clob_client methods are synchronous (blocking HTTP).
+        Running them in the default executor prevents blocking the async
+        event loop, which is critical so that exit engine safety overrides
+        are never delayed during order placement.
+        """
+        loop = asyncio.get_running_loop()
+        if kwargs:
+            call = functools.partial(func, *args, **kwargs)
+            return await loop.run_in_executor(None, call)
+        elif args:
+            return await loop.run_in_executor(None, func, *args)
+        else:
+            return await loop.run_in_executor(None, func)
+
     async def _get_http(self):
         if not self._http or self._http.is_closed:
             self._http = httpx.AsyncClient(timeout=15.0, headers={"User-Agent": "Arbitrout/1.0"})
@@ -64,7 +86,7 @@ class PolymarketExecutor(BaseExecutor):
             tokens = self._token_id_cache[condition_id]
         else:
             clob = self._get_clob()
-            market = clob.get_market(condition_id)
+            market = await self._run_sync(clob.get_market, condition_id)
             tokens = market.get("clobTokenIds", [])
             if not tokens or len(tokens) < 2:
                 raise ValueError(f"Cannot resolve token_ids for condition {condition_id}: {market}")
@@ -82,60 +104,78 @@ class PolymarketExecutor(BaseExecutor):
         return asset_id, "YES"
 
     async def buy(self, asset_id: str, amount_usd: float) -> ExecutionResult:
-        """Buy shares using a limit order at current best price (maker fee: 0%).
+        """Buy shares using a FOK market order for guaranteed immediate fill.
 
-        amount_usd is the dollar cost. Shares = amount_usd / price.
-        Uses GTC limit order at current midpoint for maker fee rate.
+        amount_usd is the dollar cost. Uses Fill-or-Kill so the position
+        system doesn't need to handle pending/unfilled orders.
+        Accepts taker fee (~2%) for guaranteed execution.
         """
         try:
-            from py_clob_client.clob_types import OrderArgs
+            from py_clob_client.clob_types import MarketOrderArgs, OrderType, PartialCreateOrderOptions
 
             condition_id, side = self._parse_asset_id(asset_id)
             token_id = await self._resolve_token_id(condition_id, side)
             clob = self._get_clob()
 
-            # Get current price for limit order
-            price = float(clob.get_midpoint(token_id) or 0)
+            # Balance check before placing order
+            balance_info = await self._run_sync(clob.get_balance_allowance)
+            if isinstance(balance_info, dict):
+                available_balance = float(balance_info.get("balance", 0))
+            else:
+                available_balance = 0
+            if amount_usd > available_balance:
+                return ExecutionResult(
+                    False, None, 0, 0, 0,
+                    f"Insufficient balance: need ${amount_usd:.2f} but only ${available_balance:.2f} available"
+                )
+
+            # Get current price for logging and amount calculation
+            price = float(await self._run_sync(clob.get_midpoint, token_id) or 0)
             if price <= 0:
                 return ExecutionResult(False, None, 0, 0, 0, f"Cannot get price for {asset_id}")
 
-            # Get tick size and fee rate for this market
-            tick_size = float(clob.get_tick_size(token_id))
-            fee_rate_bps = clob.get_fee_rate_bps(token_id)
-
-            # Round price to tick size
-            price = round(price / tick_size) * tick_size
-            price = round(price, 4)
-
-            # Calculate shares from USD amount
-            size = round(amount_usd / price, 2)
-            if size < 1:
-                return ExecutionResult(False, None, 0, 0, 0, f"Trade too small: {size} shares at ${price}")
-
-            # Check neg_risk flag (required for some markets)
-            neg_risk = clob.get_neg_risk(token_id)
-
-            order_args = OrderArgs(
+            # For buy market orders, amount = dollar amount to spend
+            market_args = MarketOrderArgs(
                 token_id=token_id,
-                price=price,
-                size=size,
+                amount=round(amount_usd, 2),
                 side="BUY",
-                fee_rate_bps=fee_rate_bps,
             )
 
-            logger.info("Placing BUY order: %s %s shares @ $%.4f (fee=%dbps, neg_risk=%s)",
-                        asset_id, size, price, fee_rate_bps, neg_risk)
+            # Get neg_risk flag — required for some markets
+            neg_risk = await self._run_sync(clob.get_neg_risk, token_id)
+            options = PartialCreateOrderOptions(neg_risk=neg_risk)
 
-            result = clob.create_and_post_order(order_args)
+            expected_shares = round(amount_usd / price, 2)
+            logger.info("Placing BUY market order (FOK): %s ~%.2f shares, $%.2f @ ~$%.4f (neg_risk=%s)",
+                        asset_id, expected_shares, amount_usd, price, neg_risk)
+
+            # create_market_order returns a SignedOrder — must also post it
+            signed_order = await self._run_sync(clob.create_market_order, market_args, options)
+            result = await self._run_sync(clob.post_order, signed_order, OrderType.FOK)
 
             order_id = result.get("orderID", result.get("id", ""))
             if not order_id:
                 return ExecutionResult(False, None, 0, 0, 0, f"Order rejected: {result}")
 
-            # For limit orders, the fill may not be immediate
-            # Return the order details — actual fill tracked by the position manager
-            fee = round(amount_usd * (fee_rate_bps / 10000), 4)
-            return ExecutionResult(True, order_id, price, size, fee, None)
+            # Try to get actual fill details from the response
+            fill_price = float(result.get("price", price))
+            fill_quantity = float(result.get("size", result.get("amount", expected_shares)))
+            fee = float(result.get("fee", 0))
+
+            # Try querying the order for actual fill price verification
+            try:
+                order_details = await self._run_sync(clob.get_order, order_id)
+                if order_details:
+                    if "price" in order_details:
+                        fill_price = float(order_details["price"])
+                    if "size_matched" in order_details:
+                        fill_quantity = float(order_details["size_matched"])
+                    if "fee" in order_details:
+                        fee = float(order_details["fee"])
+            except Exception as e:
+                logger.warning("Could not verify fill details for order %s: %s — using response/estimated values", order_id, e)
+
+            return ExecutionResult(True, order_id, fill_price, fill_quantity, fee, None)
 
         except Exception as e:
             logger.error("Polymarket buy failed for %s: %s", asset_id, e)
@@ -146,16 +186,17 @@ class PolymarketExecutor(BaseExecutor):
 
         Uses MarketOrderArgs for Fill-or-Kill execution.
         amount = shares to sell (for sells, amount is in shares).
+        Verifies actual fill price via get_order after posting.
         """
         try:
-            from py_clob_client.clob_types import MarketOrderArgs, OrderType
+            from py_clob_client.clob_types import MarketOrderArgs, OrderType, PartialCreateOrderOptions
 
             condition_id, side = self._parse_asset_id(asset_id)
             token_id = await self._resolve_token_id(condition_id, side)
             clob = self._get_clob()
 
             # Get current price for logging and fee estimation
-            price = float(clob.get_midpoint(token_id) or 0)
+            price = float(await self._run_sync(clob.get_midpoint, token_id) or 0)
 
             # For sell market orders, amount = number of shares to sell
             market_args = MarketOrderArgs(
@@ -164,21 +205,43 @@ class PolymarketExecutor(BaseExecutor):
                 side="SELL",
             )
 
-            logger.info("Placing SELL order: %s %.2f shares @ ~$%.4f",
-                        asset_id, quantity, price)
+            # Get neg_risk flag — required for some markets
+            neg_risk = await self._run_sync(clob.get_neg_risk, token_id)
+            options = PartialCreateOrderOptions(neg_risk=neg_risk)
+
+            logger.info("Placing SELL market order (FOK): %s %.2f shares @ ~$%.4f (neg_risk=%s)",
+                        asset_id, quantity, price, neg_risk)
 
             # create_market_order returns a SignedOrder — must also post it
-            signed_order = clob.create_market_order(market_args)
-            result = clob.post_order(signed_order, orderType=OrderType.FOK)
+            signed_order = await self._run_sync(clob.create_market_order, market_args, options)
+            result = await self._run_sync(clob.post_order, signed_order, OrderType.FOK)
 
             order_id = result.get("orderID", result.get("id", ""))
             if not order_id:
                 return ExecutionResult(False, None, 0, 0, 0, f"Sell order rejected: {result}")
 
             fill_price = float(result.get("price", price))
-            proceeds = quantity * fill_price
+            fill_quantity = float(result.get("size", result.get("amount", quantity)))
             fee = float(result.get("fee", 0))
-            return ExecutionResult(True, order_id, fill_price, quantity, fee, None)
+
+            # Verify actual fill price by querying the order
+            try:
+                order_details = await self._run_sync(clob.get_order, order_id)
+                if order_details:
+                    if "price" in order_details:
+                        verified_price = float(order_details["price"])
+                        if verified_price != fill_price:
+                            logger.info("Fill price verified via get_order: $%.4f (response had $%.4f)",
+                                        verified_price, fill_price)
+                            fill_price = verified_price
+                    if "size_matched" in order_details:
+                        fill_quantity = float(order_details["size_matched"])
+                    if "fee" in order_details:
+                        fee = float(order_details["fee"])
+            except Exception as e:
+                logger.warning("Could not verify fill price for order %s: %s — fill price may be inaccurate", order_id, e)
+
+            return ExecutionResult(True, order_id, fill_price, fill_quantity, fee, None)
 
         except Exception as e:
             logger.error("Polymarket sell failed for %s: %s", asset_id, e)
@@ -187,7 +250,7 @@ class PolymarketExecutor(BaseExecutor):
     async def get_balance(self) -> BalanceResult:
         try:
             clob = self._get_clob()
-            b = clob.get_balance_allowance()
+            b = await self._run_sync(clob.get_balance_allowance)
             if isinstance(b, dict):
                 return BalanceResult(float(b.get("balance", 0)), float(b.get("balance", 0)))
             return BalanceResult(0, 0)
@@ -198,7 +261,7 @@ class PolymarketExecutor(BaseExecutor):
     async def get_positions(self) -> list[PositionInfo]:
         try:
             clob = self._get_clob()
-            trades = clob.get_trades()
+            trades = await self._run_sync(clob.get_trades)
             # Simplified — the CLOB doesn't have a direct "positions" endpoint
             # Real position tracking happens in PositionManager via positions.json
             return []
@@ -233,7 +296,11 @@ class PolymarketExecutor(BaseExecutor):
                             parsed = []
                     else:
                         parsed = raw_prices
-                    if parsed and len(parsed) >= 1:
+                    if parsed and len(parsed) >= 2:
+                        if side == "NO":
+                            return float(parsed[1])
+                        return float(parsed[0])
+                    elif parsed and len(parsed) >= 1:
                         yes_price = float(parsed[0])
                         if side == "NO":
                             return 1.0 - yes_price

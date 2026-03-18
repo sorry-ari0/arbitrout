@@ -2,13 +2,25 @@
 import asyncio
 import json
 import logging
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Security, WebSocket, WebSocketDisconnect
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from typing import Optional
+import os
 
 logger = logging.getLogger("positions.router")
 
-router = APIRouter(prefix="/api/derivatives", tags=["derivatives"])
+# Auth: reuse the same API key check as server.py
+_API_KEY = os.environ.get("LOBSTERMINAL_API_KEY", "dev-local-only")
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+async def _verify_api_key(api_key: str = Security(_api_key_header)):
+    if _API_KEY == "dev-local-only":
+        return
+    if not api_key or api_key != _API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+router = APIRouter(prefix="/api/derivatives", tags=["derivatives"], dependencies=[Depends(_verify_api_key)])
 
 # Module-level references set by init_position_system()
 _pm = None  # PositionManager

@@ -264,6 +264,10 @@ class ExitEngine:
             else:
                 pkg["_neg_streak"] = 0
 
+            # C5 fix: skip packages currently being exited by another trigger
+            if pkg.get("_exiting"):
+                continue
+
             triggers = evaluate_heuristics(pkg)
             if not triggers:
                 continue
@@ -290,51 +294,58 @@ class ExitEngine:
 
     async def _process_triggers(self, pkg: dict, triggers: list[dict]):
         """Route triggers — safety overrides execute immediately, others go to AI."""
-        safety_triggers = [t for t in triggers if t.get("safety_override")]
-        ai_triggers = [t for t in triggers if not t.get("safety_override")]
+        # C5 fix: guard against double-fire on same package
+        if pkg.get("_exiting"):
+            return
+        pkg["_exiting"] = True
+        try:
+            safety_triggers = [t for t in triggers if t.get("safety_override")]
+            ai_triggers = [t for t in triggers if not t.get("safety_override")]
 
-        # Safety overrides — immediate exit, no AI
-        for trigger in safety_triggers:
-            logger.warning("SAFETY OVERRIDE [%s] on %s: %s", trigger["name"], pkg["id"], trigger["details"])
-            for leg in pkg["legs"]:
-                if leg["status"] == "open":
-                    await self.pm.exit_leg(pkg["id"], leg["leg_id"], trigger=trigger["name"])
+            # Safety overrides — immediate exit, no AI
+            for trigger in safety_triggers:
+                logger.warning("SAFETY OVERRIDE [%s] on %s: %s", trigger["name"], pkg["id"], trigger["details"])
+                for leg in pkg["legs"]:
+                    if leg["status"] == "open":
+                        await self.pm.exit_leg(pkg["id"], leg["leg_id"], trigger=trigger["name"])
 
-        # Non-safety triggers — batch to AI advisor
-        if ai_triggers and self.ai:
-            try:
-                verdicts = await self.ai.review_proposals(pkg, ai_triggers)
-                await self._apply_verdicts(pkg, ai_triggers, verdicts)
-            except Exception as e:
-                logger.error("AI review failed for %s: %s", pkg["id"], e)
-                # Escalate as alert
-                self.pm.add_alert(pkg["id"], 0, "ai_review_failed",
-                    {"error": str(e), "triggers": [t["name"] for t in ai_triggers]})
-        elif ai_triggers:
-            # No AI advisor — auto-execute clear-cut triggers, escalate ambiguous ones
-            for trigger in ai_triggers:
-                if trigger["name"] in ("target_hit", "stop_loss", "trailing_stop"):
-                    # These are mechanical rules — safe to auto-execute without AI review
-                    logger.info("Auto-executing %s on %s (no AI): %s",
-                                trigger["name"], pkg["id"], trigger["details"])
-                    if trigger.get("action") == "full_exit":
+            # Non-safety triggers — batch to AI advisor
+            if ai_triggers and self.ai:
+                try:
+                    verdicts = await self.ai.review_proposals(pkg, ai_triggers)
+                    await self._apply_verdicts(pkg, ai_triggers, verdicts)
+                except Exception as e:
+                    logger.error("AI review failed for %s: %s", pkg["id"], e)
+                    # Escalate as alert
+                    self.pm.add_alert(pkg["id"], 0, "ai_review_failed",
+                        {"error": str(e), "triggers": [t["name"] for t in ai_triggers]})
+            elif ai_triggers:
+                # No AI advisor — auto-execute clear-cut triggers, escalate ambiguous ones
+                for trigger in ai_triggers:
+                    if trigger["name"] in ("target_hit", "stop_loss", "trailing_stop"):
+                        # These are mechanical rules — safe to auto-execute without AI review
+                        logger.info("Auto-executing %s on %s (no AI): %s",
+                                    trigger["name"], pkg["id"], trigger["details"])
+                        if trigger.get("action") == "full_exit":
+                            for leg in pkg["legs"]:
+                                if leg["status"] == "open":
+                                    await self.pm.exit_leg(pkg["id"], leg["leg_id"],
+                                        trigger=f"auto:{trigger['name']}")
+                    elif trigger["name"] == "partial_profit":
+                        # Partial profit — exit first open leg
+                        logger.info("Auto-executing partial_profit on %s (no AI): %s",
+                                    pkg["id"], trigger["details"])
                         for leg in pkg["legs"]:
                             if leg["status"] == "open":
                                 await self.pm.exit_leg(pkg["id"], leg["leg_id"],
                                     trigger=f"auto:{trigger['name']}")
-                elif trigger["name"] == "partial_profit":
-                    # Partial profit — exit first open leg
-                    logger.info("Auto-executing partial_profit on %s (no AI): %s",
-                                pkg["id"], trigger["details"])
-                    for leg in pkg["legs"]:
-                        if leg["status"] == "open":
-                            await self.pm.exit_leg(pkg["id"], leg["leg_id"],
-                                trigger=f"auto:{trigger['name']}")
-                            break
-                else:
-                    # Ambiguous triggers (correlation_break, vol_spike, etc.) — escalate
-                    self.pm.add_alert(pkg["id"], trigger["trigger_id"], trigger["name"],
-                        {"details": trigger["details"], "action": trigger["action"]})
+                                break
+                    else:
+                        # Ambiguous triggers (correlation_break, vol_spike, etc.) — escalate
+                        self.pm.add_alert(pkg["id"], trigger["trigger_id"], trigger["name"],
+                            {"details": trigger["details"], "action": trigger["action"]})
+        finally:
+            pkg.pop("_exiting", None)
 
     async def _apply_verdicts(self, pkg: dict, triggers: list[dict], verdicts: dict):
         """Apply AI verdicts — APPROVE=execute, MODIFY=adjust, REJECT=skip."""
