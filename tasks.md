@@ -277,7 +277,7 @@
    - Rewrite to match the pattern used by polymarket.py, kalshi.py, etc.
    - File: src/adapters/commodities.py
 
-39. TODO - Rewrite theta scanner with working implementation
+39. COMPLETED - Rewrite theta scanner with working implementation
    - Current `src/theta_scanner.py` is a 27-line stub calling `registry.get_all_events()` which doesn't exist
    - References non-existent event fields (implied_probability, current_price, end_date)
    - Rewrite to use AdapterRegistry.fetch_all() to get NormalizedEvents, check expiry dates, calculate edge
@@ -343,6 +343,7 @@
    - Add `/api/arbitrage/hedge-packages` endpoint returning available hedged positions with P&L scenarios
    - Add UI section in arbitrout.js showing hedge packages with visual payoff diagrams
    - File: src/execution/crypto_hedger.py (new), src/arbitrage_router.py, src/static/js/arbitrout.js
+
 
 
 
