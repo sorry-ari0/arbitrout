@@ -47,7 +47,7 @@ try:
     from adapters.coinbase import CoinbaseAdapter
     from adapters.crypto_spot import CryptoSpotAdapter
     _ARBITRAGE_AVAILABLE = True
-except ImportError as _arb_err:
+except (ImportError, SyntaxError) as _arb_err:
     logger.warning("Arbitrage modules not available: %s", _arb_err)
     _ARBITRAGE_AVAILABLE = False
 
@@ -64,8 +64,9 @@ try:
     from execution.kalshi_executor import KalshiExecutor
     from execution.coinbase_spot_executor import CoinbaseSpotExecutor
     from execution.predictit_executor import PredictItExecutor
+    from positions.trade_journal import TradeJournal
     _POSITIONS_AVAILABLE = True
-except ImportError as _pos_err:
+except (ImportError, SyntaxError) as _pos_err:
     logger.warning("Position system not available: %s", _pos_err)
     _POSITIONS_AVAILABLE = False
 
@@ -191,10 +192,11 @@ async def lifespan(app: FastAPI):
                 executors = paper_executors
                 logger.info("Position system running in PAPER TRADING mode (balance=$%.2f)", get_paper_balance())
 
-            pm = PositionManager(data_dir=DATA_DIR / "positions", executors=executors)
+            journal = TradeJournal(data_dir=DATA_DIR / "positions")
+            pm = PositionManager(data_dir=DATA_DIR / "positions", executors=executors, trade_journal=journal)
             ai = AIAdvisor() if os.environ.get("ANTHROPIC_API_KEY") else None
             exit_engine = ExitEngine(pm, ai_advisor=ai)
-            init_position_system(pm, exit_engine, ai)
+            init_position_system(pm, exit_engine, ai, trade_journal=journal)
             exit_engine.start()
             _exit_task = True
             logger.info("Position system initialized with %d executors", len(executors))

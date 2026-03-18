@@ -14,15 +14,17 @@ router = APIRouter(prefix="/api/derivatives", tags=["derivatives"])
 _pm = None  # PositionManager
 _exit_engine = None  # ExitEngine
 _ai_advisor = None  # AIAdvisor
+_trade_journal = None  # TradeJournal
 _ws_clients: list[WebSocket] = []
 
 
-def init_position_system(pm, exit_engine=None, ai_advisor=None):
+def init_position_system(pm, exit_engine=None, ai_advisor=None, trade_journal=None):
     """Called by server.py lifespan to inject dependencies."""
-    global _pm, _exit_engine, _ai_advisor
+    global _pm, _exit_engine, _ai_advisor, _trade_journal
     _pm = pm
     _exit_engine = exit_engine
     _ai_advisor = ai_advisor
+    _trade_journal = trade_journal
 
 
 def _require_pm():
@@ -307,3 +309,18 @@ async def _broadcast(data: dict):
     for ws in disconnected:
         if ws in _ws_clients:
             _ws_clients.remove(ws)
+
+
+# ── Trade Journal ─────────────────────────────────────────────────────────────
+
+@router.get("/journal")
+async def get_journal(limit: int = 20):
+    if not _trade_journal:
+        return {"entries": [], "message": "Trade journal not initialized"}
+    return {"entries": _trade_journal.get_recent(limit)}
+
+@router.get("/journal/performance")
+async def get_journal_performance(mode: Optional[str] = None, strategy: Optional[str] = None):
+    if not _trade_journal:
+        return {"total_trades": 0, "message": "Trade journal not initialized"}
+    return _trade_journal.get_performance(mode=mode, strategy=strategy)

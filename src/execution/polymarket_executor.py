@@ -50,13 +50,17 @@ class PolymarketExecutor(BaseExecutor):
         try:
             b = self._get_clob().get_balance()
             return BalanceResult(float(b.get("available",0)), float(b.get("total",0)))
-        except: return BalanceResult(0,0)
+        except Exception as e:
+            logger.warning("Polymarket balance failed: %s", e)
+            return BalanceResult(0,0)
 
     async def get_positions(self) -> list[PositionInfo]:
         try:
             ps = self._get_clob().get_positions()
             return [PositionInfo(p.get("asset_id",""),float(p.get("size",0)),float(p.get("avg_price",0)),float(p.get("cur_price",0)),float(p.get("pnl",0))) for p in (ps if isinstance(ps,list) else [])]
-        except: return []
+        except Exception as e:
+            logger.warning("Polymarket positions failed: %s", e)
+            return []
 
     async def get_current_price(self, asset_id: str) -> float:
         try:

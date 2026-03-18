@@ -16,10 +16,13 @@ class PaperExecutor:
         self.positions: dict[str, dict] = {}
         self.trade_history: list[dict] = []
 
-    async def buy(self, asset_id: str, amount_usd: float) -> ExecutionResult:
+    async def buy(self, asset_id: str, amount_usd: float, fallback_price: float = 0) -> ExecutionResult:
         if amount_usd > self.balance:
             return ExecutionResult(False, None, 0, 0, 0, f"Insufficient paper balance: {self.balance:.2f} < {amount_usd:.2f}")
         price = await self.real.get_current_price(asset_id)
+        if price <= 0 and fallback_price > 0:
+            price = fallback_price
+            logger.info("Using fallback price %.4f for %s", price, asset_id)
         if price <= 0:
             return ExecutionResult(False, None, 0, 0, 0, f"Invalid price for {asset_id}")
         qty = amount_usd / price
@@ -40,6 +43,9 @@ class PaperExecutor:
         if not pos or pos["quantity"] < quantity * 0.999:
             return ExecutionResult(False, None, 0, 0, 0, f"No position or insufficient quantity for {asset_id}")
         price = await self.real.get_current_price(asset_id)
+        if price <= 0:
+            price = pos["avg_entry_price"]
+            logger.info("Using entry price fallback %.4f for sell of %s", price, asset_id)
         proceeds = quantity * price
         self.balance += proceeds
         pos["quantity"] -= quantity
@@ -52,27 +58,38 @@ class PaperExecutor:
         pos_val = 0.0
         for aid, pos in self.positions.items():
             try: pos_val += pos["quantity"] * await self.real.get_current_price(aid)
-            except: pos_val += pos["quantity"] * pos["avg_entry_price"]
+            except Exception: pos_val += pos["quantity"] * pos["avg_entry_price"]
         return BalanceResult(self.balance, self.balance + pos_val)
 
     async def get_positions(self) -> list[PositionInfo]:
         result = []
         for aid, pos in self.positions.items():
             try: price = await self.real.get_current_price(aid)
-            except: price = pos["avg_entry_price"]
+            except Exception: price = pos["avg_entry_price"]
             result.append(PositionInfo(aid, pos["quantity"], pos["avg_entry_price"], price,
                                        (price - pos["avg_entry_price"]) * pos["quantity"]))
         return result
 
     async def get_current_price(self, asset_id: str) -> float:
-        return await self.real.get_current_price(asset_id)
+        price = await self.real.get_current_price(asset_id)
+        if price <= 0:
+            # Fallback to known position entry price
+            pos = self.positions.get(asset_id)
+            if pos:
+                return pos["avg_entry_price"]
+        return price
 
     def is_configured(self) -> bool: return True
 
     def get_stats(self) -> dict:
         pnl = self.balance - self.starting_balance
         sells = [t for t in self.trade_history if t["action"] == "sell"]
-        wins = sum(1 for t in sells if t.get("price", 0) > 0)  # tracked at package level via position_manager
+        # Win rate: compare sell price to buy price for same asset
+        wins = 0
+        for s in sells:
+            buys = [b for b in self.trade_history if b["action"] == "buy" and b["asset_id"] == s["asset_id"]]
+            if buys and s.get("price", 0) > buys[-1].get("price", 0):
+                wins += 1
         return {"mode":"paper","starting_balance":self.starting_balance,"current_balance":self.balance,
                 "total_pnl":round(pnl,2),"total_trades":len(self.trade_history),
                 "win_rate":round(wins/len(sells),2) if sells else 0,"open_positions":len(self.positions)}
