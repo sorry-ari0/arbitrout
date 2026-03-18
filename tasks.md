@@ -318,7 +318,7 @@
    - Restore on page load so user doesn't lose their view on refresh
    - File: src/static/js/arbitrout.js
 
-45. TODO - Add RSI and MACD indicators to Lobsterminal chart
+45. BLOCKED - Add RSI and MACD indicators to Lobsterminal chart
    - Calculate RSI(14) and MACD(12,26,9) from price history
    - Add as separate panes below the main chart (not overlaid on candles)
    - Match existing Bollinger Bands color scheme
@@ -343,6 +343,7 @@
    - Add `/api/arbitrage/hedge-packages` endpoint returning available hedged positions with P&L scenarios
    - Add UI section in arbitrout.js showing hedge packages with visual payoff diagrams
    - File: src/execution/crypto_hedger.py (new), src/arbitrage_router.py, src/static/js/arbitrout.js
+
 
 
 
