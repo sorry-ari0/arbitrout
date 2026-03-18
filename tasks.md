@@ -236,7 +236,7 @@
    - Prices in 1-99 cents, use POST /portfolio/orders
    - File: src/execution/kalshi_executor.py
 
-34. TODO - Build unified arbitrage executor
+34. BLOCKED - Build unified arbitrage executor
    - Create `src/execution/arbitrage_executor.py` that orchestrates cross-platform trades
    - Flow: verify_spread() → calculate_allocation(amount, yes_price, no_price) → execute_both_sides() → log_result()
    - Kelly criterion for optimal bet sizing (from strategy research)
@@ -343,6 +343,7 @@
    - Add `/api/arbitrage/hedge-packages` endpoint returning available hedged positions with P&L scenarios
    - Add UI section in arbitrout.js showing hedge packages with visual payoff diagrams
    - File: src/execution/crypto_hedger.py (new), src/arbitrage_router.py, src/static/js/arbitrout.js
+
 
 
 
