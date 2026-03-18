@@ -502,14 +502,108 @@ function showEventDetail(opp) {
         container.appendChild(tradeEl);
     }
 
+    // Controls container for bookmark and execution
+    var controlsContainer = document.createElement('div');
+    controlsContainer.style.cssText = 'display:flex; flex-direction:column; gap:8px; padding:8px; border-top:1px solid var(--arb-border);';
+    container.appendChild(controlsContainer);
+
     // Save button
     var saveBtn = document.createElement('button');
-    saveBtn.style.cssText = 'margin:8px;padding:6px 12px;background:var(--arb-accent);color:var(--arb-bg);border:none;border-radius:3px;cursor:pointer;font-family:monospace;font-size:11px;font-weight:700;';
+    saveBtn.style.cssText = 'padding:6px 12px;background:var(--arb-accent);color:var(--arb-bg);border:none;border-radius:3px;cursor:pointer;font-family:monospace;font-size:11px;font-weight:700;';
     saveBtn.textContent = 'BOOKMARK';
     saveBtn.addEventListener('click', function() {
         saveMarket(event.match_id || '', event.canonical_title || opp.canonical_title || '', event.category || '');
     });
-    container.appendChild(saveBtn);
+    controlsContainer.appendChild(saveBtn);
+
+    // Execution controls
+    var executeControls = document.createElement('div');
+    executeControls.style.cssText = 'display:flex; flex-direction:column; gap:6px;';
+    controlsContainer.appendChild(executeControls);
+
+    var amountInputContainer = document.createElement('div');
+    amountInputContainer.style.cssText = 'display:flex; align-items:center; gap:4px;';
+    executeControls.appendChild(amountInputContainer);
+
+    var amountLabel = document.createElement('span');
+    amountLabel.style.cssText = 'color:var(--arb-text); font-family:monospace; font-size:11px;';
+    amountLabel.textContent = 'Amount ($):';
+    amountInputContainer.appendChild(amountLabel);
+
+    var amountInput = document.createElement('input');
+    amountInput.type = 'number';
+    amountInput.value = '100'; // Default amount
+    amountInput.min = '1';
+    amountInput.step = '10';
+    amountInput.style.cssText = 'flex-grow:1; padding:4px; background:#1a1a2e; color:#0f0; border:1px solid #333; border-radius:3px; font-family:monospace; font-size:11px;';
+    amountInputContainer.appendChild(amountInput);
+
+    var autoConfirmCheckboxContainer = document.createElement('label');
+    autoConfirmCheckboxContainer.style.cssText = 'display:flex; align-items:center; gap:4px; color:var(--arb-muted); font-family:monospace; font-size:10px; cursor:pointer;';
+    var autoConfirmCheckbox = document.createElement('input');
+    autoConfirmCheckbox.type = 'checkbox';
+    autoConfirmCheckbox.style.cssText = 'margin:0;';
+    autoConfirmCheckboxContainer.appendChild(autoConfirmCheckbox);
+    autoConfirmCheckboxContainer.appendChild(document.createTextNode('Auto-confirm (risky)'));
+    executeControls.appendChild(autoConfirmCheckboxContainer);
+
+    var executeBtn = document.createElement('button');
+    executeBtn.style.cssText = 'padding:6px 12px; background:var(--arb-green); color:var(--arb-bg); border:none; border-radius:3px; cursor:pointer; font-family:monospace; font-size:11px; font-weight:700;';
+    executeBtn.textContent = 'EXECUTE TRADE';
+    executeControls.appendChild(executeBtn);
+
+    var statusEl = document.createElement('div');
+    statusEl.style.cssText = 'color:var(--arb-muted); font-family:monospace; font-size:10px; margin-top:4px; text-align:center;';
+    executeControls.appendChild(statusEl);
+
+    executeBtn.addEventListener('click', async function() {
+        var amount_usd = parseFloat(amountInput.value);
+        var auto_confirm = autoConfirmCheckbox.checked;
+        if (isNaN(amount_usd) || amount_usd <= 0) {
+            statusEl.textContent = 'Please enter a valid amount.';
+            statusEl.style.color = '#ff4444';
+            return;
+        }
+
+        var confirmMessage = `Are you sure you want to execute a trade of $${amount_usd.toFixed(2)} for this opportunity?`;
+        if (!auto_confirm && !confirm(confirmMessage)) {
+            statusEl.textContent = 'Execution cancelled.';
+            statusEl.style.color = 'var(--arb-muted)';
+            return;
+        }
+
+        executeBtn.disabled = true;
+        executeBtn.textContent = 'EXECUTING...';
+        statusEl.textContent = 'Pending...';
+        statusEl.style.color = 'var(--arb-muted)';
+
+        try {
+            const response = await fetch('/api/arbitrage/execute', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    opportunity_id: opp.id,
+                    amount_usd: amount_usd,
+                    auto_confirm: auto_confirm
+                })
+            });
+            const result = await response.json();
+
+            if (response.ok) {
+                statusEl.textContent = `Completed! Expected profit: $${result.expected_profit_usd.toFixed(2)} (${result.expected_profit_pct.toFixed(1)}%)`;
+                statusEl.style.color = 'var(--arb-green)';
+            } else {
+                statusEl.textContent = `Failed: ${result.detail || 'Unknown error'}`;
+                statusEl.style.color = '#ff4444';
+            }
+        } catch (error) {
+            statusEl.textContent = `Error: ${error.message}`;
+            statusEl.style.color = '#ff4444';
+        } finally {
+            executeBtn.disabled = false;
+            executeBtn.textContent = 'EXECUTE TRADE';
+        }
+    });
 }
 
 // === FEED ===
