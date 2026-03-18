@@ -284,7 +284,7 @@
    - Wire up to `/api/arbitrage/theta` endpoint in arbitrage_router.py
    - File: src/theta_scanner.py, src/arbitrage_router.py
 
-40. TODO - Rewrite cross-asset matcher with working implementation
+40. BLOCKED - Rewrite cross-asset matcher with working implementation
    - Current `src/cross_asset_matcher.py` is a 16-line stub returning empty list with only comments
    - Implement actual matching: parse prediction market event titles for price targets, match against real asset prices
    - Use CryptoSpotAdapter prices for crypto events, CommoditiesAdapter for commodity events
@@ -343,6 +343,7 @@
    - Add `/api/arbitrage/hedge-packages` endpoint returning available hedged positions with P&L scenarios
    - Add UI section in arbitrout.js showing hedge packages with visual payoff diagrams
    - File: src/execution/crypto_hedger.py (new), src/arbitrage_router.py, src/static/js/arbitrout.js
+
 
 
 
