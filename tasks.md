@@ -38,7 +38,7 @@
    - Use semi-transparent colors so they dont obscure candles
    - File: src/static/js/app.js
 
-7. BLOCKED - Add arbitrage engine unit tests
+7. COMPLETED - Add arbitrage engine unit tests
    - Create tests/test_arbitrage.py with pytest
    - Test that two events with yes=0.40 and no=0.55 produce profit=0.05
    - Test that same-platform pairs are excluded
@@ -100,7 +100,7 @@
      - Initially hide the event detail pane (`#event-detail`) on mobile, making it visible only when an opportunity is clicked.
    - File: src/static/css/arbitrout.css
 
-18. BLOCKED - Frontend JS: Add sorting controls and logic to Arbitrout opportunities list.
+18. COMPLETED - Frontend JS: Add sorting controls and logic to Arbitrout opportunities list.
    - The UI is missing a dropdown to select sorting preferences for the arbitrage opportunities. The `renderOpportunities` function also lacks the logic to apply sorting client-side.
    - Add a dropdown UI element (e.g., `<select>`) in the opportunities panel header.
    - Implement client-side sorting logic within `renderOpportunities` or a helper function, allowing users to sort by criteria such as "Profit High-Low", "Profit Low-High", "Platform A-Z", and "Newest First" (using `matched_event.last_updated` or similar).
@@ -126,7 +126,7 @@
 
 ## Stock Analysis & Portfolio Research (Bloomberg Terminal)
 
-22. BLOCKED - Add scrapling-based company research module
+22. COMPLETED - Add scrapling-based company research module
    - Create a new module `src/research/company_researcher.py` that uses the scrapling library (already installed v0.4.1)
    - Implement `research_company(ticker: str) -> dict` that scrapes Wikipedia for: CEO name, founders, founding year, headquarters, industry, key investors, board members, recent controversies
    - Use the existing `_COMPANY_NAMES` mapping in swarm_engine.py (maps ~50 tickers to Wikipedia article titles) as a starting point, but also support looking up unknown tickers by searching Wikipedia for "{company_name} company"
@@ -145,7 +145,7 @@
    - Modify `swarm_engine.py` to use this universe instead of MOCK_UNIVERSE when the data file exists, falling back to MOCK_UNIVERSE if not
    - File: src/research/stock_universe.py (new), src/swarm_engine.py
 
-24. BLOCKED - Add Hong Kong Stock Exchange (HKEX) listings to universe
+24. COMPLETED - Add Hong Kong Stock Exchange (HKEX) listings to universe
    - Extend `src/research/stock_universe.py` to include HKEX stocks
    - Scrape HKEX stock list from `https://www.hkex.com.hk/Market-Data/Securities-Prices/Equities` or use the HKEX API
    - Hong Kong tickers use 4-digit codes (e.g., 0700.HK for Tencent, 9988.HK for Alibaba HK)
@@ -162,7 +162,7 @@
    - Add the research data to the swarm_engine screening results so when a user says "tech companies with female CEOs" the unresolved criteria can be checked against actual scraped data
    - File: src/server.py, src/research/company_researcher.py
 
-26. BLOCKED - Integrate scrapling research into portfolio prompt screening
+26. COMPLETED - Integrate scrapling research into portfolio prompt screening
    - When swarm_engine.py parses a prompt and gets `unresolved` criteria (e.g., "companies founded by immigrants", "CEOs with engineering backgrounds", "backed by Sequoia Capital"), it currently ignores them
    - After the initial fundamentals screening, for each passing ticker call `company_researcher.research_company()` to get qualitative data
    - Use a simple keyword/substring match against the research data to filter for unresolved criteria
@@ -180,7 +180,7 @@
    - Register the adapter in server.py alongside existing adapters
    - File: src/adapters/commodities.py (new), src/server.py
 
-28. BLOCKED - Add crypto spot price adapter for cross-platform arbitrage
+28. COMPLETED - Add crypto spot price adapter for cross-platform arbitrage
    - Create `src/adapters/crypto_spot.py` that fetches real-time crypto prices from multiple exchanges
    - Use free APIs: CoinGecko (no key needed) for BTC, ETH, SOL, DOGE, XRP, ADA, AVAX, LINK, DOT, MATIC prices across exchanges
    - Normalize into `NormalizedEvent` format: compare prediction market contracts about crypto prices (e.g., "BTC > $100k by July") against actual spot prices and implied probabilities from options/futures
@@ -218,6 +218,7 @@
    - Store findings in `data/strategy_research.json` with: strategy_name, description, expected_edge_pct, risk_factors, sources
    - This research should inform the implementation of tasks 27-30 above
    - File: src/research/arbitrage_strategies.py (new)
+
 
 
 
