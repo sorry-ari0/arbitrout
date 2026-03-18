@@ -313,7 +313,7 @@
    - Use token-based similarity (Jaccard) instead of exact string match
    - File: src/adapters/registry.py or src/arbitrage_engine.py
 
-44. TODO - Add localStorage persistence for arbitrout UI state
+44. COMPLETED - Add localStorage persistence for arbitrout UI state
    - Save sort preference, selected filters, and last viewed opportunity to localStorage
    - Restore on page load so user doesn't lose their view on refresh
    - File: src/static/js/arbitrout.js
@@ -343,6 +343,7 @@
    - Add `/api/arbitrage/hedge-packages` endpoint returning available hedged positions with P&L scenarios
    - Add UI section in arbitrout.js showing hedge packages with visual payoff diagrams
    - File: src/execution/crypto_hedger.py (new), src/arbitrage_router.py, src/static/js/arbitrout.js
+
 
 
 
