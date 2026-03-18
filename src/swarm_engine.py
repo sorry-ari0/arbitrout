@@ -854,6 +854,29 @@ async def screen_stocks(body: ScreenRequest) -> ScreenResponse:
         except Exception as e:
             logger.warning("Research filter failed, skipping: %s", e)
 
+    # Fallback: use company_researcher for remaining unresolved criteria
+    if unresolved and tickers:
+        try:
+            from research.company_researcher import research_company
+            resolved_tickers = []
+            for sym in tickers:
+                info = research_company(sym)
+                if info:
+                    blob = " ".join(str(v) for v in info.values() if v).lower()
+                    matched_criteria = 0
+                    for criterion in unresolved:
+                        keywords = criterion.lower().split()
+                        if sum(1 for kw in keywords if kw in blob) >= len(keywords) // 2 + 1:
+                            matched_criteria += 1
+                    if matched_criteria > 0:
+                        resolved_tickers.append(sym)
+            if resolved_tickers:
+                tickers = resolved_tickers
+                unresolved = []
+                logger.info("Company research fallback: %d tickers matched", len(resolved_tickers))
+        except Exception as e:
+            logger.warning("Company research fallback failed: %s", e)
+
     # Build notes from research results
     notes = ""
     if research_results:

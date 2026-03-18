@@ -206,7 +206,7 @@
    - Add `/api/arbitrage/cross-asset` endpoint returning matched opportunities with hedge instructions
    - File: src/cross_asset_matcher.py (new), src/arbitrage_router.py
 
-31. BLOCKED - Research best arbitrage strategies before implementation
+31. COMPLETED - Research best arbitrage strategies before implementation
    - Create `src/research/arbitrage_strategies.py` that uses scrapling to research and document the best approaches for:
      - Prediction market arbitrage (academic papers, blog posts from experienced traders)
      - Crypto spot vs prediction market hedging
@@ -219,6 +219,130 @@
    - This research should inform the implementation of tasks 27-30 above
    - File: src/research/arbitrage_strategies.py (new)
 
+## Auto-Execution & Trade Placement
+
+32. TODO - Build Polymarket trade executor
+   - Create `src/execution/polymarket_executor.py` using `py-clob-client` SDK
+   - Implement EIP-712 wallet signing for Polygon chain (chain_id=137)
+   - Functions: `buy_yes(token_id, amount_usdc)`, `buy_no(token_id, amount_usdc)`, `get_balance()`, `get_positions()`
+   - Use FOK (Fill or Kill) order type for immediate execution
+   - Handle USDC.e deposits and token allowances for CTF Exchange contract
+   - File: src/execution/polymarket_executor.py
+
+33. TODO - Build Kalshi trade executor
+   - Create `src/execution/kalshi_executor.py` using `kalshi_python_sync` SDK
+   - Implement RSA key-pair auth (KALSHI-ACCESS-KEY/SIGNATURE/TIMESTAMP headers)
+   - Functions: `buy_yes(ticker, contracts, limit_price)`, `buy_no(ticker, contracts, limit_price)`, `get_balance()`, `get_positions()`
+   - Prices in 1-99 cents, use POST /portfolio/orders
+   - File: src/execution/kalshi_executor.py
+
+34. TODO - Build unified arbitrage executor
+   - Create `src/execution/arbitrage_executor.py` that orchestrates cross-platform trades
+   - Flow: verify_spread() → calculate_allocation(amount, yes_price, no_price) → execute_both_sides() → log_result()
+   - Kelly criterion for optimal bet sizing (from strategy research)
+   - Simultaneous FOK orders on both platforms to minimize slippage
+   - Rollback logic: if one side fails, attempt to cancel or exit the other
+   - Track execution history in `data/execution_log.json`
+   - File: src/execution/arbitrage_executor.py
+
+35. TODO - Add auto-execution API endpoint and UI controls
+   - Add POST `/api/arbitrage/execute` endpoint accepting: `{opportunity_id, amount_usd, auto_confirm: bool}`
+   - Pre-flight check: re-fetch prices, verify spread still exists, calculate expected profit after fees
+   - Add execution controls to arbitrout.js: "Execute" button on each opportunity, amount input field, confirmation dialog
+   - Show execution status: pending → verifying → executing → completed/failed
+   - File: src/arbitrage_router.py, src/static/js/arbitrout.js
+
+36. TODO - Add wallet/account configuration and balance management
+   - Create `src/execution/wallet_config.py` for managing API keys and wallet credentials
+   - Support env vars: POLYMARKET_PRIVATE_KEY, POLYMARKET_FUNDER_ADDRESS, KALSHI_API_KEY, KALSHI_RSA_PRIVATE_KEY
+   - Add `/api/execution/balances` endpoint showing available balance on each platform
+   - Add `/api/execution/config` endpoint for checking which platforms are configured
+   - Never log or expose private keys in responses
+   - File: src/execution/wallet_config.py, src/server.py
+
+37. TODO - Generate pixel art for Arbitrout using Groq API
+   - Use Groq's image generation API to create pixel art logo/mascot for the Arbitrout dashboard
+   - Terminal-style pixel art aesthetic matching the green-on-black theme
+   - Generate: logo, favicon, loading animation sprites
+   - Save to src/static/img/ directory
+   - File: src/tools/generate_art.py (new)
+
+## Stub Rewrites (broken code from dispatcher)
+
+38. TODO - Rewrite commodities adapter to use correct BaseAdapter pattern
+   - Current `src/adapters/commodities.py` has wrong imports (uses `from adapters.registry import BaseAdapter` instead of `from adapters.base`)
+   - Has custom NormalizedEvent Pydantic model instead of using the dataclass from `adapters.models`
+   - Uses `random.uniform()` for price noise instead of real implied probabilities
+   - Wrong field names (event_name vs title, market_end_time vs expiry)
+   - Rewrite to match the pattern used by polymarket.py, kalshi.py, etc.
+   - File: src/adapters/commodities.py
+
+39. TODO - Rewrite theta scanner with working implementation
+   - Current `src/theta_scanner.py` is a 27-line stub calling `registry.get_all_events()` which doesn't exist
+   - References non-existent event fields (implied_probability, current_price, end_date)
+   - Rewrite to use AdapterRegistry.fetch_all() to get NormalizedEvents, check expiry dates, calculate edge
+   - Wire up to `/api/arbitrage/theta` endpoint in arbitrage_router.py
+   - File: src/theta_scanner.py, src/arbitrage_router.py
+
+40. TODO - Rewrite cross-asset matcher with working implementation
+   - Current `src/cross_asset_matcher.py` is a 16-line stub returning empty list with only comments
+   - Implement actual matching: parse prediction market event titles for price targets, match against real asset prices
+   - Use CryptoSpotAdapter prices for crypto events, CommoditiesAdapter for commodity events
+   - Calculate hedge cost and guaranteed P&L for each matched pair
+   - Wire up to `/api/arbitrage/cross-asset` endpoint
+   - File: src/cross_asset_matcher.py, src/arbitrage_router.py
+
+## Quality & Infrastructure
+
+41. TODO - Add thread safety to arbitrage scanner shared state
+   - `_previous_prices` dict and scanner state accessed from multiple async tasks without locks
+   - Add asyncio.Lock for scanner state mutations
+   - Prevent race conditions between auto-scan loop and manual scan triggers
+   - File: src/arbitrage_engine.py
+
+42. TODO - Add integration tests for adapter fetch cycles
+   - Create `tests/test_adapters_integration.py`
+   - Test each adapter's fetch_events() returns valid NormalizedEvent list (or gracefully fails)
+   - Mock HTTP responses for deterministic testing
+   - Test AdapterRegistry.fetch_all() concurrent execution
+   - File: tests/test_adapters_integration.py
+
+43. TODO - Optimize event matching with indexing
+   - Current event matching is O(n²) comparing all events across platforms
+   - Add title normalization and fuzzy matching index
+   - Use token-based similarity (Jaccard) instead of exact string match
+   - File: src/adapters/registry.py or src/arbitrage_engine.py
+
+44. TODO - Add localStorage persistence for arbitrout UI state
+   - Save sort preference, selected filters, and last viewed opportunity to localStorage
+   - Restore on page load so user doesn't lose their view on refresh
+   - File: src/static/js/arbitrout.js
+
+45. TODO - Add RSI and MACD indicators to Lobsterminal chart
+   - Calculate RSI(14) and MACD(12,26,9) from price history
+   - Add as separate panes below the main chart (not overlaid on candles)
+   - Match existing Bollinger Bands color scheme
+   - File: src/static/js/app.js
+
+46. TODO - Add structured logging with JSON output
+   - Replace print statements and basic logging with structured JSON logs
+   - Include: timestamp, level, module, event_type, duration_ms for API calls
+   - Add request_id tracking through the middleware
+   - File: src/server.py, new src/logging_config.py
+
+## Crypto Derivative Hedging
+
+47. TODO - Build crypto spot + prediction market synthetic derivative package
+   - Create `src/execution/crypto_hedger.py` that implements hedged crypto positions
+   - Strategy: Buy crypto on exchange (via CoinGecko price feed) + simultaneously buy NO on prediction market "crypto > $X" contract
+   - If price drops: crypto loses value but NO contract pays out → net profit from NO payout minus crypto loss
+   - If price rises: crypto gains value, NO contract expires worthless → net profit from crypto appreciation minus NO cost
+   - Profit when: spread between crypto spot and prediction market implied probability exceeds total fees
+   - Auto-detect optimal strike price by scanning all crypto prediction market contracts and finding the best hedge ratio
+   - Calculate break-even points, max profit, max loss for each package
+   - Add `/api/arbitrage/hedge-packages` endpoint returning available hedged positions with P&L scenarios
+   - Add UI section in arbitrout.js showing hedge packages with visual payoff diagrams
+   - File: src/execution/crypto_hedger.py (new), src/arbitrage_router.py, src/static/js/arbitrout.js
 
 
 

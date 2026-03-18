@@ -45,6 +45,7 @@ try:
     from adapters.opinion_labs import OpinionLabsAdapter
     from adapters.robinhood import RobinhoodAdapter
     from adapters.coinbase import CoinbaseAdapter
+    from adapters.crypto_spot import CryptoSpotAdapter
     _ARBITRAGE_AVAILABLE = True
 except ImportError as _arb_err:
     logger.warning("Arbitrage modules not available: %s", _arb_err)
@@ -141,6 +142,7 @@ async def lifespan(app: FastAPI):
         arb_registry.register(OpinionLabsAdapter())
         arb_registry.register(RobinhoodAdapter())
         arb_registry.register(CoinbaseAdapter())
+        arb_registry.register(CryptoSpotAdapter())
         init_scanner(arb_registry)
         (DATA_DIR / "arbitrage").mkdir(exist_ok=True)
         logger.info("Arbitrage subsystem initialized with %d adapters", len(arb_registry.list_platforms()))
@@ -191,6 +193,41 @@ app.include_router(strategy_router)
 
 if _ARBITRAGE_AVAILABLE:
     app.include_router(arbitrage_router)
+
+# --- Research API Routes ---
+try:
+    from research.company_researcher import research_company, research_batch
+    from research.stock_universe import get_universe, get_ticker_count, refresh_us_universe
+    from research.arbitrage_strategies import research_strategies
+
+    @app.get("/api/research/company/{ticker}")
+    async def get_company_research(ticker: str):
+        result = research_company(ticker.upper())
+        if not result:
+            return {"error": f"No research found for {ticker}"}
+        return result
+
+    @app.get("/api/research/batch")
+    async def get_batch_research(tickers: str = ""):
+        ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()][:20]
+        if not ticker_list:
+            return {"error": "Provide tickers as comma-separated list"}
+        results = research_batch(ticker_list)
+        return {"results": results, "count": len(results)}
+
+    @app.get("/api/research/universe")
+    async def get_stock_universe(exchange: str = None, cap_tier: str = None, include_hkex: bool = False):
+        universe = get_universe(exchange=exchange, cap_tier=cap_tier, include_hkex=include_hkex)
+        return {"tickers": universe[:500], "total": len(universe), "ticker_count": get_ticker_count()}
+
+    @app.get("/api/research/strategies")
+    async def get_strategies(force: bool = False):
+        strategies = research_strategies(force=force)
+        return {"strategies": strategies, "count": len(strategies)}
+
+    logger.info("Research API endpoints registered")
+except ImportError as _research_err:
+    logger.warning("Research modules not available: %s", _research_err)
 
 # --- API Routes ---
 

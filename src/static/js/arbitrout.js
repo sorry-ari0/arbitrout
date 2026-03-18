@@ -233,6 +233,44 @@ function loadOpportunities() {
         .catch(function(err) { console.error('Arb fetch error:', err); });
 }
 
+var currentSort = 'profit-high';
+
+function sortOpportunities(opps) {
+    var sorted = opps.slice();
+    switch (currentSort) {
+        case 'profit-high': sorted.sort(function(a, b) { return (b.profit_pct || 0) - (a.profit_pct || 0); }); break;
+        case 'profit-low': sorted.sort(function(a, b) { return (a.profit_pct || 0) - (b.profit_pct || 0); }); break;
+        case 'platform-az': sorted.sort(function(a, b) { return (a.buy_yes_platform || '').localeCompare(b.buy_yes_platform || ''); }); break;
+        case 'newest': sorted.sort(function(a, b) { return (b.last_updated || 0) - (a.last_updated || 0); }); break;
+        case 'volume-high': sorted.sort(function(a, b) { return (b.volume || 0) - (a.volume || 0); }); break;
+    }
+    return sorted;
+}
+
+function createSortDropdown() {
+    var select = document.createElement('select');
+    select.id = 'arb-sort';
+    select.style.cssText = 'background:#1a1a2e;color:#0f0;border:1px solid #333;padding:4px 8px;font-family:monospace;font-size:12px;margin-bottom:8px;width:100%;';
+    var options = [
+        ['profit-high', 'Profit: High → Low'],
+        ['profit-low', 'Profit: Low → High'],
+        ['platform-az', 'Platform: A → Z'],
+        ['newest', 'Newest First'],
+        ['volume-high', 'Volume: High → Low']
+    ];
+    options.forEach(function(opt) {
+        var o = document.createElement('option');
+        o.value = opt[0]; o.textContent = opt[1];
+        if (opt[0] === currentSort) o.selected = true;
+        select.appendChild(o);
+    });
+    select.addEventListener('change', function() {
+        currentSort = this.value;
+        fetchArbitrageData();
+    });
+    return select;
+}
+
 function renderOpportunities(opps) {
     var container = document.getElementById('opp-list');
     if (!container) return;
@@ -241,6 +279,12 @@ function renderOpportunities(opps) {
     while (container.firstChild) {
         container.removeChild(container.firstChild);
     }
+
+    // Add sort dropdown
+    container.appendChild(createSortDropdown());
+
+    // Apply sort
+    opps = sortOpportunities(opps);
 
     if (!opps || opps.length === 0) {
         var empty = document.createElement('div');
