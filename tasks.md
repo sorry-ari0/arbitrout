@@ -229,7 +229,7 @@
    - Handle USDC.e deposits and token allowances for CTF Exchange contract
    - File: src/execution/polymarket_executor.py
 
-33. TODO - Build Kalshi trade executor
+33. BLOCKED - Build Kalshi trade executor
    - Create `src/execution/kalshi_executor.py` using `kalshi_python_sync` SDK
    - Implement RSA key-pair auth (KALSHI-ACCESS-KEY/SIGNATURE/TIMESTAMP headers)
    - Functions: `buy_yes(ticker, contracts, limit_price)`, `buy_no(ticker, contracts, limit_price)`, `get_balance()`, `get_positions()`
@@ -343,6 +343,7 @@
    - Add `/api/arbitrage/hedge-packages` endpoint returning available hedged positions with P&L scenarios
    - Add UI section in arbitrout.js showing hedge packages with visual payoff diagrams
    - File: src/execution/crypto_hedger.py (new), src/arbitrage_router.py, src/static/js/arbitrout.js
+
 
 
 
