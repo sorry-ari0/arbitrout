@@ -70,7 +70,7 @@ class PoliticalSyntheticStrategy:
     expected_value_pct: float = 0.0     # weighted-average P&L across scenarios
     win_probability: float = 0.0        # probability of positive outcome
     max_loss_pct: float = 0.0           # worst-case scenario loss
-    confidence: float = 0.0             # LLM self-assessed confidence (0.0 - 1.0)
+    confidence: str | float = 0.0        # LLM self-assessed confidence: float 0-1 or string "high"/"medium"/"low"
     reasoning: str = ""                 # LLM explanation of the trade thesis
 
 
@@ -186,7 +186,7 @@ class PoliticalOpportunity:
                 "expected_value_pct": round(self.strategy.expected_value_pct, 2),
                 "win_probability": round(self.strategy.win_probability, 2),
                 "max_loss_pct": round(self.strategy.max_loss_pct, 2),
-                "confidence": round(self.strategy.confidence, 2),
+                "confidence": round(self.strategy.confidence, 2) if isinstance(self.strategy.confidence, (int, float)) else self.strategy.confidence,
                 "reasoning": self.strategy.reasoning,
                 "leg_count": len(self.legs),
                 "scenarios": [
