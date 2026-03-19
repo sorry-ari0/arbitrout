@@ -54,6 +54,11 @@ class AutoTrader:
         # News scanner integration — thread-safe queue
         self._news_lock = asyncio.Lock()
         self._news_opportunities: list[dict] = []
+        self._political_analyzer = None
+
+    def set_political_analyzer(self, analyzer):
+        """Set the political analyzer reference for opportunity consumption."""
+        self._political_analyzer = analyzer
 
     async def add_news_opportunity(self, opp: dict):
         """Called by NewsScanner to queue a normal-urgency signal."""
@@ -192,6 +197,21 @@ class AutoTrader:
             opportunities.append(news_opp)
         if news_opps:
             logger.info("Auto trader: merged %d news opportunities", len(news_opps))
+
+        # Merge political synthetic opportunities
+        if self._political_analyzer:
+            political_opps = self._political_analyzer.get_opportunities()
+            for pol_opp in political_opps:
+                ev_pct = pol_opp.get("net_expected_value_pct", 0)
+                confidence = pol_opp.get("strategy", {}).get("confidence", "medium")
+                conf_mult = {"high": 1.5, "medium": 1.0}.get(confidence, 0.5)
+                cross_platform = len(set(pol_opp.get("platforms", []))) > 1
+                platform_mult = 1.5 if cross_platform else 1.0
+                pol_opp["_score"] = ev_pct * conf_mult * platform_mult
+                pol_opp["profit_pct"] = ev_pct
+                opportunities.append(pol_opp)
+            if political_opps:
+                logger.info("Auto trader: merged %d political opportunities", len(political_opps))
 
         if not opportunities:
             logger.info("Auto trader: no opportunities found this cycle")
@@ -383,6 +403,70 @@ class AutoTrader:
                 self._trades_skipped += 1
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "duplicate_open_position")
+                continue
+
+            # Political synthetic: multi-leg with weight-based allocation
+            if opp.get("opportunity_type") == "political_synthetic":
+                try:
+                    pkg = create_package(f"Auto: {trade_title[:60]}", "political_synthetic")
+                except ValueError:
+                    continue
+
+                opp_legs = opp.get("legs", [])
+                if not opp_legs:
+                    continue
+
+                for opp_leg in opp_legs:
+                    leg_cost = round(trade_size * opp_leg.get("weight", 1.0 / len(opp_legs)), 2)
+                    leg_cost = max(MIN_TRADE_SIZE, leg_cost)
+                    side = opp_leg.get("side", "YES")
+                    leg_type = "prediction_yes" if side == "YES" else "prediction_no"
+                    price = opp_leg.get("yes_price", 0.5) if side == "YES" else opp_leg.get("no_price", 0.5)
+                    pkg["legs"].append(create_leg(
+                        platform=opp_leg.get("platform", "polymarket"),
+                        leg_type=leg_type,
+                        asset_id=f"{opp_leg['event_id']}:{side}",
+                        asset_label=f"{side} @ {opp_leg.get('platform', '?')}: {opp_leg.get('title', '?')[:40]}",
+                        entry_price=price if price > 0 else 0.5,
+                        cost=leg_cost,
+                        expiry=opp.get("expiry", "2026-12-31")[:10],
+                    ))
+
+                pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 30}))
+                pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -30}))
+                pkg["exit_rules"].append(create_exit_rule("trailing_stop", {"current": 20, "bound_min": 10, "bound_max": 40}))
+                pkg["_political_strategy"] = opp.get("strategy", {})
+
+                # Political packages skip normal strategy/side determination.
+                # Fall through to the execution block below (try/await pm.execute_package).
+                if not pkg["legs"]:
+                    self._trades_skipped += 1
+                    continue
+
+                pkg_name = pkg.get("name", opp_title)
+                bet_side = "POLITICAL"
+                bet_conviction = 0.0
+                entry_price = 0.5
+                try:
+                    result = await self.pm.execute_package(pkg)
+                    if result.get("success"):
+                        trades_this_cycle += 1
+                        self._trades_opened += 1
+                        remaining_budget -= trade_size
+                        logger.info("Auto trader OPENED political: %s (ev=%.1f%%, size=$%.2f)",
+                                    pkg_name, spread_pct, trade_size)
+                        if self.dlog:
+                            self.dlog.log_trade_opened(
+                                pkg_id=pkg.get("id", ""), title=pkg_name,
+                                strategy="political_synthetic",
+                                side=bet_side, price=entry_price,
+                                size=trade_size, score=score, spread_pct=spread_pct,
+                                conviction=bet_conviction,
+                                days_to_expiry=days_to_expiry, volume=opp.get("volume", 0))
+                except Exception as e:
+                    logger.warning("Auto trader: political trade failed: %s", e)
+                    if self.dlog:
+                        self.dlog.log_trade_failed(opp_title, str(e))
                 continue
 
             # Determine strategy:

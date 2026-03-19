@@ -222,3 +222,21 @@ class DecisionLogger:
             "size_usd": round(size, 2),
             "reasoning": reasoning[:200],
         })
+
+    # ── Political Analyzer decisions ──────────────────────────────────────
+
+    def log_political_analysis(self, cluster_id: str, race: str,
+                                contracts_count: int, relationships_count: int,
+                                strategies_found: int, strategies_valid: int,
+                                cache_hit: bool, elapsed_ms: int):
+        self._write({
+            "type": "political_synthetic_analysis",
+            "cluster_id": cluster_id,
+            "race": race[:100],
+            "contracts_count": contracts_count,
+            "relationships_count": relationships_count,
+            "strategies_found": strategies_found,
+            "strategies_valid": strategies_valid,
+            "cache_hit": cache_hit,
+            "elapsed_ms": elapsed_ms,
+        })
