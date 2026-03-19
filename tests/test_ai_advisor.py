@@ -18,11 +18,11 @@ class TestPromptBuilding:
 
 class TestParseResponse:
     def test_approve(self, advisor):
-        v = advisor._parse_response("r1: APPROVE\n")
-        assert v["r1"]["action"] == "APPROVE"
+        v = advisor._parse_response("trailing_stop: APPROVE\n")
+        assert v["trailing_stop"]["action"] == "APPROVE"
     def test_modify(self, advisor):
-        v = advisor._parse_response("r1: MODIFY 8\n")
-        assert v["r1"]["action"] == "MODIFY" and v["r1"]["value"] == 8.0
+        v = advisor._parse_response("trailing_stop: MODIFY 8\n")
+        assert v["trailing_stop"]["action"] == "MODIFY" and v["trailing_stop"]["value"] == 8.0
     def test_reject(self, advisor):
-        v = advisor._parse_response("r1: REJECT too risky\n")
-        assert v["r1"]["action"] == "REJECT"
+        v = advisor._parse_response("trailing_stop: REJECT too risky\n")
+        assert v["trailing_stop"]["action"] == "REJECT"
