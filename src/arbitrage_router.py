@@ -20,11 +20,11 @@ _scanner: ArbitrageScanner | None = None
 _registry: AdapterRegistry | None = None
 
 
-def init_scanner(registry: AdapterRegistry):
+def init_scanner(registry: AdapterRegistry, decision_logger=None):
     """Called by server.py to initialize the scanner."""
     global _scanner, _registry
     _registry = registry
-    _scanner = ArbitrageScanner(registry)
+    _scanner = ArbitrageScanner(registry, decision_logger=decision_logger)
 
 
 def get_scanner() -> ArbitrageScanner:
