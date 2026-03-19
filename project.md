@@ -292,7 +292,7 @@ signal_strength = 0.2 * normalized_insider_count
 | `src/adapters/registry.py` | `AdapterRegistry` — registers adapters, concurrent `fetch_all()`, status reporting |
 | `src/adapters/polymarket.py` | Polymarket Gamma API adapter |
 | `src/adapters/predictit.py` | PredictIt API adapter |
-| `src/adapters/kalshi.py` | Kalshi API adapter (needs API key) |
+| `src/adapters/kalshi.py` | Kalshi API adapter (public events+orderbook, optional auth) |
 | `src/adapters/limitless.py` | Limitless API adapter |
 | `src/adapters/robinhood.py` | Robinhood scraper adapter |
 | `src/adapters/coinbase.py` | Coinbase scraper adapter |
@@ -405,7 +405,7 @@ ArbitrageOpportunity:
 
 **Package structure:**
 - A "package" is a grouped position with one or more "legs" (individual market bets) and "exit rules"
-- Strategy types: `spot_plus_hedge`, `cross_platform_arb`, `pure_prediction`, `news_driven`
+- Strategy types: `spot_plus_hedge`, `cross_platform_arb`, `pure_prediction`, `news_driven`, `synthetic_derivative` (planned: `political_synthetic`)
 - Each package tracks: status (open/closed/partial_exit/rollback), total_cost, current_value, peak_value, unrealized_pnl, itm_status (ITM/OTM/ATM), execution_log, ai_strategy
 
 **Leg structure:**
@@ -678,6 +678,8 @@ is_configured() → bool
 | `cache.json` | `src/data/arbitrage/` | Latest fetched events from all platforms |
 | `saved_markets.json` | `src/data/arbitrage/` | User-bookmarked matched events |
 | `manual_links.json` | `src/data/arbitrage/` | User-created manual event links |
+| `eval_log.jsonl` | `src/data/arbitrage/` | **Planned:** Universal eval log — all opportunities (entered + skipped) with backfilled P&L |
+| `political_cache.json` | `src/data/arbitrage/` | **Planned:** Political synthetic LLM analysis cache (15-min TTL, 200-entry LRU) |
 
 ## Frontend
 | File | Purpose |
@@ -720,11 +722,11 @@ python -m uvicorn server:app --host 127.0.0.1 --port 8500 --log-level info
 | Polymarket | Working | ~100 |
 | PredictIt | Working | ~865 |
 | Limitless | Working (500 errors sometimes) | ~25 |
-| Kalshi | Needs API key (401) | 0 |
+| Kalshi | Working (public API, no auth needed) | ~54 |
 | Robinhood | Scraping returns 0 | 0 |
 | Coinbase | Scraping returns 0 | 0 |
 | CryptoSpot | Working (CoinGecko) | ~45 |
-| Opinion Labs | Needs API key (401) | 0 |
+| Opinion Labs | Disabled (US-restricted) | 0 |
 
 ### Executors (trading)
 | Platform | Key | Status | Notes |
@@ -749,7 +751,27 @@ python -m uvicorn server:app --host 127.0.0.1 --port 8500 --log-level info
 - News scanner: 150s interval, 14 RSS feeds, two-pass AI pipeline (headline scan → deep analysis), breaking trades execute immediately
 - Decision logging: all buys, skips, trigger fires, AI verdicts, news signals logged to `decision_log.jsonl`
 - Arbitrage scanner: ~1170 events from 8 adapters
+- **Upcoming: Political Synthetic Derivative Analysis** — spec at `docs/specs/2026-03-19-political-synthetic-analysis-design.md`
+  - Rule-based contract classification (candidate_win, party_outcome, margin_bracket, vote_share, matchup) + LLM-driven multi-leg strategy
+  - Detects mispriced correlations (same outcome priced differently cross-platform) and conditional hedges (complementary branches)
+  - 2-4 legs per position, cross-platform and single-platform
+  - 15-min scan cadence, 15-min cache TTL with 3% price-shift invalidation
+  - New trigger #21: `political_event_resolved` (safety override)
+- **Upcoming: System-Wide Hindsight Analysis** — unified eval log for ALL strategy types
+  - Logs every opportunity encountered (entered AND skipped, with reasons)
+  - Backfills P&L when positions close or markets resolve
+  - Missed opportunity analysis: hypothetical P&L for skipped strategies
+  - Calibration tracking: for each skip reason, % correct vs incorrect
+  - New endpoints: `/api/eval/summary`, `/api/eval/missed`, `/api/eval/calibration`, `/api/eval/details/{id}`
+  - New dashboard "Eval" tab: strategy performance comparison, missed opportunities, calibration chart
 - **Recent changes (2026-03-19):**
+  - **Kalshi adapter rewrite:** Public API now uses events→markets→orderbook pipeline (no auth needed). Returns ~54 properly-priced events. Old approach returned 600 useless multi-leg parlays.
+  - **Coinbase dedup:** Coinbase prediction markets ARE Kalshi markets. `_fetch_via_kalshi()` returns empty when no `COINBASE_ADV_API_KEY` to avoid duplicate events.
+  - **Opinion Labs disabled:** US-restricted platform. Adapter only registered when `OPINION_LABS_API_KEY` is set.
+  - **OpenRouter auto-disable:** AI advisor tracks `_disabled_providers` dict. On 402/401 errors, provider disabled for 1 hour (prevents spam retries).
+  - **OPPORTUNITIES 0 fix:** Relaxed `_passes_quick_filter` from requiring 2+ context terms to: 2+ shared names OR 1 shared name + 1 context term.
+  - **Zero-price market filter:** `find_arbitrage()` skips events where both yes_price and no_price are 0 (closed/no liquidity).
+  - **Finnhub API key added:** `FINNHUB_API_KEY` configured in `.env` for quote/history fallback.
   - **False opportunity fixes:**
     - Hungarian MSZP election: added acronym extraction (`_extract_acronyms()`) to entity matcher. Extracts party names, tickers, PredictIt contract identifiers. Rejects matches where both events have unique non-overlapping acronyms (e.g., MSZP vs TISZA).
     - BTC $74K-$76K range synthetic: added `_build_range_synthetic_info()` with proper 4-scenario analysis for range markets. Sorts boundaries into zones, calculates per-zone payoff, rejects if win_count <= loss_count or loss_prob > 60%.
