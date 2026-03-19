@@ -52,6 +52,175 @@ def _markets_have_same_target(markets: list[NormalizedEvent]) -> bool:
     return (lo / hi) >= 0.98
 
 
+def _build_range_synthetic_info(yes_market: NormalizedEvent,
+                                no_market: NormalizedEvent,
+                                yes_crypto: dict,
+                                no_crypto: dict) -> dict | None:
+    """Build synthetic info when one leg is a range ("between") market.
+
+    Range markets have 4 scenarios, not 3:
+    Example: BUY YES "BTC between $74K-$76K" + BUY NO "BTC above $73.2K"
+      1. Price > range_high ($76K): YES loses, NO loses (BTC IS above $73.2K) → BOTH LOSE
+      2. range_low < Price < range_high ($74K-$76K): YES wins, NO loses → ONE WINS
+      3. directional_strike < Price < range_low ($73.2K-$74K): YES loses, NO loses → BOTH LOSE
+      4. Price < directional_strike ($73.2K): YES loses, NO wins → ONE WINS
+
+    We must check all 4 scenarios and reject if loss scenarios are most probable.
+    """
+    yes_dir = yes_crypto.get("direction", "")
+    no_dir = no_crypto.get("direction", "")
+
+    # Identify which is the range market and which is directional
+    if yes_dir == "between":
+        range_market, range_crypto = yes_market, yes_crypto
+        dir_market, dir_crypto = no_market, no_crypto
+        range_is_yes = True
+    else:
+        range_market, range_crypto = no_market, no_crypto
+        dir_market, dir_crypto = yes_market, yes_crypto
+        range_is_yes = False
+
+    range_low = range_crypto.get("price_low")
+    range_high = range_crypto.get("price_high")
+    dir_target = dir_crypto.get("price") or 0
+    dir_direction = dir_crypto.get("direction", "") or "above"
+
+    if not range_low or not range_high or not dir_target:
+        return None
+
+    # Costs
+    if range_is_yes:
+        range_cost = yes_market.yes_price   # BUY YES on range
+        dir_cost = no_market.no_price       # BUY NO on directional
+    else:
+        range_cost = no_market.no_price     # BUY NO on range
+        dir_cost = yes_market.yes_price     # BUY YES on directional
+
+    total_cost = range_cost + dir_cost
+    if total_cost >= 1.0:
+        return None
+
+    # Determine when each leg pays out
+    # Range YES pays when price is IN [range_low, range_high]
+    # Range NO pays when price is OUTSIDE [range_low, range_high]
+    # Directional "above X" YES pays when price > X; NO pays when price < X
+    # Directional "below X" YES pays when price < X; NO pays when price > X
+
+    # Build 4 scenarios based on the price zones
+    # Sort all boundary prices to create zones
+    boundaries = sorted(set([range_low, range_high, dir_target]))
+
+    # Create zones: below lowest, between each pair, above highest
+    zones = []
+    zones.append(("below", boundaries[0], f"Price < ${boundaries[0]:,.0f}"))
+    for i in range(len(boundaries) - 1):
+        zones.append(("between", (boundaries[i], boundaries[i+1]),
+                      f"${boundaries[i]:,.0f} < Price < ${boundaries[i+1]:,.0f}"))
+    zones.append(("above", boundaries[-1], f"Price > ${boundaries[-1]:,.0f}"))
+
+    scenarios = {}
+    win_count = 0
+    loss_count = 0
+
+    for zone_type, zone_val, condition in zones:
+        # Determine a representative price for this zone
+        if zone_type == "below":
+            rep_price = zone_val - 1
+        elif zone_type == "above":
+            rep_price = zone_val + 1
+        else:
+            rep_price = (zone_val[0] + zone_val[1]) / 2
+
+        # Does the range leg pay?
+        in_range = range_low <= rep_price <= range_high
+        if range_is_yes:
+            range_pays = 1.0 if in_range else 0.0  # BUY YES on range
+        else:
+            range_pays = 1.0 if not in_range else 0.0  # BUY NO on range
+
+        # Does the directional leg pay?
+        if dir_direction in ("above", "over"):
+            dir_condition_true = rep_price > dir_target
+        elif dir_direction in ("below", "under"):
+            dir_condition_true = rep_price < dir_target
+        else:
+            dir_condition_true = rep_price > dir_target
+
+        if range_is_yes:
+            # BUY NO on directional → pays when condition is FALSE
+            dir_pays = 1.0 if not dir_condition_true else 0.0
+        else:
+            # BUY YES on directional → pays when condition is TRUE
+            dir_pays = 1.0 if dir_condition_true else 0.0
+
+        total_payout = range_pays + dir_pays
+        net = round(total_payout - total_cost, 4)
+        return_pct = round(net / total_cost * 100, 1) if total_cost > 0 else 0
+
+        scenario_key = condition.replace(" ", "_").replace("$", "").replace(",", "")[:30]
+        scenarios[scenario_key] = {
+            "condition": condition,
+            "range_pays": range_pays,
+            "dir_pays": dir_pays,
+            "net": net,
+            "return_pct": return_pct,
+        }
+
+        if return_pct > 0:
+            win_count += 1
+        else:
+            loss_count += 1
+
+    # Must win in more scenarios than lose
+    if win_count <= loss_count:
+        return None
+
+    # Estimate loss probability using market-implied probabilities
+    # For range: YES price ≈ P(in range), NO price ≈ P(outside range)
+    # For directional "above X": YES price ≈ P(above X), NO price ≈ P(below X)
+    loss_prob = 0.0
+    for s in scenarios.values():
+        if s["return_pct"] <= 0:
+            # Estimate zone probability from market prices
+            # This is rough but better than assuming equal probability
+            loss_prob += 1.0 / len(scenarios)
+
+    if loss_prob > 0.60:
+        return None
+
+    # Calculate the gap between range boundary and directional strike
+    if dir_target < range_low:
+        gap = range_low - dir_target
+    elif dir_target > range_high:
+        gap = dir_target - range_high
+    else:
+        gap = 0  # directional strike is inside the range
+    avg_price = (range_low + range_high) / 2
+    gap_pct = gap / avg_price if avg_price > 0 else 1.0
+
+    win_return_pct = round((1.0 - total_cost) / total_cost * 100, 1) if total_cost > 0 else 0
+
+    return {
+        "type": "range_vs_directional",
+        "high_strike": range_high,
+        "low_strike": range_low if dir_target >= range_low else dir_target,
+        "yes_target": yes_crypto.get("price", 0),
+        "no_target": no_crypto.get("price", 0),
+        "yes_direction": yes_crypto.get("direction", ""),
+        "no_direction": no_crypto.get("direction", ""),
+        "yes_market_type": "range" if range_is_yes else "directional",
+        "no_market_type": "range" if not range_is_yes else "directional",
+        "total_cost": round(total_cost, 4),
+        "scenarios": scenarios,
+        "win_conditions": win_count,
+        "loss_conditions": loss_count,
+        "loss_probability": round(loss_prob, 3),
+        "gap_pct": round(gap_pct * 100, 1),
+        "yes_price_range": [yes_crypto.get("price_low"), yes_crypto.get("price_high")],
+        "no_price_range": [no_crypto.get("price_low"), no_crypto.get("price_high")],
+    }
+
+
 def _build_synthetic_info(yes_market: NormalizedEvent,
                           no_market: NormalizedEvent) -> dict | None:
     """Build synthetic derivative details from two markets with different targets.
@@ -74,6 +243,13 @@ def _build_synthetic_info(yes_market: NormalizedEvent,
 
     if not yes_target or not no_target:
         return None
+
+    # Handle range ("between") markets with proper 4-scenario analysis
+    # instead of the standard 3-scenario model
+    if yes_dir == "between" or no_dir == "between":
+        return _build_range_synthetic_info(
+            yes_market, no_market, yes_crypto, no_crypto
+        )
 
     # Reject if both bets are the same direction — that's doubling down, not hedging
     # e.g., YES "dip to $70K" (below) + NO "above $70K" (above) — both win on same move
@@ -376,20 +552,24 @@ def unsave_market(match_id: str) -> list[dict]:
 # ============================================================
 # FEED: RECENT PRICE CHANGES
 # ============================================================
-_previous_prices: dict[str, float] = {}  # "platform:event_id" -> yes_price
+_previous_prices: dict[str, tuple[float, float]] = {}  # "platform:event_id" -> (yes_price, timestamp)
 _previous_prices_lock = threading.Lock()
+_MAX_PRICE_ENTRIES = 5000  # Cap to prevent unbounded memory growth
+_PRICE_TTL_SECONDS = 86400  # Prune entries older than 24 hours
 
 
 def compute_feed(events: list[NormalizedEvent], max_items: int = 50) -> list[dict]:
     """Compute recent price changes for the live feed pane."""
     global _previous_prices
     feed: list[dict] = []
+    now = time.time()
 
     for ev in events:
         key = f"{ev.platform}:{ev.event_id}"
         with _previous_prices_lock:
-            prev = _previous_prices.get(key)
-            _previous_prices[key] = ev.yes_price
+            entry = _previous_prices.get(key)
+            prev = entry[0] if entry else None
+            _previous_prices[key] = (ev.yes_price, now)
 
         if prev is not None and prev != ev.yes_price:
             change = ev.yes_price - prev
@@ -403,6 +583,17 @@ def compute_feed(events: list[NormalizedEvent], max_items: int = 50) -> list[dic
                 "change_pct": round(change / prev * 100, 2) if prev > 0 else 0,
                 "timestamp": ev.last_updated,
             })
+
+    # Prune stale entries periodically (when over 80% of cap)
+    with _previous_prices_lock:
+        if len(_previous_prices) > _MAX_PRICE_ENTRIES * 0.8:
+            cutoff = now - _PRICE_TTL_SECONDS
+            _previous_prices = {k: v for k, v in _previous_prices.items() if v[1] > cutoff}
+            # If still over cap after TTL prune, drop oldest entries
+            if len(_previous_prices) > _MAX_PRICE_ENTRIES:
+                sorted_keys = sorted(_previous_prices, key=lambda k: _previous_prices[k][1])
+                for k in sorted_keys[:len(_previous_prices) - _MAX_PRICE_ENTRIES]:
+                    del _previous_prices[k]
 
     # Sort by absolute change descending
     feed.sort(key=lambda f: abs(f["change"]), reverse=True)

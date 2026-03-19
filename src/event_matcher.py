@@ -190,6 +190,31 @@ def _extract_key_terms(title: str) -> set:
     return {w for w in words if len(w) >= 3 and w not in _COMMON_WORDS}
 
 
+def _extract_acronyms(title: str) -> set:
+    """Extract uppercase acronyms/identifiers (2-10 chars) from a title.
+
+    Catches party names (MSZP, TISZA, KDNP), org abbreviations (NATO, FIFA),
+    and PredictIt contract identifiers that _extract_names misses.
+    Also catches mixed-case identifiers like 'Fidesz' after the colon in
+    PredictIt's 'Market: Contract' format.
+    """
+    acronyms = set()
+    # Pure uppercase acronyms (2-10 chars)
+    for m in re.finditer(r'\b([A-Z][A-Z0-9]{1,9})\b', title):
+        word = m.group(1)
+        if word.lower() not in _COMMON_WORDS and word.lower() not in _COUNTRIES:
+            acronyms.add(word.lower())
+    # After colon = PredictIt contract name — extract as distinguishing identifier
+    if ':' in title:
+        contract_part = title.split(':', 1)[1].strip()
+        # Extract capitalized words from the contract portion
+        for m in re.finditer(r'\b([A-Za-z][A-Za-z]{2,})\b', contract_part):
+            word = m.group(1)
+            if word.lower() not in _COMMON_WORDS and word.lower() not in _COUNTRIES:
+                acronyms.add(word.lower())
+    return acronyms
+
+
 def extract_entities(title: str) -> dict:
     """Extract all entity types from a market title."""
     crypto = _extract_crypto(title)
@@ -203,6 +228,7 @@ def extract_entities(title: str) -> dict:
         "countries": _extract_countries(title),
         "quoted": _extract_quoted_terms(title),
         "key_terms": _extract_key_terms(title),
+        "acronyms": _extract_acronyms(title),
     }
 
 
@@ -300,6 +326,18 @@ def _passes_quick_filter(ent_a: dict, ent_b: dict, title_a: str, title_b: str) -
 
     if ent_a["crypto_ticker"] or ent_b["crypto_ticker"]:
         return False
+
+    # Check for conflicting identifiers: if both events have unique
+    # acronyms/identifiers that the other lacks, they're different outcomes
+    # of the same market (e.g., MSZP vs TISZA in Hungarian election)
+    acr_a, acr_b = ent_a.get("acronyms", set()), ent_b.get("acronyms", set())
+    if acr_a and acr_b:
+        shared_acr = acr_a & acr_b
+        unique_a = acr_a - acr_b - ent_a.get("countries", set())
+        unique_b = acr_b - acr_a - ent_b.get("countries", set())
+        if unique_a and unique_b and not shared_acr:
+            # Both have identifiers the other lacks = different contracts
+            return False
 
     # Shared person name — need shared CONTEXT terms beyond the name itself
     shared_names = ent_a["names"] & ent_b["names"]
