@@ -74,9 +74,17 @@ _COUNTRIES = {
 
 
 def _extract_crypto(title: str) -> dict:
-    """Extract crypto entities: ticker, price target, direction."""
+    """Extract crypto entities: ticker, price target(s), direction.
+
+    Handles three market types:
+    - Directional: "BTC above $74K" → price=74000, direction="above"
+    - Range: "BTC between $74K and $76K" → price=75000 (midpoint),
+             price_low=74000, price_high=76000, direction="between"
+    - Plain: "BTC price on March 23" → price extracted, direction=None
+    """
     lower = title.lower()
-    result = {"ticker": None, "price": None, "direction": None}
+    result = {"ticker": None, "price": None, "direction": None,
+              "price_low": None, "price_high": None}
 
     for alias, ticker in _TICKER_ALIASES.items():
         if len(alias) <= 3:
@@ -95,6 +103,30 @@ def _extract_crypto(title: str) -> dict:
             if t in _KNOWN_TICKERS:
                 result["ticker"] = t
 
+    # Check for "between X and Y" range pattern FIRST
+    range_pat = r'between\s+\$?([\d,]+(?:\.\d+)?)\s*(?:k|K)?\s*(?:and|[-–])\s*\$?([\d,]+(?:\.\d+)?)\s*(?:k|K)?'
+    range_match = re.search(range_pat, title, re.IGNORECASE)
+    if range_match:
+        low_str = range_match.group(1).replace(",", "")
+        high_str = range_match.group(2).replace(",", "")
+        low_price = float(low_str)
+        high_price = float(high_str)
+        # Handle K suffix
+        range_text = title[range_match.start():range_match.end()]
+        if re.search(r'(?:' + re.escape(low_str) + r')\s*(?:k|K)', range_text):
+            low_price *= 1000
+        if re.search(r'(?:' + re.escape(high_str) + r')\s*(?:k|K)', range_text):
+            high_price *= 1000
+        # Ensure low < high
+        if low_price > high_price:
+            low_price, high_price = high_price, low_price
+        result["price_low"] = low_price
+        result["price_high"] = high_price
+        result["price"] = (low_price + high_price) / 2  # midpoint for matching
+        result["direction"] = "between"
+        return result
+
+    # Standard single-price extraction
     price_patterns = [
         r'\$?([\d,]+(?:\.\d+)?)\s*(?:k|K)',
         r'\$\s*([\d,]+(?:\.\d+)?)',
@@ -165,6 +197,8 @@ def extract_entities(title: str) -> dict:
         "crypto_ticker": crypto["ticker"],
         "crypto_price": crypto["price"],
         "crypto_direction": crypto["direction"],
+        "crypto_price_low": crypto.get("price_low"),
+        "crypto_price_high": crypto.get("price_high"),
         "names": _extract_names(title),
         "countries": _extract_countries(title),
         "quoted": _extract_quoted_terms(title),
@@ -243,7 +277,13 @@ def _passes_quick_filter(ent_a: dict, ent_b: dict, title_a: str, title_b: str) -
     # Same crypto ticker
     if (ent_a["crypto_ticker"] and ent_b["crypto_ticker"]
             and ent_a["crypto_ticker"] == ent_b["crypto_ticker"]):
+        dir_a = ent_a.get("crypto_direction")
+        dir_b = ent_b.get("crypto_direction")
         pa, pb = ent_a["crypto_price"], ent_b["crypto_price"]
+
+        # "between" (range) markets are structurally different from "above"/"below"
+        # They can still be grouped for synthetic derivatives, but must be
+        # explicitly recognized as different market types
         if pa and pb:
             ratio = min(pa, pb) / max(pa, pb)
             if ratio < 0.90:

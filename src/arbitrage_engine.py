@@ -25,15 +25,27 @@ DATA_DIR = Path(__file__).parent / "data" / "arbitrage"
 # ARBITRAGE CALCULATOR
 # ============================================================
 def _markets_have_same_target(markets: list[NormalizedEvent]) -> bool:
-    """Check if all markets in a group target the same crypto price."""
-    prices = []
+    """Check if all markets in a group target the same crypto price and type.
+
+    Returns False (= synthetic) when:
+    - Price targets differ by >2%
+    - Market types differ (e.g., "between $74K-$76K" vs "above $74K")
+    """
+    cryptos = []
     for m in markets:
         crypto = _extract_crypto(m.title)
         if crypto["price"]:
-            prices.append(crypto["price"])
-    if len(prices) < 2:
+            cryptos.append(crypto)
+    if len(cryptos) < 2:
         return True  # Can't tell, assume same
+
+    # Check if any markets are range ("between") vs directional ("above"/"below")
+    directions = set(c.get("direction") for c in cryptos if c.get("direction"))
+    if "between" in directions and directions - {"between"}:
+        return False  # Mix of range and directional = synthetic
+
     # All prices within 2% of each other = same target
+    prices = [c["price"] for c in cryptos]
     lo, hi = min(prices), max(prices)
     if hi == 0:
         return True
@@ -59,6 +71,8 @@ def _build_synthetic_info(yes_market: NormalizedEvent,
 
     yes_target = yes_crypto.get("price") or 0
     no_target = no_crypto.get("price") or 0
+    yes_dir = yes_crypto.get("direction", "")
+    no_dir = no_crypto.get("direction", "")
 
     # Determine which is the higher vs lower strike
     if yes_target >= no_target:
@@ -67,6 +81,10 @@ def _build_synthetic_info(yes_market: NormalizedEvent,
     else:
         high_strike = no_target
         low_strike = yes_target
+
+    # Detect market type mix (range vs directional)
+    market_types = set(filter(None, [yes_dir, no_dir]))
+    is_range_mix = "between" in market_types and market_types - {"between"}
 
     yes_cost = yes_market.yes_price
     no_cost = no_market.no_price
@@ -96,16 +114,28 @@ def _build_synthetic_info(yes_market: NormalizedEvent,
             },
         }
 
+    synth_type = "range_vs_directional" if is_range_mix else "range_synthetic"
+
+    # For range-vs-directional mixes, annotate the specific market types
+    yes_type = "range" if yes_dir == "between" else ("directional" if yes_dir else "unknown")
+    no_type = "range" if no_dir == "between" else ("directional" if no_dir else "unknown")
+
     return {
-        "type": "range_synthetic",
+        "type": synth_type,
         "high_strike": high_strike,
         "low_strike": low_strike,
         "yes_target": yes_target,
         "no_target": no_target,
+        "yes_direction": yes_dir,
+        "no_direction": no_dir,
+        "yes_market_type": yes_type,
+        "no_market_type": no_type,
         "total_cost": round(total_cost, 4),
         "scenarios": scenarios,
         "win_conditions": 2,   # wins in 2 of 3 scenarios
         "loss_conditions": 1,  # loses only if price drops below both
+        "yes_price_range": [yes_crypto.get("price_low"), yes_crypto.get("price_high")],
+        "no_price_range": [no_crypto.get("price_low"), no_crypto.get("price_high")],
     }
 
 

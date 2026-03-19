@@ -32,11 +32,15 @@ from .position_manager import create_package, create_leg, create_exit_rule
 
 logger = logging.getLogger("positions.news_scanner")
 
-# ── Position limits (mirrors auto_trader) ────────────────────────────────────
+# ── Position limits ───────────────────────────────────────────────────────────
+# Global cap: $2000 total across auto_trader + news scanner combined.
+# News scanner reserves 3 slots and $600 from the global $2000 budget.
+# These limits are checked against the SHARED position_manager, so the
+# effective news budget is: min(MAX_TOTAL_EXPOSURE, global_cap - auto_exposure)
 MAX_TRADE_SIZE = 200.0
 MIN_TRADE_SIZE = 5.0
-MAX_CONCURRENT = 10
-MAX_TOTAL_EXPOSURE = 2000.0
+MAX_CONCURRENT = 10          # Global max (auto_trader capped at 7)
+MAX_TOTAL_EXPOSURE = 2000.0  # Global max (auto_trader capped at $1400)
 
 # ── Timing ───────────────────────────────────────────────────────────────────
 COOLDOWN_SECONDS = 15 * 60      # 15 min per-market cooldown
