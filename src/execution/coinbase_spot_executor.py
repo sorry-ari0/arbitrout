@@ -48,7 +48,9 @@ class CoinbaseSpotExecutor(BaseExecutor):
             r = await (await self._get_http()).get("/accounts"); r.raise_for_status()
             usd = next((a for a in r.json().get("accounts",[]) if a.get("currency")=="USD"), None)
             return BalanceResult(float(usd["available_balance"]["value"]) if usd else 0, 0)
-        except: return BalanceResult(0,0)
+        except Exception as e:
+            logger.warning("Coinbase get_balance failed: %s", e)
+            return BalanceResult(0,0)
 
     async def get_positions(self) -> list[PositionInfo]: return []
 
@@ -59,7 +61,8 @@ class CoinbaseSpotExecutor(BaseExecutor):
             async with httpx.AsyncClient(timeout=10) as c:
                 r = await c.get("https://api.coingecko.com/api/v3/simple/price", params={"ids":cid,"vs_currencies":"usd"})
                 if r.status_code == 200: return float(r.json().get(cid,{}).get("usd",0))
-        except: pass
+        except Exception as e:
+            logger.warning("Coinbase get_current_price failed for %s: %s", asset_id, e)
         return 0.0
 
     async def close(self):

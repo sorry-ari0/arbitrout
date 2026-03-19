@@ -27,10 +27,11 @@ MAX_TOTAL_EXPOSURE = 1400.0  # Max $1400 for auto trader (reserve $600 for news)
 PORTFOLIO_EXPOSURE_CAP = 0.40  # Kelly portfolio rule: never exceed 40% of total bankroll
 TOTAL_BANKROLL = 2000.0      # Total bankroll (auto_trader $1400 + news $600)
 SCAN_INTERVAL = 300          # 5 minutes between self-initiated scans (safety net)
-MIN_SPREAD_PCT = 3.0         # Minimum 3% spread AFTER fees (lower threshold with limit orders)
+MIN_SPREAD_PCT = 5.0         # Minimum 5% spread to ensure profit after fees
 # Polymarket: 0% maker fee on limit orders. Use limit orders (maker) to enter,
 # taker to exit in worst case = ~2% one-way exit fee.
 # Conservative estimate: 0% entry + 2% exit = 2% round-trip
+# With 5% min spread - 2% fees = 3% net margin minimum
 ROUND_TRIP_FEE_PCT = 2.0     # Estimated round-trip fees with limit order entry
 
 
