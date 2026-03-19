@@ -196,7 +196,14 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
 
 
 def _check_expiry_triggers(legs: list[dict], triggers: list[dict]):
-    """Check time-based safety triggers (10, 11)."""
+    """Check time-based triggers (10, 11).
+
+    Changed from SAFETY OVERRIDE to soft review triggers. Previous behavior
+    force-exited positions <24h before expiry, resulting in 25 trades totaling
+    -$38.88 in losses. Prediction markets often move most in the final hours,
+    so early exits destroy value. Now these are just informational — positions
+    expire naturally and settle at $0 or $1.
+    """
     now = datetime.now()
     for leg in legs:
         if not leg.get("expiry"):
@@ -208,11 +215,11 @@ def _check_expiry_triggers(legs: list[dict], triggers: list[dict]):
             if hours_left <= 6:
                 triggers.append({"trigger_id": T_TIME_6H, "name": "time_6h",
                     "details": f"Leg {leg['leg_id']} expires in {hours_left:.1f}h",
-                    "action": "immediate_exit", "safety_override": True})
+                    "action": "review", "safety_override": False})
             elif hours_left <= 24:
                 triggers.append({"trigger_id": T_TIME_24H, "name": "time_24h",
                     "details": f"Leg {leg['leg_id']} expires in {hours_left:.1f}h",
-                    "action": "immediate_exit", "safety_override": True})
+                    "action": "review", "safety_override": False})
         except (ValueError, TypeError):
             pass
 

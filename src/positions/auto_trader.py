@@ -22,8 +22,8 @@ logger = logging.getLogger("positions.auto_trader")
 # Position limits
 MAX_TRADE_SIZE = 200.0       # Max $200 per trade
 MIN_TRADE_SIZE = 5.0         # Min $5 per trade (supports small live accounts)
-MAX_CONCURRENT = 10          # Max 10 open packages
-MAX_TOTAL_EXPOSURE = 2000.0  # Max $2000 total
+MAX_CONCURRENT = 7           # Max 7 open packages (reserve 3 slots for news-driven trades)
+MAX_TOTAL_EXPOSURE = 1400.0  # Max $1400 for auto trader (reserve $600 for news)
 SCAN_INTERVAL = 300          # 5 minutes between scans
 MIN_SPREAD_PCT = 3.0         # Minimum 3% spread AFTER fees (lower threshold with limit orders)
 # Polymarket: 0% maker fee on limit orders. Use limit orders (maker) to enter,
@@ -291,17 +291,45 @@ class AutoTrader:
 
             trade_title = opp.get("title") or opp.get("canonical_title") or f"Auto-{int(time.time())}"
 
-            # Cooldown: don't re-enter a market within 30 minutes of exiting it
-            recently_closed = {
-                leg.get("asset_id", "").split(":")[0]
-                for p in self.pm.list_packages("closed")
-                if time.time() - p.get("updated_at", 0) < 1800  # 30 min
-                for leg in p.get("legs", [])
-            }
-            if yes_market_id in recently_closed or no_market_id in recently_closed:
+            # Cooldown: don't re-enter a market within 4 hours of exiting it
+            # Track BOTH by condition ID and normalized title to catch duplicates
+            recently_closed_ids = set()
+            recently_closed_titles = set()
+            for p in self.pm.list_packages("closed"):
+                if time.time() - p.get("updated_at", 0) < 14400:  # 4 hours
+                    for leg in p.get("legs", []):
+                        cid = leg.get("asset_id", "").split(":")[0]
+                        if cid:
+                            recently_closed_ids.add(cid)
+                    # Normalize title for matching: strip "Auto: " prefix, lowercase, first 50 chars
+                    ptitle = (p.get("name", "").replace("Auto: ", "").replace("News: ", "").lower().strip())[:50]
+                    if ptitle:
+                        recently_closed_titles.add(ptitle)
+
+            if yes_market_id in recently_closed_ids or no_market_id in recently_closed_ids:
                 self._trades_skipped += 1
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "cooldown_after_exit")
+                continue
+
+            # Title-based duplicate check: don't re-enter the same event by title
+            norm_title = trade_title.lower().strip()[:50]
+            if norm_title in recently_closed_titles:
+                self._trades_skipped += 1
+                if self.dlog:
+                    self.dlog.log_opportunity_skip(opp_title, "cooldown_title_match")
+                continue
+
+            # Also check open positions by title — don't open duplicates of existing positions
+            open_titles = set()
+            for p in self.pm.list_packages("open"):
+                ptitle = (p.get("name", "").replace("Auto: ", "").replace("News: ", "").lower().strip())[:50]
+                if ptitle:
+                    open_titles.add(ptitle)
+            if norm_title in open_titles:
+                self._trades_skipped += 1
+                if self.dlog:
+                    self.dlog.log_opportunity_skip(opp_title, "duplicate_open_position")
                 continue
 
             # Determine strategy:
@@ -442,12 +470,14 @@ class AutoTrader:
                 self._trades_skipped += 1
                 continue
 
-            # Exit rules — tuned for directional bets
-            # Higher target (directional bets have bigger potential moves)
-            # Wider stop (prediction markets are volatile, need room)
-            pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 25}))
-            pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -20}))
-            pkg["exit_rules"].append(create_exit_rule("trailing_stop", {"current": 12, "bound_min": 5, "bound_max": 30}))
+            # Exit rules — tuned from live paper trading data:
+            # - target_hit (100% WR, +$410) is the only profitable exit trigger
+            # - trailing_stop at 12% lost 2 trades (-$15): too tight, shaken out
+            # - time-based exits (-$39): removed as safety overrides, now soft review
+            # Strategy: let winners ride to target, give losers room to recover
+            pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 30}))
+            pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -30}))
+            pkg["exit_rules"].append(create_exit_rule("trailing_stop", {"current": 20, "bound_min": 10, "bound_max": 40}))
 
             # Execute
             pkg_name = pkg.get("name", opp_title)
