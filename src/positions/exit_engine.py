@@ -74,15 +74,32 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
                     "details": f"P&L {pnl_pct:.1f}% >= target {target}%",
                     "action": "full_exit", "safety_override": False})
 
-    # ── 2: Trailing Stop ────────────────────────────────────────────────────
+    # ── 2: Trailing Stop (adaptive, price-level-aware) ───────────────────────
+    # Research: fixed trailing stops fail on prediction markets because a $0.20
+    # contract swinging 15% is only $0.03 (noise), while a $0.80 contract
+    # swinging 15% is a genuine $0.12 move. Scale trail by entry price level:
+    #   Longshots ($0.10-0.30): 2.0x wider (high volatility, low absolute moves)
+    #   Uncertain ($0.30-0.60): 1.0x standard
+    #   Favorites ($0.60-0.85): 0.7x tighter (upside capped at $1.00, protect gains)
     for rule in rules:
         if rule.get("type") == "trailing_stop" and rule.get("active"):
-            trail_pct = rule["params"].get("current", 12)
+            trail_pct = rule["params"].get("current", 35)
+            # Adapt trail by average entry price across legs
+            avg_entry = 0.5
+            open_legs = [l for l in legs if l.get("status") == "open"]
+            if open_legs:
+                entries = [l.get("entry_price", 0.5) for l in open_legs]
+                avg_entry = sum(entries) / len(entries)
+            if avg_entry <= 0.30:
+                trail_pct *= 2.0  # Longshots: very wide trail
+            elif avg_entry >= 0.60:
+                trail_pct *= 0.7  # Favorites: tighter trail to protect gains
+            # else: standard trail for uncertain zone
             if peak_value > 0:
                 drawdown = (peak_value - current_value) / peak_value * 100
                 if drawdown >= trail_pct:
                     triggers.append({"trigger_id": T_TRAILING_STOP, "name": "trailing_stop",
-                        "details": f"Drawdown {drawdown:.1f}% >= trail {trail_pct}%",
+                        "details": f"Drawdown {drawdown:.1f}% >= adaptive trail {trail_pct:.1f}% (entry={avg_entry:.2f})",
                         "action": "full_exit", "safety_override": False})
 
     # ── 3: Partial Profit ───────────────────────────────────────────────────

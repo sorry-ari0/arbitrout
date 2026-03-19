@@ -373,11 +373,17 @@ class AutoTrader:
             recently_closed_ids = set()
             recently_closed_titles = set()
             market_loss_counts = {}  # title → loss count (all time)
+            market_exit_prices = {}  # title → last exit price (for price-change requirement)
             for p in self.pm.list_packages("closed"):
                 ptitle = (p.get("name", "").replace("Auto: ", "").replace("News: ", "").lower().strip())[:50]
                 # Track all-time loss count per market
-                if ptitle and p.get("realized_pnl", p.get("unrealized_pnl", 0)) < 0:
+                pnl = p.get("realized_pnl", p.get("unrealized_pnl", 0))
+                if ptitle and pnl < 0:
                     market_loss_counts[ptitle] = market_loss_counts.get(ptitle, 0) + 1
+                    # Record the exit price of the last losing trade for price-change check
+                    for leg in p.get("legs", []):
+                        if leg.get("current_price", 0) > 0:
+                            market_exit_prices[ptitle] = leg["current_price"]
                 # 24-hour cooldown window (was 4 hours — too short, NCAA entered 5 times)
                 if time.time() - p.get("updated_at", 0) < 86400:  # 24 hours
                     for leg in p.get("legs", []):
@@ -407,6 +413,22 @@ class AutoTrader:
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, f"max_losses_reached ({market_loss_counts[norm_title]} losses)")
                 continue
+
+            # Price-change requirement: after a loss, require 10% favorable move
+            # before re-entering the same market (research: prevents re-entering
+            # unchanged losing markets just because cooldown expired)
+            if norm_title in market_exit_prices:
+                exit_price = market_exit_prices[norm_title]
+                current_entry = buy_yes_price if buy_yes_price > 0 else buy_no_price
+                if current_entry > 0 and exit_price > 0:
+                    price_change = abs(current_entry - exit_price) / exit_price
+                    if price_change < 0.10:  # Less than 10% price change
+                        self._trades_skipped += 1
+                        if self.dlog:
+                            self.dlog.log_opportunity_skip(
+                                opp_title,
+                                f"insufficient_price_change ({price_change:.1%} < 10% since last loss exit)")
+                        continue
 
             # Also check open positions by title — don't open duplicates of existing positions
             open_titles = set()
