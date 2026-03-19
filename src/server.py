@@ -190,7 +190,9 @@ async def lifespan(app: FastAPI):
         arb_registry.register(PolymarketAdapter())
         arb_registry.register(PredictItAdapter())
         arb_registry.register(LimitlessAdapter())
-        arb_registry.register(OpinionLabsAdapter())
+        # Opinion Labs: not available in US — skip unless API key is set
+        if os.environ.get("OPINION_LABS_API_KEY"):
+            arb_registry.register(OpinionLabsAdapter())
         arb_registry.register(RobinhoodAdapter())
         arb_registry.register(CoinbaseAdapter())
         arb_registry.register(CryptoSpotAdapter())
