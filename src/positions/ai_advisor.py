@@ -190,21 +190,42 @@ Do NOT include trigger numbers, parentheses, reasoning lines, or any text other 
     # Extract trigger name from wrapped formats like "Trigger #5 (new_ath)"
     _WRAPPED_KEY_RE = re.compile(r"Trigger\s*#\d+\s*\((\w+)\)", re.IGNORECASE)
 
-    def _normalize_key(self, raw_key: str) -> str:
+    # Valid trigger names — only these are accepted as verdict keys
+    _KNOWN_TRIGGERS = {
+        "target_hit", "trailing_stop", "partial_profit",
+        "stop_loss", "new_ath", "correlation_break",
+        "spread_inversion", "spread_compression", "volume_dry",
+        "time_24h", "time_6h", "time_decay",
+        "vol_spike", "vol_crush", "negative_drift",
+        "platform_error", "liquidity_gap", "fee_spike",
+        "stale_position", "longshot_decay",
+        "political_event_resolved",
+    }
+
+    def _normalize_key(self, raw_key: str) -> str | None:
         """Normalize verdict key to just the trigger name.
+
+        Returns None if the key is not a recognized trigger name.
 
         Handles:
         - "time_decay" → "time_decay" (already clean)
         - "Trigger #5 (new_ath)" → "new_ath"
         - "Trigger #12 (time_decay)" → "time_decay"
         - "- trailing_stop" → "trailing_stop" (strip bullets)
+        - "time_decay (leg_abc123)" → "time_decay" (strip leg suffix)
+        - "Here are my responses" → None (not a trigger)
         """
         m = self._WRAPPED_KEY_RE.search(raw_key)
         if m:
-            return m.group(1)
+            name = m.group(1)
+            return name if name in self._KNOWN_TRIGGERS else None
         # Strip leading bullets/dashes/numbers
         cleaned = re.sub(r"^[\s\-*\d.]+", "", raw_key).strip()
-        return cleaned if cleaned else raw_key
+        # Strip leg suffix: "time_decay (leg_abc123)" → "time_decay"
+        cleaned = re.sub(r"\s*\(leg_\w+\)", "", cleaned).strip()
+        if cleaned in self._KNOWN_TRIGGERS:
+            return cleaned
+        return None
 
     def _parse_response(self, text: str) -> dict:
         """Parse APPROVE/MODIFY/REJECT response per rule.
@@ -233,6 +254,9 @@ Do NOT include trigger numbers, parentheses, reasoning lines, or any text other 
                 continue
 
             rule_id = self._normalize_key(raw_key)
+            if rule_id is None:
+                logger.debug("Skipping unknown trigger key: %s", raw_key)
+                continue
 
             if rest.upper().startswith("APPROVE"):
                 verdicts[rule_id] = {"action": "APPROVE"}
