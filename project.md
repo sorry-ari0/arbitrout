@@ -308,7 +308,7 @@ For each crypto market opportunity:
     score *= (1.0 + signal_strength * 2.0)
     if suspicious insiders:       score *= 1.5
 
-  ENTER if: score >= 3.0 AND net_profit >= 5% (MIN_SPREAD_PCT)
+  ENTER if: score >= 8.0 AND net_profit >= 8% (MIN_SPREAD_PCT)
   STRATEGY: directional bet (one side) on same-platform, arb (both sides) on cross-platform
   SIZE: min($200, remaining_budget/2), floor $25
   LIMITS: 10 concurrent, $2000 total exposure
@@ -544,9 +544,11 @@ The exit engine runs a 60-second scan loop evaluating all open packages.
 - Batched prompt uses `[PKG:id]` markers so AI can address each package separately
 - Provider chain: Groq → Gemini → OpenRouter (Anthropic first in live mode)
 - AI returns per-package: APPROVE (execute), MODIFY (adjust rule params within bounds), REJECT (skip with reason)
+- AI prompt includes paper trading performance data (17 auto exits, 0 wins, -$143) to bias toward REJECT
 - AI prompt is nuanced per trigger type:
-  - `time_decay`: REJECT if 3+ days left and P&L only slightly negative (>-5%). APPROVE only if deeply negative (<-10%) or <2 days left
-  - `negative_drift`: REJECT if loss is small (<5%). APPROVE only for sustained large losses (>8%)
+  - `trailing_stop`: REJECT unless drawdown >25% from peak AND position open >24 hours
+  - `time_decay`: REJECT almost always. APPROVE only if P&L < -20% AND <12 hours left
+  - `negative_drift`: REJECT unless loss >15% sustained over many ticks
 - If AI fails or unavailable → auto-execute mechanical triggers (target_hit, stop_loss, trailing_stop)
 - Noisy triggers (vol_spike, new_ath, spread_compression) suppressed without AI — not actionable
 - Escalation triggers (correlation_break, time_decay, negative_drift, platform_error) create alerts
@@ -581,13 +583,14 @@ The exit engine runs a 60-second scan loop evaluating all open packages.
 6. Calculates profit potential AFTER estimated round-trip fees: `raw_profit = ((1.0 - favored_price) / favored_price) * 100`, then `net_profit = raw_profit - 2%` round-trip fees
 7. Scores each market: `profit_pct * crypto_boost(2x) * expiry_boost(2x if 3-14d, 1.5x if 14-30d) * volume_boost(1.5x if >100K, 1.2x if >10K) * conviction_boost(1.5x if >0.3) * insider_boost`
 8. Insider signal boost: if insiders have positions, `score *= (1 + strength * 2)`. Suspicious insiders add extra 1.5x
-9. Requires minimum 5% gross spread to enter (ensures ~3% net margin after 2% round-trip fees)
+9. Requires minimum 8% gross spread to enter (ensures ~6% net margin after 2% round-trip fees — raised from 5% after data showed fees eating 65% of losses)
 10. **Directional bets (same platform):** picks ONE side based on conviction — cheaper side = higher upside. Buying both YES and NO on the same platform locks in the spread minus fees = guaranteed loss
 11. **Cross-platform arb:** buys both sides on different platforms (spread capture)
-12. **Cooldown:** 30-minute re-entry cooldown after exiting a market
-13. Exit rules tuned for directional bets: target profit (25%), stop loss (-20%), trailing stop (12%, bounds 5-30%)
-14. Position limits: $200 max per trade, $5 min, 10 concurrent positions, $2000 total exposure
-15. **Decision logging:** all buys, skips (with reason), and failures logged to `decision_log.jsonl`
+12. **Cooldown:** 24-hour re-entry cooldown after exiting a market (raised from 4h — NCAA entered 5x, Crude Oil 3x)
+13. Exit rules tuned from 31-trade paper data: target profit (50%), stop loss (-40%), trailing stop (35%, bounds 15-50%)
+14. Position limits: $200 max per trade, $5 min, 7 concurrent positions (3 reserved for news), $1400 auto exposure + $600 news
+15. **Market loss limit:** Block re-entry after 2 losses on the same market (prevents churning)
+16. **Decision logging:** all buys, skips (with reason), and failures logged to `decision_log.jsonl`
 
 ### How the Insider Tracker Works
 
