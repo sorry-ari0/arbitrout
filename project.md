@@ -3,14 +3,15 @@ Status: ACTIVE
 Phase: BUILD
 Last Updated: 2026-03-19
 Repo: https://github.com/sorry-ari0/arbitrout.git
-Branch: feat/derivative-position-manager
+Branch: feat/political-synthetic-analysis
 
 ## Overview
-Arbitrout is a prediction market trading system with three core capabilities:
+Arbitrout is a prediction market trading system with five core capabilities:
 1. **Cross-platform arbitrage scanner** — finds price discrepancies across Polymarket, PredictIt, Limitless, Kalshi, and more
 2. **Autonomous paper trading** — auto trader scans ALL platforms (9 adapters, 10 executors) for opportunities, opens directional bets and cross-platform arb with risk management
 3. **Insider/whale tracker** — monitors top Polymarket traders and uses their positions as trading signals
 4. **AI news scanner** — monitors RSS feeds, uses AI to match headlines to prediction markets, executes trades on breaking news before markets react
+5. **Political synthetic derivatives** — rule-based classification + LLM-driven multi-leg strategy generation for political prediction markets, with cross-platform correlation detection and fee-adjusted expected value analysis
 
 Integrated into the Lobsterminal financial terminal as a switchable tab. Backend is Python FastAPI on port 8500.
 
@@ -45,6 +46,14 @@ server.py creates all subsystems and injects dependencies:
   NewsAI       <─── NewsScanner            (headline scan + deep article analysis)
   InsiderTracker ──> AutoTrader            (signal boost for scoring)
   NewsScanner  ──> AutoTrader              (queued opportunities via asyncio.Lock)
+
+  PoliticalAnalyzer ──> AutoTrader         (political synthetic opportunities)
+  PoliticalAnalyzer <── ArbitrageScanner   (event feed for political filtering)
+  PoliticalAnalyzer <── AIAdvisor          (LLM strategy generation)
+  PoliticalAnalyzer <── DecisionLogger     (political analysis logging)
+
+  EvalLogger   <─── AutoTrader             (logs all entered/skipped opportunities)
+  EvalLogger   <─── PoliticalAnalyzer      (logs political opportunities)
 ```
 
 ### Runtime Data Flow
@@ -150,6 +159,52 @@ server.py creates all subsystems and injects dependencies:
 |       +---> PositionManager.execute_package() (breaking trades)      |
 |       +---> AutoTrader.add_news_opportunity() (queued trades)        |
 +---------------------------------------------------------------------+
+
++---------------------------------------------------------------------+
+|                 POLITICAL SYNTHETIC DERIVATIVE PIPELINE              |
+|  (15-min cycle: classify → cluster → analyze → score → trade)       |
+|                                                                      |
+|  PoliticalAnalyzer (every 15m)                                       |
+|       |                                                              |
+|       |  1. Fetch events from ArbitrageScanner                       |
+|       |  2. Filter to "politics" category                            |
+|       |  3. Classify contracts (6 types: margin_bracket,             |
+|       |     vote_share, matchup, party_outcome,                      |
+|       |     candidate_win, yes_no_binary)                            |
+|       |  4. Cluster by normalized race+state (fuzzy matching)        |
+|       |     ("TX Senate" = "Texas Senate" = "Senate TX")             |
+|       |  5. For top 10 clusters (by contract count):                 |
+|       |     a. Check SHA-256 keyed LRU cache (15m TTL, 3% shift)    |
+|       |     b. Detect relationships (6 types with score multipliers):|
+|       |        mispriced_correlation(3.0x), candidate_party(2.5x),   |
+|       |        margin_decomposition(2.0x), conditional_hedge(1.5x),  |
+|       |        bracket_spread(1.5x), matchup_arbitrage(2.0x)         |
+|       |     c. Build 2-4 leg combinations (greedy from best pair)    |
+|       |     d. LLM generates strategy (JSON schema, fee-adjusted)    |
+|       |     e. Validate: EV>=3%, win_prob>=50%, max_loss>=-60%       |
+|       |     f. Convert to PoliticalOpportunity with platform fees    |
+|       |                                                              |
+|       +---> AutoTrader (merged with arb + news opportunities)        |
+|       +---> /api/political/* endpoints                               |
+|       +---> EvalLogger (all entered + skipped)                       |
++---------------------------------------------------------------------+
+
++---------------------------------------------------------------------+
+|                    UNIVERSAL EVAL LOGGER                             |
+|  (records ALL opportunities for hindsight analysis)                  |
+|                                                                      |
+|  EvalLogger (append-only JSONL)                                      |
+|       |                                                              |
+|       |  1. log_opportunity(): records every opportunity              |
+|       |     - strategy_type, action (entered/skipped),               |
+|       |       action_reason, markets, score, prices                  |
+|       |  2. backfill_outcome(): hourly loop checks resolved markets  |
+|       |     - adds actual_pnl, resolution_price, hypothetical_pnl   |
+|       |  3. get_missed_opportunities(): finds profitable skips       |
+|       |  4. get_calibration(): per-reason correct-skip rate          |
+|       |                                                              |
+|       +---> /api/eval/* endpoints                                    |
++---------------------------------------------------------------------+
 ```
 
 ### How Arbitrage Evaluation Works
@@ -205,17 +260,23 @@ Package: "Auto: Will ETH hit $5000?"
   Package level: ITM if unrealized_pnl > 0, OTM if < 0
 ```
 
-The exit engine evaluates 18 triggers organized in 6 categories:
+The exit engine evaluates 21 triggers organized in 7 categories:
 
 ```
 PROFIT TAKING (1-3):     target hit, trailing stop, partial profit
 LOSS PREVENTION (4-6):   stop loss, new ATH (tighten trail), correlation break
 SPREAD / ARB (7-9):      spread inversion*, spread compression, volume dry-up
-TIME (10-12):            time <24h*, time <6h*, time decay (3-7 days)
+TIME (10-12):            time <24h, time <6h, time decay (3-7 days)
 VOLATILITY (13-15):      vol spike (>15% move), vol crush, negative drift
 PLATFORM (16-18):        platform error (3+ consecutive), liquidity gap, fee spike
+RESEARCH (19-20):        stale position, longshot decay
+POLITICAL (21):          political event resolved* (leg price <=0.01 or >=0.99)
 
 * = SAFETY OVERRIDE — executes immediately, bypasses AI
+
+NOTE: time_24h (#10) and time_6h (#11) are NO LONGER safety overrides.
+Prediction markets move most in final hours — early exits destroyed value
+($38.88 in losses from premature time-based exits). Now soft review triggers.
 ```
 
 The AI advisor (Claude) reviews non-safety triggers with full context:
@@ -274,7 +335,7 @@ signal_strength = 0.2 * normalized_insider_count
 - **Framework:** Python FastAPI + uvicorn
 - **Server:** `src/server.py` — main app, lifespan init, all subsystem wiring
 - **Port:** 8500 (local only)
-- **Auto-scan:** Background tasks: arbitrage (60s), exit engine (60s), auto trader (5m), insider tracker (15m), news scanner (150s)
+- **Auto-scan:** Background tasks: arbitrage (60s), exit engine (60s), auto trader (5m), insider tracker (15m), news scanner (150s), political analyzer (15m), eval backfill (1h)
 - **GPU:** Intel Arc 140V (~7GB VRAM) — one 8B model at a time for Ollama
 
 ---
@@ -391,7 +452,7 @@ ArbitrageOpportunity:
 |------|---------|
 | `src/positions/position_manager.py` | CRUD, persistence, execution, rollback for derivative packages |
 | `src/positions/position_router.py` | FastAPI router at `/api/derivatives/` — all position endpoints + WebSocket |
-| `src/positions/exit_engine.py` | 60s scan loop, 18 heuristic triggers, safety overrides, AI routing |
+| `src/positions/exit_engine.py` | 60s scan loop, 21 heuristic triggers, safety overrides, AI routing |
 | `src/positions/auto_trader.py` | Autonomous paper trader — scans Polymarket Gamma API for crypto markets |
 | `src/positions/trade_journal.py` | Records completed trades with P&L, fees, exit triggers, performance analytics |
 | `src/positions/insider_tracker.py` | Whale/insider monitor — leaderboard, positions, accuracy tracking, movement alerts |
@@ -405,7 +466,7 @@ ArbitrageOpportunity:
 
 **Package structure:**
 - A "package" is a grouped position with one or more "legs" (individual market bets) and "exit rules"
-- Strategy types: `spot_plus_hedge`, `cross_platform_arb`, `pure_prediction`, `news_driven`, `synthetic_derivative` (planned: `political_synthetic`)
+- Strategy types: `spot_plus_hedge`, `cross_platform_arb`, `pure_prediction`, `news_driven`, `synthetic_derivative`, `political_synthetic`
 - Each package tracks: status (open/closed/partial_exit/rollback), total_cost, current_value, peak_value, unrealized_pnl, itm_status (ITM/OTM/ATM), execution_log, ai_strategy
 
 **Leg structure:**
@@ -460,8 +521,8 @@ The exit engine runs a 60-second scan loop evaluating all open packages.
 | 7 | spread_inversion | Spread/Arb | immediate_exit | **YES** |
 | 8 | spread_compression | Spread/Arb | review | No |
 | 9 | volume_dry | Spread/Arb | review | No (placeholder) |
-| 10 | time_24h | Time | immediate_exit | **YES** |
-| 11 | time_6h | Time | immediate_exit | **YES** |
+| 10 | time_24h | Time | review | No (was safety, demoted — early exits destroyed value) |
+| 11 | time_6h | Time | review | No (was safety, demoted — early exits destroyed value) |
 | 12 | time_decay | Time | review | No |
 | 13 | vol_spike | Volatility | review | No |
 | 14 | vol_crush | Volatility | review | No (placeholder) |
@@ -471,11 +532,12 @@ The exit engine runs a 60-second scan loop evaluating all open packages.
 | 18 | fee_spike | Platform | review | No (placeholder) |
 | 19 | stale_position | Time | review | No |
 | 20 | longshot_decay | Research | review | No |
+| 21 | political_event_resolved | Political | immediate_exit | **YES** |
 
-**Safety overrides (triggers 7, 10, 11):**
+**Safety overrides (triggers 7, 21):**
 - Execute immediately — no AI review, no escalation
-- Spread inversion: YES + NO prices > 1.0 (guaranteed loss if held)
-- Time <24h / <6h: expiry approaching, must exit regardless of P&L
+- Spread inversion (#7): YES + NO prices > 1.0 (guaranteed loss if held)
+- Political event resolved (#21): any leg price <= 0.01 or >= 0.99 (market has resolved, exit immediately)
 
 **Non-safety trigger routing (batched AI review):**
 - All non-safety triggers from ALL packages are collected per tick, then sent in a SINGLE batched AI call (reduces Groq/Gemini 429 rate limit hits)
@@ -508,10 +570,11 @@ The exit engine runs a 60-second scan loop evaluating all open packages.
 ### How the Auto Trader Works
 
 1. Every 5 minutes, scans ALL platforms via ArbitrageScanner (not just Polymarket)
-2. **Three opportunity sources:**
+2. **Four opportunity sources:**
    - Cross-platform arbitrage (highest priority, 3x score boost): from `scanner.get_opportunities()`
    - Single-platform directional bets: from ALL platform events via `scanner.get_events()`, filtered to tradeable platforms only (those with registered executors)
    - Queued news signals (2x score boost): from NewsScanner via `add_news_opportunity()`
+   - Political synthetic derivatives: from PoliticalAnalyzer, scored by `EV * confidence * cross_platform_boost(1.5x)`
 3. Fallback: direct Polymarket Gamma API scan if scanner fails entirely
 4. **ITM/OTM filter:** skips entries with side price > $0.85 (tiny upside) or < $0.15 (lottery tickets)
 5. **Filters:** skips near-resolved (>0.92 or <0.08), near-50/50 (0.42-0.58), and <2 day expiry
@@ -648,6 +711,126 @@ is_configured() → bool
 
 ---
 
+## Subsystem 5: Political Synthetic Derivatives
+
+### Files
+| File | Purpose |
+|------|---------|
+| `src/political/__init__.py` | Package init |
+| `src/political/models.py` | 7 dataclasses: PoliticalContractInfo, PoliticalCluster, SyntheticLeg, Scenario, PoliticalSyntheticStrategy, PoliticalLeg, PoliticalOpportunity + PLATFORM_FEES dict |
+| `src/political/classifier.py` | Rule-based contract classification — 6 types in priority order via regex |
+| `src/political/clustering.py` | Groups contracts by normalized race+state with fuzzy matching |
+| `src/political/cache.py` | SHA-256 keyed LRU cache — 15-min TTL, 3% price-shift invalidation, 200-entry max |
+| `src/political/relationships.py` | Pairwise relationship detection (6 types), greedy leg combination builder (2-4 legs) |
+| `src/political/strategy.py` | LLM prompt builder, response parser, strategy validator |
+| `src/political/analyzer.py` | 15-min async loop orchestrator — event filtering, clustering, LLM analysis, opportunity output |
+| `src/political/router.py` | FastAPI router at `/api/political/` — clusters, strategies, eval endpoints |
+
+### How Political Synthetic Analysis Works
+
+**Step 1: Contract Classification (`classifier.py`)**
+- Classifies each political event into one of 6 types (priority order):
+  1. `margin_bracket` — "win by 5-10 points" (regex: margin, spread, points)
+  2. `vote_share` — "get more than 55% of vote" (regex: percent, share, threshold)
+  3. `matchup` — "Cruz vs Talarico" (regex: vs, versus, head-to-head)
+  4. `party_outcome` — "Democrats win Senate" (regex: democrat, republican, party)
+  5. `candidate_win` — "Cruz to win TX Senate" (regex: win, elected, victory)
+  6. `yes_no_binary` — fallback for all other political contracts
+- Extracts: candidates, party, race, state, threshold, direction
+
+**Step 2: Clustering (`clustering.py`)**
+- `_normalize_race()`: lowercase → replace state names with abbreviations → remove filler words → sort tokens → join with "-"
+- Groups contracts with identical normalized key
+- Minimum 2 contracts per cluster (singleton = no synthesis possible)
+- Deduplicates events by event_id
+
+**Step 3: Relationship Detection (`relationships.py`)**
+- Pairwise comparison of all contracts in a cluster
+- 6 relationship types with score multipliers:
+  - `mispriced_correlation` (3.0x) — same candidate, same outcome, different prices cross-platform
+  - `candidate_party_link` (2.5x) — same candidate on same party
+  - `margin_decomposition` (2.0x) — margin_bracket pairs that decompose a range
+  - `conditional_hedge` (1.5x) — opposing sides create natural hedges
+  - `bracket_spread` (1.5x) — adjacent bracket pairs
+  - `matchup_arbitrage` (2.0x) — matchup contracts with arbitrage potential
+- `build_leg_combinations()`: starts from highest-scored pair, greedily extends to 4 legs max
+- Minimum relationship score: 1.5
+
+**Step 4: LLM Strategy Generation (`strategy.py`)**
+- `build_cluster_prompt()`: constructs prompt with contracts, relationships, platform fee rates, JSON schema
+- `parse_strategy_response()`: strips code fences/trailing commas, parses JSON, maps contract indices to event_ids
+- `validate_strategy()`: win_probability >= 0.50, max_loss >= -60%, expected_value >= 3%, confidence != "low"
+
+**Step 5: Opportunity Conversion (`analyzer.py`)**
+- Converts validated `PoliticalSyntheticStrategy` to `PoliticalOpportunity`
+- Calculates weighted platform fees from `PLATFORM_FEES` dict
+- Net EV = gross EV - weighted fees
+- `PoliticalOpportunity.to_dict()` produces auto-trader-compatible format
+
+**Step 6: Auto Trader Integration (`auto_trader.py`)**
+- Political opportunities merged into scoring pipeline after news opportunities
+- Scored by: `net_EV * confidence * cross_platform_boost(1.5x)`
+- Multi-leg execution: weight-based capital allocation across legs
+- Custom exit rules: target_profit (EV/2%), stop_loss (-max_loss/2%), trailing_stop
+
+### Political API Endpoints (`/api/political/`)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/clusters` | Current political clusters with contract counts |
+| GET | `/strategies` | All generated strategies with scores |
+| GET | `/strategies/{cluster_id}` | Analyze specific cluster (triggers fresh LLM analysis) |
+| POST | `/analyze` | Force a full analysis cycle |
+| GET | `/eval` | Eval summary for political strategies |
+| GET | `/eval/missed` | Missed political opportunities |
+
+### Political Data Models
+```
+PoliticalContractInfo:
+  event, contract_type (6 types), candidates[], party, race, state,
+  threshold, direction
+
+PoliticalCluster:
+  cluster_id, race, state, contracts[], matched_events[]
+
+PoliticalSyntheticStrategy:
+  cluster_id, strategy_name, legs[] (SyntheticLeg), scenarios[] (Scenario),
+  expected_value_pct, win_probability, max_loss_pct, confidence (str|float), reasoning
+
+PoliticalOpportunity:
+  cluster_id, strategy, legs[] (PoliticalLeg), total_fee_pct,
+  net_expected_value_pct, platforms[], created_at
+  → to_dict() produces auto-trader-compatible format
+```
+
+---
+
+## Subsystem 6: Universal Eval Logger
+
+### Files
+| File | Purpose |
+|------|---------|
+| `src/eval_logger.py` | Append-only JSONL logger — records all opportunities (entered + skipped), backfill outcomes |
+| `src/eval_router.py` | FastAPI router at `/api/eval/` — summary, missed, calibration, details |
+
+### How the Eval Logger Works
+- `log_opportunity()`: records every opportunity with strategy_type, opportunity_id, action (entered/skipped), action_reason, markets, score, prices
+- `backfill_outcome()`: hourly background loop adds resolution data (actual_pnl, resolution_price, hypothetical_pnl for skips)
+- `get_summary()`: counts by strategy_type and action
+- `get_missed_opportunities()`: finds skipped entries where hypothetical P&L was positive
+- `get_calibration()`: per action_reason, calculates correct-skip rate
+- `get_details(opportunity_id)`: merged opportunity + backfill data lookup
+- `get_unresolved_skips()`: skipped entries awaiting backfill
+
+### Eval API Endpoints (`/api/eval/`)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/summary` | Strategy-type breakdown of entered vs skipped |
+| GET | `/missed` | Profitable opportunities that were skipped |
+| GET | `/calibration` | Per-reason correct-skip rates |
+| GET | `/details/{opportunity_id}` | Full detail for a single opportunity |
+
+---
+
 ## Fee Model
 | Platform | Maker (limit) | Taker (market) | Our Strategy |
 |----------|---------------|----------------|--------------|
@@ -678,8 +861,8 @@ is_configured() → bool
 | `cache.json` | `src/data/arbitrage/` | Latest fetched events from all platforms |
 | `saved_markets.json` | `src/data/arbitrage/` | User-bookmarked matched events |
 | `manual_links.json` | `src/data/arbitrage/` | User-created manual event links |
-| `eval_log.jsonl` | `src/data/arbitrage/` | **Planned:** Universal eval log — all opportunities (entered + skipped) with backfilled P&L |
-| `political_cache.json` | `src/data/arbitrage/` | **Planned:** Political synthetic LLM analysis cache (15-min TTL, 200-entry LRU) |
+| `eval_log.jsonl` | `src/data/eval/` | Universal eval log — all opportunities (entered + skipped) with backfilled P&L |
+| `political_cache.json` | `src/data/arbitrage/` | Political synthetic LLM analysis cache (15-min TTL, 200-entry LRU) |
 
 ## Frontend
 | File | Purpose |
@@ -705,7 +888,7 @@ is_configured() → bool
 ## Git Workflow
 1. Feature branch: `feat/derivative-position-manager`
 2. All changes committed to feature branch
-3. Tests in `tests/` (48 passing, ignore test_arbitrage.py)
+3. Tests in `tests/` (130 passing, ignore test_arbitrage.py)
 4. Never push directly to main
 
 ## Running
@@ -747,23 +930,14 @@ python -m uvicorn server:app --host 127.0.0.1 --port 8500 --log-level info
 - AI advisor active via Groq (Llama 3.3 70B), batched reviews (~1 call per tick instead of 8)
 - Insider tracker: 100 traders monitored, 139 markets with signals
 - Auto trader: event-driven, MIN_SPREAD_PCT raised 3%→5% (ensures 3% net margin after 2% fees), $2K exposure limit, $5 min trade size
-- Exit engine: 60s interval, 20 heuristic triggers, batched AI reviews (single LLM call for all packages per tick)
+- Exit engine: 60s interval, 21 heuristic triggers, batched AI reviews (single LLM call for all packages per tick)
 - News scanner: 150s interval, 14 RSS feeds, two-pass AI pipeline (headline scan → deep analysis), breaking trades execute immediately
 - Decision logging: all buys, skips, trigger fires, AI verdicts, news signals logged to `decision_log.jsonl`
 - Arbitrage scanner: ~1170 events from 8 adapters
-- **Upcoming: Political Synthetic Derivative Analysis** — spec at `docs/specs/2026-03-19-political-synthetic-analysis-design.md`
-  - Rule-based contract classification (candidate_win, party_outcome, margin_bracket, vote_share, matchup) + LLM-driven multi-leg strategy
-  - Detects mispriced correlations (same outcome priced differently cross-platform) and conditional hedges (complementary branches)
-  - 2-4 legs per position, cross-platform and single-platform
-  - 15-min scan cadence, 15-min cache TTL with 3% price-shift invalidation
-  - New trigger #21: `political_event_resolved` (safety override)
-- **Upcoming: System-Wide Hindsight Analysis** — unified eval log for ALL strategy types
-  - Logs every opportunity encountered (entered AND skipped, with reasons)
-  - Backfills P&L when positions close or markets resolve
-  - Missed opportunity analysis: hypothetical P&L for skipped strategies
-  - Calibration tracking: for each skip reason, % correct vs incorrect
-  - New endpoints: `/api/eval/summary`, `/api/eval/missed`, `/api/eval/calibration`, `/api/eval/details/{id}`
-  - New dashboard "Eval" tab: strategy performance comparison, missed opportunities, calibration chart
+- **Political synthetic derivatives:** 15-min scan cycle, 6-type classifier, fuzzy clustering, 6 relationship types, LLM strategy generation with fee-adjusted EV, trigger #21 (political_event_resolved), integrated with auto trader
+- **Universal eval logger:** JSONL logging of all opportunities (entered + skipped), hourly backfill loop, missed opportunity analysis, calibration tracking
+- Spec: `docs/specs/2026-03-19-political-synthetic-analysis-design.md`
+- Plan: `docs/plans/2026-03-19-political-synthetic-analysis.md`
 - **Recent changes (2026-03-19):**
   - **Kalshi adapter rewrite:** Public API now uses events→markets→orderbook pipeline (no auth needed). Returns ~54 properly-priced events. Old approach returned 600 useless multi-leg parlays.
   - **Coinbase dedup:** Coinbase prediction markets ARE Kalshi markets. `_fetch_via_kalshi()` returns empty when no `COINBASE_ADV_API_KEY` to avoid duplicate events.
@@ -780,7 +954,7 @@ python -m uvicorn server:app --host 127.0.0.1 --port 8500 --log-level info
   - **MIN_SPREAD_PCT raised 3%→5%:** Ensures minimum 3% net margin after 2% round-trip fees.
   - **Memory leak fix:** `_previous_prices` dict in arbitrage_engine.py now stores `(price, timestamp)` tuples with 24h TTL pruning and 5K entry cap.
   - **Bare except cleanup:** Fixed bare `except:` → `except Exception as e:` with logging in kalshi_executor.py, predictit_executor.py, coinbase_spot_executor.py.
-  - **Exit engine trigger count:** 18 → 20 heuristic triggers (added research_invalidation, funding_rate_divergence).
+  - **Exit engine trigger count:** 18 → 21 heuristic triggers (added stale_position #19, longshot_decay #20, political_event_resolved #21). Time_24h (#10) and time_6h (#11) demoted from safety overrides to soft review triggers.
 - **Previous changes (2026-03-18):**
   - **Arbitrage display fixes (4):**
     - Tightened crypto price ratio from 0.90 to 0.98 for same-direction matches (prevents false matches: $90K vs $100K)

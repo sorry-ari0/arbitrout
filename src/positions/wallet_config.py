@@ -74,7 +74,7 @@ def get_paper_balance() -> float:
 
 def get_configured_platforms() -> dict[str, bool]:
     return {p: True for p, keys in PLATFORM_CREDENTIALS.items()
-            if all(os.environ.get(k, "") for k in keys)}
+            if keys and all(os.environ.get(k, "") for k in keys)}
 
 def has_anthropic_key() -> bool:
     return bool(os.environ.get("ANTHROPIC_API_KEY", ""))
