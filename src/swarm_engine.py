@@ -5,7 +5,7 @@ Flow:
     1. User POSTs a free-text prompt to /api/generate-asset/screen
     2. intent_parser() asks a local Ollama LLM to extract structured screening
        rules from the prompt.
-    3. swarm_evaluator() filters a 103-stock mock universe against those rules.
+    3. swarm_evaluator() filters a ~200-stock mock universe against those rules.
     4. The matching tickers, parsed rules, and counts are returned as JSON.
 """
 
@@ -33,7 +33,7 @@ except ImportError:
 logger = logging.getLogger("swarm_engine")
 
 # ---------------------------------------------------------------------------
-# Mock universe — 83 real tickers with synthetic fundamentals
+# Mock universe — ~200 real tickers with synthetic fundamentals
 # ---------------------------------------------------------------------------
 
 MOCK_UNIVERSE: dict[str, dict[str, Any]] = {
@@ -106,13 +106,13 @@ MOCK_UNIVERSE: dict[str, dict[str, Any]] = {
     "PANW":  {"market_cap": 110,  "fcf": 3200,   "debt_to_equity": 1.85, "sector": "Technology",      "revenue_growth": 19.8,  "industry": "Software", "pe_ratio": 20, "roe": 14},
 
     # ── Ad-tech / Gaming ──────────────────────────────────────────────────
-    "TTD":   {"market_cap": 48,   "fcf": 600,    "debt_to_equity": 0.07, "sector": "Technology",      "revenue_growth": 23.3,  "industry": "Software"},
-    "RBLX":  {"market_cap": 30,   "fcf": -200,   "debt_to_equity": 2.10, "sector": "Communication Services","revenue_growth": 25.0, "industry": "Electronic Gaming"},
-    "U":     {"market_cap": 14,   "fcf": -180,   "debt_to_equity": 1.40, "sector": "Technology",      "revenue_growth": -2.5,  "industry": "Software"},
+    "TTD":   {"market_cap": 48,   "fcf": 600,    "debt_to_equity": 0.07, "sector": "Technology",      "revenue_growth": 23.3,  "industry": "Software", "pe_ratio": 45, "roe": 20},
+    "RBLX":  {"market_cap": 30,   "fcf": -200,   "debt_to_equity": 2.10, "sector": "Communication Services","revenue_growth": 25.0, "industry": "Electronic Gaming", "pe_ratio": 0, "roe": -15},
+    "U":     {"market_cap": 14,   "fcf": -180,   "debt_to_equity": 1.40, "sector": "Technology",      "revenue_growth": -2.5,  "industry": "Software", "pe_ratio": 0, "roe": -8},
 
     # ── Fintech / Consumer Finance ────────────────────────────────────────
-    "SOFI":  {"market_cap": 12,   "fcf": 350,    "debt_to_equity": 0.72, "sector": "Financial Services","revenue_growth": 34.5, "industry": "Credit Services"},
-    "HOOD":  {"market_cap": 20,   "fcf": 280,    "debt_to_equity": 0.31, "sector": "Financial Services","revenue_growth": 29.4, "industry": "Capital Markets"},
+    "SOFI":  {"market_cap": 12,   "fcf": 350,    "debt_to_equity": 0.72, "sector": "Financial Services","revenue_growth": 34.5, "industry": "Credit Services", "pe_ratio": 28, "roe": 6},
+    "HOOD":  {"market_cap": 20,   "fcf": 280,    "debt_to_equity": 0.31, "sector": "Financial Services","revenue_growth": 29.4, "industry": "Capital Markets", "pe_ratio": 35, "roe": 10},
 
     # ── EV ────────────────────────────────────────────────────────────────
     "RIVN":  {"market_cap": 15,   "fcf": -5400,  "debt_to_equity": 0.78, "sector": "Consumer Cyclical","revenue_growth": 167.4, "industry": "Auto Manufacturers"},
@@ -185,6 +185,135 @@ MOCK_UNIVERSE: dict[str, dict[str, Any]] = {
     "ITCI":  {"market_cap": 1.6,  "fcf": 50,     "debt_to_equity": 0.0,  "sector": "Healthcare",      "revenue_growth": 35.0,  "industry": "Biotechnology", "pe_ratio": 28, "roe": 22},
     "ELF":   {"market_cap": 1.4,  "fcf": 65,     "debt_to_equity": 0.3,  "sector": "Consumer Defensive","revenue_growth": 48.1, "industry": "Household & Personal Products", "pe_ratio": 25, "roe": 24},
     "LNTH":  {"market_cap": 1.7,  "fcf": 80,     "debt_to_equity": 1.2,  "sector": "Healthcare",      "revenue_growth": 25.6,  "industry": "Drug Manufacturers", "pe_ratio": 19, "roe": 18},
+
+    # --- Large-Cap Missing (from _COMPANY_NAMES) ---
+    "V":     {"market_cap": 550,  "fcf": 18000,  "debt_to_equity": 1.73, "sector": "Financial Services","revenue_growth": 10.2,  "industry": "Credit Services", "pe_ratio": 30, "roe": 45},
+    "MA":    {"market_cap": 420,  "fcf": 12000,  "debt_to_equity": 5.20, "sector": "Financial Services","revenue_growth": 12.5,  "industry": "Credit Services", "pe_ratio": 35, "roe": 180},
+    "PG":    {"market_cap": 380,  "fcf": 16000,  "debt_to_equity": 0.73, "sector": "Consumer Defensive","revenue_growth": 2.8,   "industry": "Household & Personal Products", "pe_ratio": 26, "roe": 30},
+    "MRK":   {"market_cap": 260,  "fcf": 13000,  "debt_to_equity": 0.93, "sector": "Healthcare",       "revenue_growth": -1.2,  "industry": "Drug Manufacturers", "pe_ratio": 14, "roe": 35},
+    "ABBV":  {"market_cap": 310,  "fcf": 22000,  "debt_to_equity": 5.80, "sector": "Healthcare",       "revenue_growth": 4.1,   "industry": "Drug Manufacturers", "pe_ratio": 18, "roe": 65},
+    "KO":    {"market_cap": 270,  "fcf": 9500,   "debt_to_equity": 1.72, "sector": "Consumer Defensive","revenue_growth": 3.2,   "industry": "Beverages", "pe_ratio": 24, "roe": 40},
+    "PEP":   {"market_cap": 230,  "fcf": 7200,   "debt_to_equity": 2.38, "sector": "Consumer Defensive","revenue_growth": 2.3,   "industry": "Beverages", "pe_ratio": 22, "roe": 50},
+    "LLY":   {"market_cap": 700,  "fcf": 5800,   "debt_to_equity": 2.10, "sector": "Healthcare",       "revenue_growth": 32.0,  "industry": "Drug Manufacturers", "pe_ratio": 60, "roe": 55},
+    "TMO":   {"market_cap": 200,  "fcf": 7500,   "debt_to_equity": 0.75, "sector": "Healthcare",       "revenue_growth": 1.4,   "industry": "Medical Instruments", "pe_ratio": 30, "roe": 15},
+    "ABT":   {"market_cap": 190,  "fcf": 7000,   "debt_to_equity": 0.46, "sector": "Healthcare",       "revenue_growth": 2.5,   "industry": "Medical Devices", "pe_ratio": 25, "roe": 16},
+    "DHR":   {"market_cap": 180,  "fcf": 6800,   "debt_to_equity": 0.35, "sector": "Healthcare",       "revenue_growth": -3.2,  "industry": "Medical Instruments", "pe_ratio": 28, "roe": 10},
+    "LIN":   {"market_cap": 220,  "fcf": 6500,   "debt_to_equity": 0.32, "sector": "Basic Materials",  "revenue_growth": 2.1,   "industry": "Industrial Gases", "pe_ratio": 32, "roe": 12},
+    "ACN":   {"market_cap": 210,  "fcf": 8200,   "debt_to_equity": 0.18, "sector": "Technology",       "revenue_growth": 3.8,   "industry": "IT Services", "pe_ratio": 28, "roe": 30},
+    "CSCO":  {"market_cap": 220,  "fcf": 15000,  "debt_to_equity": 0.24, "sector": "Technology",       "revenue_growth": -5.7,  "industry": "Communication Equipment", "pe_ratio": 14, "roe": 28},
+    "GS":    {"market_cap": 165,  "fcf": 8000,   "debt_to_equity": 2.58, "sector": "Financial Services","revenue_growth": 12.3,  "industry": "Capital Markets", "pe_ratio": 16, "roe": 12},
+    "MS":    {"market_cap": 160,  "fcf": 7500,   "debt_to_equity": 2.81, "sector": "Financial Services","revenue_growth": 5.8,   "industry": "Capital Markets", "pe_ratio": 14, "roe": 13},
+    "CAT":   {"market_cap": 170,  "fcf": 9500,   "debt_to_equity": 2.04, "sector": "Industrials",      "revenue_growth": 3.1,   "industry": "Farm & Heavy Construction Machinery", "pe_ratio": 16, "roe": 55},
+    "GE":    {"market_cap": 190,  "fcf": 5800,   "debt_to_equity": 1.08, "sector": "Industrials",      "revenue_growth": 16.3,  "industry": "Aerospace & Defense", "pe_ratio": 30, "roe": 25},
+    "HON":   {"market_cap": 135,  "fcf": 5200,   "debt_to_equity": 1.21, "sector": "Industrials",      "revenue_growth": 3.4,   "industry": "Diversified Industrials", "pe_ratio": 20, "roe": 32},
+    "BA":    {"market_cap": 130,  "fcf": -4200,  "debt_to_equity": -6.5, "sector": "Industrials",      "revenue_growth": 16.8,  "industry": "Aerospace & Defense", "pe_ratio": 0, "roe": -40},
+    "IBM":   {"market_cap": 195,  "fcf": 11500,  "debt_to_equity": 2.51, "sector": "Technology",       "revenue_growth": 3.5,   "industry": "IT Services", "pe_ratio": 22, "roe": 35},
+    "LOW":   {"market_cap": 150,  "fcf": 7800,   "debt_to_equity": -15.0,"sector": "Consumer Cyclical", "revenue_growth": -2.1,  "industry": "Home Improvement Retail", "pe_ratio": 18, "roe": -200},
+    "SBUX":  {"market_cap": 105,  "fcf": 3600,   "debt_to_equity": -7.0, "sector": "Consumer Cyclical", "revenue_growth": 1.8,   "industry": "Restaurants", "pe_ratio": 25, "roe": -150},
+    "DE":    {"market_cap": 115,  "fcf": 5200,   "debt_to_equity": 2.15, "sector": "Industrials",      "revenue_growth": -15.2, "industry": "Farm & Heavy Construction Machinery", "pe_ratio": 14, "roe": 30},
+    "RTX":   {"market_cap": 150,  "fcf": 5000,   "debt_to_equity": 0.58, "sector": "Industrials",      "revenue_growth": 8.4,   "industry": "Aerospace & Defense", "pe_ratio": 22, "roe": 10},
+    "MMM":   {"market_cap": 70,   "fcf": 4200,   "debt_to_equity": 2.80, "sector": "Industrials",      "revenue_growth": -3.8,  "industry": "Diversified Industrials", "pe_ratio": 11, "roe": 30},
+    "F":     {"market_cap": 42,   "fcf": 3500,   "debt_to_equity": 3.50, "sector": "Consumer Cyclical", "revenue_growth": 5.2,   "industry": "Auto Manufacturers", "pe_ratio": 6, "roe": 12},
+    "GM":    {"market_cap": 48,   "fcf": 9200,   "debt_to_equity": 1.68, "sector": "Consumer Cyclical", "revenue_growth": 9.7,   "industry": "Auto Manufacturers", "pe_ratio": 5, "roe": 15},
+
+    # --- Utilities ---
+    "NEE":   {"market_cap": 155,  "fcf": 2000,   "debt_to_equity": 1.35, "sector": "Utilities",        "revenue_growth": 14.5,  "industry": "Utilities - Renewables", "pe_ratio": 22, "roe": 12, "dividend_yield": 2.8, "beta": 0.55},
+    "DUK":   {"market_cap": 88,   "fcf": 1200,   "debt_to_equity": 1.42, "sector": "Utilities",        "revenue_growth": 5.1,   "industry": "Utilities - Regulated Electric", "pe_ratio": 18, "roe": 9, "dividend_yield": 3.8, "beta": 0.45},
+    "SO":    {"market_cap": 92,   "fcf": 2800,   "debt_to_equity": 1.55, "sector": "Utilities",        "revenue_growth": 3.2,   "industry": "Utilities - Regulated Electric", "pe_ratio": 20, "roe": 12, "dividend_yield": 3.5, "beta": 0.50},
+    "AEP":   {"market_cap": 52,   "fcf": 800,    "debt_to_equity": 1.61, "sector": "Utilities",        "revenue_growth": 4.8,   "industry": "Utilities - Regulated Electric", "pe_ratio": 17, "roe": 10, "dividend_yield": 3.7, "beta": 0.48},
+    "D":     {"market_cap": 48,   "fcf": 1100,   "debt_to_equity": 1.38, "sector": "Utilities",        "revenue_growth": -2.5,  "industry": "Utilities - Regulated Electric", "pe_ratio": 15, "roe": 8, "dividend_yield": 4.8, "beta": 0.55},
+    "SRE":   {"market_cap": 55,   "fcf": 900,    "debt_to_equity": 1.20, "sector": "Utilities",        "revenue_growth": 8.3,   "industry": "Utilities - Diversified", "pe_ratio": 18, "roe": 11, "dividend_yield": 2.9, "beta": 0.60},
+
+    # --- Real Estate (REITs) ---
+    "PLD":   {"market_cap": 110,  "fcf": 3500,   "debt_to_equity": 0.40, "sector": "Real Estate",      "revenue_growth": 8.5,   "industry": "Industrial REITs", "pe_ratio": 40, "roe": 8, "dividend_yield": 3.2},
+    "AMT":   {"market_cap": 95,   "fcf": 2800,   "debt_to_equity": 3.40, "sector": "Real Estate",      "revenue_growth": 4.2,   "industry": "Telecom Tower REITs", "pe_ratio": 45, "roe": 18, "dividend_yield": 3.0},
+    "EQIX":  {"market_cap": 75,   "fcf": 2200,   "debt_to_equity": 1.15, "sector": "Real Estate",      "revenue_growth": 9.8,   "industry": "Data Center REITs", "pe_ratio": 80, "roe": 6, "dividend_yield": 2.1},
+    "O":     {"market_cap": 50,   "fcf": 1500,   "debt_to_equity": 0.55, "sector": "Real Estate",      "revenue_growth": 18.5,  "industry": "Retail REITs", "pe_ratio": 55, "roe": 3, "dividend_yield": 5.4},
+    "SPG":   {"market_cap": 55,   "fcf": 2000,   "debt_to_equity": 8.50, "sector": "Real Estate",      "revenue_growth": 5.1,   "industry": "Retail REITs", "pe_ratio": 20, "roe": 45, "dividend_yield": 5.0},
+
+    # --- Basic Materials ---
+    "APD":   {"market_cap": 65,   "fcf": 2500,   "debt_to_equity": 0.52, "sector": "Basic Materials",  "revenue_growth": -3.1,  "industry": "Industrial Gases", "pe_ratio": 25, "roe": 14},
+    "ECL":   {"market_cap": 60,   "fcf": 1800,   "debt_to_equity": 0.83, "sector": "Basic Materials",  "revenue_growth": 5.2,   "industry": "Specialty Chemicals", "pe_ratio": 35, "roe": 20},
+    "SHW":   {"market_cap": 85,   "fcf": 2600,   "debt_to_equity": 2.75, "sector": "Basic Materials",  "revenue_growth": 3.8,   "industry": "Specialty Chemicals", "pe_ratio": 30, "roe": 65},
+    "NUE":   {"market_cap": 32,   "fcf": 2200,   "debt_to_equity": 0.30, "sector": "Basic Materials",  "revenue_growth": -18.5, "industry": "Steel", "pe_ratio": 8, "roe": 18},
+    "FCX":   {"market_cap": 58,   "fcf": 3500,   "debt_to_equity": 0.54, "sector": "Basic Materials",  "revenue_growth": 15.2,  "industry": "Copper", "pe_ratio": 20, "roe": 22},
+    "NEM":   {"market_cap": 50,   "fcf": 2800,   "debt_to_equity": 0.35, "sector": "Basic Materials",  "revenue_growth": 30.1,  "industry": "Gold", "pe_ratio": 15, "roe": 12},
+    "DOW":   {"market_cap": 28,   "fcf": 1200,   "debt_to_equity": 1.42, "sector": "Basic Materials",  "revenue_growth": -8.3,  "industry": "Chemicals", "pe_ratio": 22, "roe": 10, "dividend_yield": 5.2},
+
+    # --- Telecom ---
+    "T":     {"market_cap": 150,  "fcf": 16000,  "debt_to_equity": 1.23, "sector": "Communication Services","revenue_growth": 0.8, "industry": "Telecom Services", "pe_ratio": 10, "roe": 12, "dividend_yield": 5.1, "beta": 0.65},
+    "VZ":    {"market_cap": 175,  "fcf": 18000,  "debt_to_equity": 1.58, "sector": "Communication Services","revenue_growth": 1.5, "industry": "Telecom Services", "pe_ratio": 9, "roe": 22, "dividend_yield": 6.3, "beta": 0.40},
+    "TMUS":  {"market_cap": 260,  "fcf": 17000,  "debt_to_equity": 1.35, "sector": "Communication Services","revenue_growth": 3.2, "industry": "Telecom Services", "pe_ratio": 25, "roe": 15, "beta": 0.55},
+
+    # --- Aerospace / Defense ---
+    "LMT":   {"market_cap": 120,  "fcf": 6200,   "debt_to_equity": 2.85, "sector": "Industrials",      "revenue_growth": 5.8,   "industry": "Aerospace & Defense", "pe_ratio": 18, "roe": 85, "dividend_yield": 2.5},
+    "NOC":   {"market_cap": 75,   "fcf": 2500,   "debt_to_equity": 1.60, "sector": "Industrials",      "revenue_growth": 4.2,   "industry": "Aerospace & Defense", "pe_ratio": 20, "roe": 30, "dividend_yield": 1.5},
+    "GD":    {"market_cap": 72,   "fcf": 3200,   "debt_to_equity": 0.75, "sector": "Industrials",      "revenue_growth": 10.5,  "industry": "Aerospace & Defense", "pe_ratio": 19, "roe": 18, "dividend_yield": 2.0},
+    "LHX":   {"market_cap": 42,   "fcf": 2100,   "debt_to_equity": 0.68, "sector": "Industrials",      "revenue_growth": 7.2,   "industry": "Aerospace & Defense", "pe_ratio": 16, "roe": 12},
+    "HII":   {"market_cap": 9.5,  "fcf": 450,    "debt_to_equity": 1.80, "sector": "Industrials",      "revenue_growth": 8.1,   "industry": "Aerospace & Defense", "pe_ratio": 14, "roe": 22},
+
+    # --- Transportation / Logistics ---
+    "UPS":   {"market_cap": 105,  "fcf": 5200,   "debt_to_equity": 2.10, "sector": "Industrials",      "revenue_growth": -9.3,  "industry": "Integrated Freight & Logistics", "pe_ratio": 16, "roe": 35, "dividend_yield": 4.5},
+    "FDX":   {"market_cap": 65,   "fcf": 3800,   "debt_to_equity": 0.82, "sector": "Industrials",      "revenue_growth": -2.8,  "industry": "Integrated Freight & Logistics", "pe_ratio": 14, "roe": 16},
+    "DAL":   {"market_cap": 32,   "fcf": 3200,   "debt_to_equity": 2.80, "sector": "Industrials",      "revenue_growth": 5.4,   "industry": "Airlines", "pe_ratio": 7, "roe": 45},
+    "UAL":   {"market_cap": 24,   "fcf": 3500,   "debt_to_equity": 3.10, "sector": "Industrials",      "revenue_growth": 7.1,   "industry": "Airlines", "pe_ratio": 6, "roe": 50},
+    "ODFL":  {"market_cap": 38,   "fcf": 1000,   "debt_to_equity": 0.04, "sector": "Industrials",      "revenue_growth": 3.2,   "industry": "Trucking", "pe_ratio": 32, "roe": 28},
+
+    # --- Energy (More coverage) ---
+    "COP":   {"market_cap": 130,  "fcf": 10000,  "debt_to_equity": 0.38, "sector": "Energy",           "revenue_growth": -8.5,  "industry": "Oil & Gas E&P", "pe_ratio": 11, "roe": 20, "dividend_yield": 3.0},
+    "SLB":   {"market_cap": 60,   "fcf": 3800,   "debt_to_equity": 0.58, "sector": "Energy",           "revenue_growth": 12.8,  "industry": "Oil & Gas Equipment", "pe_ratio": 14, "roe": 22},
+    "EOG":   {"market_cap": 65,   "fcf": 5200,   "debt_to_equity": 0.17, "sector": "Energy",           "revenue_growth": -5.1,  "industry": "Oil & Gas E&P", "pe_ratio": 9, "roe": 25, "dividend_yield": 2.8},
+    "OKE":   {"market_cap": 55,   "fcf": 2800,   "debt_to_equity": 1.65, "sector": "Energy",           "revenue_growth": 15.3,  "industry": "Oil & Gas Midstream", "pe_ratio": 17, "roe": 30, "dividend_yield": 4.2},
+    "FANG":  {"market_cap": 45,   "fcf": 3800,   "debt_to_equity": 0.35, "sector": "Energy",           "revenue_growth": 22.5,  "industry": "Oil & Gas E&P", "pe_ratio": 8, "roe": 28, "dividend_yield": 2.0},
+
+    # --- Consumer / Retail (More coverage) ---
+    "TGT":   {"market_cap": 62,   "fcf": 4200,   "debt_to_equity": 1.35, "sector": "Consumer Defensive","revenue_growth": -4.2,  "industry": "Discount Stores", "pe_ratio": 13, "roe": 30, "dividend_yield": 3.5},
+    "ROST":  {"market_cap": 48,   "fcf": 2500,   "debt_to_equity": 2.10, "sector": "Consumer Cyclical", "revenue_growth": 7.2,   "industry": "Apparel Retail", "pe_ratio": 22, "roe": 45},
+    "TJX":   {"market_cap": 120,  "fcf": 4800,   "debt_to_equity": 4.50, "sector": "Consumer Cyclical", "revenue_growth": 8.5,   "industry": "Apparel Retail", "pe_ratio": 26, "roe": 65},
+    "LULU":  {"market_cap": 42,   "fcf": 1800,   "debt_to_equity": 0.45, "sector": "Consumer Cyclical", "revenue_growth": 18.2,  "industry": "Apparel Retail", "pe_ratio": 28, "roe": 42},
+    "DG":    {"market_cap": 18,   "fcf": 500,    "debt_to_equity": 3.20, "sector": "Consumer Defensive","revenue_growth": 2.1,   "industry": "Discount Stores", "pe_ratio": 12, "roe": 22},
+    "YUM":   {"market_cap": 38,   "fcf": 1600,   "debt_to_equity": -8.0, "sector": "Consumer Cyclical", "revenue_growth": 6.8,   "industry": "Restaurants", "pe_ratio": 25, "roe": -120, "dividend_yield": 1.9},
+    "CMG":   {"market_cap": 78,   "fcf": 1200,   "debt_to_equity": 3.50, "sector": "Consumer Cyclical", "revenue_growth": 14.3,  "industry": "Restaurants", "pe_ratio": 55, "roe": -150},
+    "DECK":  {"market_cap": 22,   "fcf": 800,    "debt_to_equity": 0.05, "sector": "Consumer Cyclical", "revenue_growth": 18.2,  "industry": "Footwear & Accessories", "pe_ratio": 25, "roe": 35},
+
+    # --- Insurance ---
+    "BRK.B": {"market_cap": 850,  "fcf": 32000,  "debt_to_equity": 0.25, "sector": "Financial Services","revenue_growth": 8.2,   "industry": "Insurance - Diversified", "pe_ratio": 10, "roe": 15},
+    "PGR":   {"market_cap": 120,  "fcf": 8500,   "debt_to_equity": 0.85, "sector": "Financial Services","revenue_growth": 25.3,  "industry": "Insurance - Property & Casualty", "pe_ratio": 18, "roe": 30},
+    "CB":    {"market_cap": 105,  "fcf": 6200,   "debt_to_equity": 0.28, "sector": "Financial Services","revenue_growth": 12.1,  "industry": "Insurance - Property & Casualty", "pe_ratio": 12, "roe": 16},
+    "MET":   {"market_cap": 52,   "fcf": 4500,   "debt_to_equity": 0.50, "sector": "Financial Services","revenue_growth": 5.8,   "industry": "Insurance - Life", "pe_ratio": 8, "roe": 12, "dividend_yield": 2.8},
+
+    # --- Pharmaceuticals / Biotech (More) ---
+    "GILD":  {"market_cap": 105,  "fcf": 8000,   "debt_to_equity": 1.35, "sector": "Healthcare",       "revenue_growth": 5.5,   "industry": "Biotechnology", "pe_ratio": 12, "roe": 30, "dividend_yield": 3.2},
+    "AMGN":  {"market_cap": 160,  "fcf": 9500,   "debt_to_equity": 8.50, "sector": "Healthcare",       "revenue_growth": 20.8,  "industry": "Biotechnology", "pe_ratio": 22, "roe": -150, "dividend_yield": 3.0},
+    "REGN":  {"market_cap": 85,   "fcf": 4500,   "debt_to_equity": 0.08, "sector": "Healthcare",       "revenue_growth": 6.3,   "industry": "Biotechnology", "pe_ratio": 18, "roe": 20},
+    "VRTX":  {"market_cap": 110,  "fcf": 4200,   "debt_to_equity": 0.05, "sector": "Healthcare",       "revenue_growth": 14.2,  "industry": "Biotechnology", "pe_ratio": 28, "roe": 25},
+    "BMY":   {"market_cap": 95,   "fcf": 12000,  "debt_to_equity": 3.15, "sector": "Healthcare",       "revenue_growth": -2.8,  "industry": "Drug Manufacturers", "pe_ratio": 8, "roe": 45, "dividend_yield": 4.5},
+
+    # --- Small-Cap Industrials (more manufacturing) ---
+    "TRS":   {"market_cap": 0.7,  "fcf": 30,     "debt_to_equity": 0.3,  "sector": "Industrials",      "revenue_growth": 8.5,   "industry": "Specialty Industrial Machinery", "pe_ratio": 12, "roe": 15},
+    "WIRE":  {"market_cap": 1.5,  "fcf": 120,    "debt_to_equity": 0.0,  "sector": "Industrials",      "revenue_growth": -12.5, "industry": "Electrical Equipment", "pe_ratio": 10, "roe": 22},
+    "POWL":  {"market_cap": 1.8,  "fcf": 90,     "debt_to_equity": 0.0,  "sector": "Industrials",      "revenue_growth": 45.2,  "industry": "Electrical Equipment", "pe_ratio": 15, "roe": 30},
+    "PRIM":  {"market_cap": 1.6,  "fcf": 70,     "debt_to_equity": 0.5,  "sector": "Industrials",      "revenue_growth": 22.3,  "industry": "Engineering & Construction", "pe_ratio": 14, "roe": 18},
+    "GBX":   {"market_cap": 1.3,  "fcf": 60,     "debt_to_equity": 0.7,  "sector": "Industrials",      "revenue_growth": 15.1,  "industry": "Railroads", "pe_ratio": 11, "roe": 16},
+    "NN":    {"market_cap": 0.5,  "fcf": 20,     "debt_to_equity": 1.2,  "sector": "Industrials",      "revenue_growth": 5.8,   "industry": "Specialty Industrial Machinery", "pe_ratio": 18, "roe": 8},
+    "ROCK":  {"market_cap": 0.8,  "fcf": 35,     "debt_to_equity": 0.2,  "sector": "Industrials",      "revenue_growth": 10.2,  "industry": "Specialty Industrial Machinery", "pe_ratio": 13, "roe": 14},
+
+    # --- Small-Cap Consumer ---
+    "DNUT":  {"market_cap": 1.2,  "fcf": 30,     "debt_to_equity": 1.8,  "sector": "Consumer Defensive","revenue_growth": 12.5,  "industry": "Packaged Foods", "pe_ratio": 35, "roe": 8},
+    "ARKO":  {"market_cap": 0.5,  "fcf": 45,     "debt_to_equity": 2.1,  "sector": "Consumer Defensive","revenue_growth": -5.2,  "industry": "Food Distribution", "pe_ratio": 8, "roe": 6},
+    "ONEW":  {"market_cap": 0.6,  "fcf": 55,     "debt_to_equity": 0.8,  "sector": "Consumer Cyclical", "revenue_growth": -8.3,  "industry": "Leisure", "pe_ratio": 4, "roe": 12},
+    "CURV":  {"market_cap": 0.4,  "fcf": 15,     "debt_to_equity": 1.5,  "sector": "Consumer Cyclical", "revenue_growth": 8.1,   "industry": "Apparel Retail", "pe_ratio": 20, "roe": 10},
+
+    # --- Small-Cap Tech ---
+    "INTA":  {"market_cap": 1.2,  "fcf": 40,     "debt_to_equity": 0.3,  "sector": "Technology",       "revenue_growth": 28.5,  "industry": "Software", "pe_ratio": 32, "roe": 18},
+    "ALKT":  {"market_cap": 0.9,  "fcf": 25,     "debt_to_equity": 0.4,  "sector": "Technology",       "revenue_growth": 15.3,  "industry": "Software", "pe_ratio": 28, "roe": 14},
+    "SMAR":  {"market_cap": 1.4,  "fcf": 55,     "debt_to_equity": 0.2,  "sector": "Technology",       "revenue_growth": 18.7,  "industry": "Software", "pe_ratio": 50, "roe": 8},
+    "RAMP":  {"market_cap": 0.6,  "fcf": 20,     "debt_to_equity": 0.1,  "sector": "Technology",       "revenue_growth": 22.1,  "industry": "Software", "pe_ratio": 25, "roe": 12},
+
+    # --- Small-Cap Energy ---
+    "VTLE":  {"market_cap": 1.0,  "fcf": 250,    "debt_to_equity": 0.4,  "sector": "Energy",           "revenue_growth": -15.2, "industry": "Oil & Gas E&P", "pe_ratio": 4, "roe": 18},
+    "CHRD":  {"market_cap": 6.5,  "fcf": 1800,   "debt_to_equity": 0.3,  "sector": "Energy",           "revenue_growth": 35.2,  "industry": "Oil & Gas E&P", "pe_ratio": 5, "roe": 22, "dividend_yield": 8.5},
+    "SM":    {"market_cap": 4.2,  "fcf": 700,    "debt_to_equity": 0.4,  "sector": "Energy",           "revenue_growth": 12.8,  "industry": "Oil & Gas E&P", "pe_ratio": 6, "roe": 20},
 }
 
 # Common ticker -> company name map for Wikipedia scraping
@@ -235,6 +364,60 @@ _COMPANY_NAMES: dict[str, str] = {
     "STEP": "StepStone Group",
     # NIO
     "NIO": "NIO",
+    # Large-cap additions
+    "V": "Visa Inc.", "MA": "Mastercard", "PG": "Procter & Gamble",
+    "MRK": "Merck & Co.", "ABBV": "AbbVie", "KO": "The Coca-Cola Company",
+    "PEP": "PepsiCo", "LLY": "Eli Lilly and Company", "TMO": "Thermo Fisher Scientific",
+    "ABT": "Abbott Laboratories", "DHR": "Danaher Corporation", "LIN": "Linde plc",
+    "ACN": "Accenture", "CSCO": "Cisco", "GS": "Goldman Sachs",
+    "MS": "Morgan Stanley", "CAT": "Caterpillar Inc.", "GE": "GE Aerospace",
+    "HON": "Honeywell", "BA": "Boeing", "IBM": "IBM",
+    "LOW": "Lowe's", "SBUX": "Starbucks", "DE": "John Deere",
+    "RTX": "RTX Corporation", "MMM": "3M", "F": "Ford Motor Company",
+    "GM": "General Motors",
+    # Utilities
+    "NEE": "NextEra Energy", "DUK": "Duke Energy", "SO": "Southern Company",
+    "AEP": "American Electric Power", "D": "Dominion Energy", "SRE": "Sempra Energy",
+    # Real Estate
+    "PLD": "Prologis", "AMT": "American Tower", "EQIX": "Equinix",
+    "O": "Realty Income", "SPG": "Simon Property Group",
+    # Materials
+    "APD": "Air Products and Chemicals", "ECL": "Ecolab", "SHW": "Sherwin-Williams",
+    "NUE": "Nucor Corporation", "FCX": "Freeport-McMoRan", "NEM": "Newmont Corporation",
+    "DOW": "Dow Inc.",
+    # Telecom
+    "T": "AT&T", "VZ": "Verizon Communications", "TMUS": "T-Mobile US",
+    # Aerospace/Defense
+    "LMT": "Lockheed Martin", "NOC": "Northrop Grumman", "GD": "General Dynamics",
+    "LHX": "L3Harris Technologies", "HII": "Huntington Ingalls Industries",
+    # Transport
+    "UPS": "United Parcel Service", "FDX": "FedEx", "DAL": "Delta Air Lines",
+    "UAL": "United Airlines", "ODFL": "Old Dominion Freight Line",
+    # Energy
+    "COP": "ConocoPhillips", "SLB": "Schlumberger", "EOG": "EOG Resources",
+    "OKE": "ONEOK", "FANG": "Diamondback Energy",
+    # Consumer/Retail
+    "TGT": "Target Corporation", "ROST": "Ross Stores", "TJX": "TJX Companies",
+    "LULU": "Lululemon Athletica", "DG": "Dollar General", "YUM": "Yum! Brands",
+    "CMG": "Chipotle Mexican Grill", "DECK": "Deckers Outdoor",
+    # Insurance
+    "BRK.B": "Berkshire Hathaway", "PGR": "Progressive Corporation",
+    "CB": "Chubb Limited", "MET": "MetLife",
+    # Pharma/Biotech
+    "GILD": "Gilead Sciences", "AMGN": "Amgen", "REGN": "Regeneron Pharmaceuticals",
+    "VRTX": "Vertex Pharmaceuticals", "BMY": "Bristol-Myers Squibb",
+    # Small-cap industrials
+    "TRS": "TriMas Corporation", "WIRE": "Encore Wire", "POWL": "Powell Industries",
+    "PRIM": "Primoris Services", "GBX": "Greenbrier Companies", "NN": "NextGen Healthcare",
+    "ROCK": "Gibraltar Industries",
+    # Small-cap consumer
+    "DNUT": "Krispy Kreme", "ARKO": "Arko Corp", "ONEW": "OneWater Marine",
+    "CURV": "Torrid Holdings",
+    # Small-cap tech
+    "INTA": "Intapp", "ALKT": "Alkami Technology", "SMAR": "Smartsheet",
+    "RAMP": "LiveRamp",
+    # Small-cap energy
+    "VTLE": "Vital Energy", "CHRD": "Chord Energy", "SM": "SM Energy",
 }
 
 # ---------------------------------------------------------------------------
@@ -252,7 +435,7 @@ class ScreenResponse(BaseModel):
     tickers: list[str]
     rules: dict[str, Any]
     count: int
-    universe_size: int = 103
+    universe_size: int = 200
     unresolved: list[str] = []
     notes: str = ""
 
