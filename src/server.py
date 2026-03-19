@@ -214,8 +214,8 @@ async def lifespan(app: FastAPI):
                 paper_executors = {}
                 for name, exec_ in executors.items():
                     paper_executors[name] = PaperExecutor(exec_, starting_balance=get_paper_balance(), use_limit_orders=True)
-                # If no real executors configured, create a paper-only executor with a dummy
-                if not paper_executors:
+                # Always ensure polymarket paper executor exists (price lookups are public, no keys needed)
+                if "polymarket" not in paper_executors:
                     paper_executors["polymarket"] = PaperExecutor(PolymarketExecutor(), starting_balance=get_paper_balance(), use_limit_orders=True)
                 executors = paper_executors
                 logger.info("Position system running in PAPER TRADING mode (balance=$%.2f)", get_paper_balance())
