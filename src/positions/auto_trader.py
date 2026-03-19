@@ -27,12 +27,15 @@ MAX_TOTAL_EXPOSURE = 1400.0  # Max $1400 for auto trader (reserve $600 for news)
 PORTFOLIO_EXPOSURE_CAP = 0.40  # Kelly portfolio rule: never exceed 40% of total bankroll
 TOTAL_BANKROLL = 2000.0      # Total bankroll (auto_trader $1400 + news $600)
 SCAN_INTERVAL = 300          # 5 minutes between self-initiated scans (safety net)
-MIN_SPREAD_PCT = 5.0         # Minimum 5% spread to ensure profit after fees
+MIN_SPREAD_PCT = 8.0         # Minimum 8% spread to ensure profit after fees
 # Polymarket: 0% maker fee on limit orders. Use limit orders (maker) to enter,
 # taker to exit in worst case = ~2% one-way exit fee.
 # Conservative estimate: 0% entry + 2% exit = 2% round-trip
-# With 5% min spread - 2% fees = 3% net margin minimum
+# With 8% min spread - 2% fees = 6% net margin minimum
+# Raised from 5%: $4 fee on $200 trade means 2% minimum loss even on flat trades.
+# Data shows 65% of losses were fee drag — need wider margin to overcome.
 ROUND_TRIP_FEE_PCT = 2.0     # Estimated round-trip fees with limit order entry
+MAX_LOSSES_PER_MARKET = 2    # Block market after 2 losses (prevents BTC-top-performer pattern: 6 entries, $24 lost)
 
 
 class AutoTrader:
@@ -364,18 +367,23 @@ class AutoTrader:
 
             trade_title = opp.get("title") or opp.get("canonical_title") or f"Auto-{int(time.time())}"
 
-            # Cooldown: don't re-enter a market within 4 hours of exiting it
+            # Cooldown: don't re-enter a market within 24 hours of exiting it
             # Track BOTH by condition ID and normalized title to catch duplicates
+            # Also block markets with 2+ historical losses (prevents churning)
             recently_closed_ids = set()
             recently_closed_titles = set()
+            market_loss_counts = {}  # title → loss count (all time)
             for p in self.pm.list_packages("closed"):
-                if time.time() - p.get("updated_at", 0) < 14400:  # 4 hours
+                ptitle = (p.get("name", "").replace("Auto: ", "").replace("News: ", "").lower().strip())[:50]
+                # Track all-time loss count per market
+                if ptitle and p.get("realized_pnl", p.get("unrealized_pnl", 0)) < 0:
+                    market_loss_counts[ptitle] = market_loss_counts.get(ptitle, 0) + 1
+                # 24-hour cooldown window (was 4 hours — too short, NCAA entered 5 times)
+                if time.time() - p.get("updated_at", 0) < 86400:  # 24 hours
                     for leg in p.get("legs", []):
                         cid = leg.get("asset_id", "").split(":")[0]
                         if cid:
                             recently_closed_ids.add(cid)
-                    # Normalize title for matching: strip "Auto: " prefix, lowercase, first 50 chars
-                    ptitle = (p.get("name", "").replace("Auto: ", "").replace("News: ", "").lower().strip())[:50]
                     if ptitle:
                         recently_closed_titles.add(ptitle)
 
@@ -391,6 +399,13 @@ class AutoTrader:
                 self._trades_skipped += 1
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "cooldown_title_match")
+                continue
+
+            # Block markets with too many historical losses
+            if market_loss_counts.get(norm_title, 0) >= MAX_LOSSES_PER_MARKET:
+                self._trades_skipped += 1
+                if self.dlog:
+                    self.dlog.log_opportunity_skip(opp_title, f"max_losses_reached ({market_loss_counts[norm_title]} losses)")
                 continue
 
             # Also check open positions by title — don't open duplicates of existing positions
@@ -432,9 +447,9 @@ class AutoTrader:
                         expiry=opp.get("expiry", "2026-12-31")[:10],
                     ))
 
-                pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 30}))
-                pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -30}))
-                pkg["exit_rules"].append(create_exit_rule("trailing_stop", {"current": 20, "bound_min": 10, "bound_max": 40}))
+                pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 50}))
+                pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -40}))
+                pkg["exit_rules"].append(create_exit_rule("trailing_stop", {"current": 35, "bound_min": 15, "bound_max": 50}))
                 pkg["_political_strategy"] = opp.get("strategy", {})
 
                 # Political packages skip normal strategy/side determination.
@@ -624,14 +639,16 @@ class AutoTrader:
                 self._trades_skipped += 1
                 continue
 
-            # Exit rules — tuned from live paper trading data:
-            # - target_hit (100% WR, +$410) is the only profitable exit trigger
-            # - trailing_stop at 12% lost 2 trades (-$15): too tight, shaken out
-            # - time-based exits (-$39): removed as safety overrides, now soft review
-            # Strategy: let winners ride to target, give losers room to recover
-            pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 30}))
-            pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -30}))
-            pkg["exit_rules"].append(create_exit_rule("trailing_stop", {"current": 20, "bound_min": 10, "bound_max": 40}))
+            # Exit rules — tuned from 31 closed trades of paper trading data:
+            # - trailing_stop at 20% lost 5 trades (-$59): too tight for prediction market volatility
+            # - AI-approved time_decay: 7 trades, 0 wins, -$29 (premature exits)
+            # - AI-approved negative_drift: 4 trades, 0 wins, -$55 (panic selling dips)
+            # - manual_full_exit: 13 trades, 3 wins, -$1.65 (humans hold, bots panic)
+            # Strategy: wide stops, let winners run to near-resolution, cut only deep losers
+            # Prediction markets resolve to 0 or 1 — asymmetric patience wins
+            pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 50}))
+            pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -40}))
+            pkg["exit_rules"].append(create_exit_rule("trailing_stop", {"current": 35, "bound_min": 15, "bound_max": 50}))
 
             # Execute
             pkg_name = pkg.get("name", opp_title)
