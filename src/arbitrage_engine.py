@@ -53,18 +53,16 @@ def _markets_have_same_target(markets: list[NormalizedEvent]) -> bool:
 
 
 def _build_synthetic_info(yes_market: NormalizedEvent,
-                          no_market: NormalizedEvent) -> dict:
+                          no_market: NormalizedEvent) -> dict | None:
     """Build synthetic derivative details from two markets with different targets.
 
-    Example: BTC >$74K (YES=13c) on Polymarket + BTC >$71K (NO=1.6c) on Limitless.
-    These are NOT the same event — combining them creates a synthetic range bet.
+    For a valid synthetic, we need two markets that cover DIFFERENT outcomes:
+    - BUY YES "above $74K" + BUY NO "above $70K"
+      = wins if Price > $74K (YES pays) OR Price < $70K (NO pays)
+      = loses only if $70K < Price < $74K (gap between strikes)
 
-    Scenarios for "buy YES on higher strike, buy NO on lower strike":
-      - Price > high_strike: YES wins ($1), NO loses ($0) → net = $1 - cost
-      - low_strike < Price < high_strike: YES loses ($0), NO wins ($1) → net = $1 - cost
-      - Price < low_strike: both lose → net = -(yes_cost + no_cost)
-
-    The "sweet spot" is the middle scenario — profitable if price lands in the range.
+    Returns None if the synthetic is invalid (same-direction doubling, no price data,
+    or loss probability > 40%).
     """
     yes_crypto = _extract_crypto(yes_market.title)
     no_crypto = _extract_crypto(no_market.title)
@@ -74,49 +72,150 @@ def _build_synthetic_info(yes_market: NormalizedEvent,
     yes_dir = yes_crypto.get("direction", "")
     no_dir = no_crypto.get("direction", "")
 
-    # Determine which is the higher vs lower strike
-    if yes_target >= no_target:
-        high_strike = yes_target
-        low_strike = no_target
+    if not yes_target or not no_target:
+        return None
+
+    # Reject if both bets are the same direction — that's doubling down, not hedging
+    # e.g., YES "dip to $70K" (below) + NO "above $70K" (above) — both win on same move
+    yes_effective = yes_dir or "above"
+    no_effective = no_dir or "above"
+
+    # For "buy YES" on market A: you WIN when direction condition is TRUE
+    # For "buy NO" on market B: you WIN when direction condition is FALSE (opposite)
+    # So "buy NO on 'above $70K'" wins when price is BELOW $70K
+    #
+    # Valid synthetic: the two winning conditions should cover DIFFERENT price ranges
+    # YES wins when: yes_dir is true (e.g., price > yes_target if "above")
+    # NO wins when: no_dir is false (e.g., price < no_target if "above")
+    #
+    # For this to create a range play:
+    #   YES "above X" wins when price > X
+    #   NO "above Y" wins when price < Y
+    #   Valid if X > Y → wins above X and below Y, loses in gap [Y, X]
+    #   Valid if Y > X → always wins (one leg covers the other) = pure arb
+    #
+    #   YES "below X" wins when price < X
+    #   NO "above Y" wins when price < Y
+    #   If X ≈ Y → both win on same condition = same-direction doubling = REJECT
+
+    # Determine effective win conditions
+    # YES side wins when direction is TRUE
+    if yes_effective in ("above", "over"):
+        yes_wins_above = yes_target  # wins when price > yes_target
+        yes_wins_below = None
+    elif yes_effective in ("below", "under"):
+        yes_wins_above = None
+        yes_wins_below = yes_target  # wins when price < yes_target
     else:
-        high_strike = no_target
-        low_strike = yes_target
+        yes_wins_above = yes_target
+        yes_wins_below = None
 
-    # Detect market type mix (range vs directional)
-    market_types = set(filter(None, [yes_dir, no_dir]))
-    is_range_mix = "between" in market_types and market_types - {"between"}
+    # NO side wins when direction is FALSE (opposite)
+    if no_effective in ("above", "over"):
+        no_wins_above = None
+        no_wins_below = no_target  # NO "above X" wins when price < X
+    elif no_effective in ("below", "under"):
+        no_wins_above = no_target  # NO "below X" wins when price > X
+        no_wins_below = None
+    else:
+        no_wins_above = None
+        no_wins_below = no_target
 
+    # Check for same-direction doubling: both legs win on same price move
+    if yes_wins_below and no_wins_below:
+        # Both win when price drops — just doubling down on bearish bet
+        ratio = min(yes_wins_below, no_wins_below) / max(yes_wins_below, no_wins_below)
+        if ratio > 0.85:
+            return None  # Too similar, not a hedge
+    if yes_wins_above and no_wins_above:
+        # Both win when price rises — just doubling down on bullish bet
+        ratio = min(yes_wins_above, no_wins_above) / max(yes_wins_above, no_wins_above)
+        if ratio > 0.85:
+            return None
+
+    # Determine the gap (loss zone) and winning zones
     yes_cost = yes_market.yes_price
     no_cost = no_market.no_price
     total_cost = yes_cost + no_cost
 
-    # Scenario payoffs (per $1 invested in each leg equally)
-    scenarios = {}
-    if high_strike > 0 and low_strike > 0:
-        scenarios = {
-            "above_both": {
-                "condition": f"Price > ${high_strike:,.0f}",
-                "yes_pays": 1.0, "no_pays": 0.0,
-                "net": round(1.0 - total_cost, 4),
-                "return_pct": round((1.0 - total_cost) / total_cost * 100, 1) if total_cost > 0 else 0,
-            },
-            "between": {
-                "condition": f"${low_strike:,.0f} < Price < ${high_strike:,.0f}",
-                "yes_pays": 0.0, "no_pays": 1.0,
-                "net": round(1.0 - total_cost, 4),
-                "return_pct": round((1.0 - total_cost) / total_cost * 100, 1) if total_cost > 0 else 0,
-            },
-            "below_both": {
-                "condition": f"Price < ${low_strike:,.0f}",
-                "yes_pays": 0.0, "no_pays": 0.0,
-                "net": round(-total_cost, 4),
-                "return_pct": -100.0,
-            },
-        }
+    if total_cost >= 1.0:
+        return None  # No profit possible
 
+    # Build direction-aware scenarios
+    if yes_wins_above and no_wins_below:
+        # Classic straddle: YES wins high, NO wins low, gap in middle
+        high_strike = yes_wins_above
+        low_strike = no_wins_below
+        if high_strike <= low_strike:
+            # Overlapping — always one leg wins = near-guaranteed
+            high_strike, low_strike = max(yes_wins_above, no_wins_below), min(yes_wins_above, no_wins_below)
+
+        # Loss probability ≈ gap size relative to strikes
+        gap = abs(high_strike - low_strike)
+        avg_strike = (high_strike + low_strike) / 2
+        gap_pct = gap / avg_strike if avg_strike > 0 else 1.0
+
+        # Use market prices as probability proxies
+        # YES price ≈ P(price > yes_target), NO price ≈ P(price < no_target)
+        # Loss prob ≈ 1 - P(YES wins) - P(NO wins)
+        loss_prob = max(0, 1.0 - yes_cost - no_cost)
+
+    elif yes_wins_below and no_wins_above:
+        # Inverse straddle: YES wins low, NO wins high
+        high_strike = no_wins_above
+        low_strike = yes_wins_below
+        gap = abs(high_strike - low_strike)
+        avg_strike = (high_strike + low_strike) / 2
+        gap_pct = gap / avg_strike if avg_strike > 0 else 1.0
+        loss_prob = max(0, 1.0 - yes_cost - no_cost)
+    else:
+        # Can't determine valid straddle structure
+        high_strike = max(yes_target, no_target)
+        low_strike = min(yes_target, no_target)
+        gap_pct = abs(high_strike - low_strike) / ((high_strike + low_strike) / 2) if (high_strike + low_strike) > 0 else 1.0
+        loss_prob = 0.5  # Unknown, assume risky
+
+    # Reject if loss probability is too high (>40%) or gap is too wide (>10%)
+    if loss_prob > 0.40:
+        return None
+    if gap_pct > 0.10:
+        return None
+
+    win_return_pct = round((1.0 - total_cost) / total_cost * 100, 1) if total_cost > 0 else 0
+
+    scenarios = {
+        "above_high": {
+            "condition": f"Price > ${high_strike:,.0f}",
+            "yes_pays": 1.0 if yes_wins_above else 0.0,
+            "no_pays": 1.0 if no_wins_above else 0.0,
+            "net": round((1.0 if (yes_wins_above or no_wins_above) else 0.0) - total_cost, 4),
+            "return_pct": win_return_pct if (yes_wins_above or no_wins_above) else -100.0,
+        },
+        "in_gap": {
+            "condition": f"${low_strike:,.0f} < Price < ${high_strike:,.0f}",
+            "yes_pays": 0.0, "no_pays": 0.0,
+            "net": round(-total_cost, 4),
+            "return_pct": -100.0,
+        },
+        "below_low": {
+            "condition": f"Price < ${low_strike:,.0f}",
+            "yes_pays": 1.0 if yes_wins_below else 0.0,
+            "no_pays": 1.0 if no_wins_below else 0.0,
+            "net": round((1.0 if (yes_wins_below or no_wins_below) else 0.0) - total_cost, 4),
+            "return_pct": win_return_pct if (yes_wins_below or no_wins_below) else -100.0,
+        },
+    }
+
+    # Count actual winning scenarios
+    win_count = sum(1 for s in scenarios.values() if s["return_pct"] > 0)
+    loss_count = sum(1 for s in scenarios.values() if s["return_pct"] <= 0)
+
+    if win_count < 2:
+        return None  # Must win in at least 2 of 3 scenarios
+
+    market_types = set(filter(None, [yes_dir, no_dir]))
+    is_range_mix = "between" in market_types and market_types - {"between"}
     synth_type = "range_vs_directional" if is_range_mix else "range_synthetic"
-
-    # For range-vs-directional mixes, annotate the specific market types
     yes_type = "range" if yes_dir == "between" else ("directional" if yes_dir else "unknown")
     no_type = "range" if no_dir == "between" else ("directional" if no_dir else "unknown")
 
@@ -132,8 +231,10 @@ def _build_synthetic_info(yes_market: NormalizedEvent,
         "no_market_type": no_type,
         "total_cost": round(total_cost, 4),
         "scenarios": scenarios,
-        "win_conditions": 2,   # wins in 2 of 3 scenarios
-        "loss_conditions": 1,  # loses only if price drops below both
+        "win_conditions": win_count,
+        "loss_conditions": loss_count,
+        "loss_probability": round(loss_prob, 3),
+        "gap_pct": round(gap_pct * 100, 1),
         "yes_price_range": [yes_crypto.get("price_low"), yes_crypto.get("price_high")],
         "no_price_range": [no_crypto.get("price_low"), no_crypto.get("price_high")],
     }
@@ -179,15 +280,17 @@ def find_arbitrage(matched: list[MatchedEvent],
         total_cost = best_yes_market.yes_price + best_no_market.no_price
 
         if is_synthetic:
-            # Synthetic: wins in 2/3 scenarios, each paying $1
-            # Expected value = (2/3 * ($1 - cost)) + (1/3 * (-cost))
-            # = 2/3 - cost
-            # Profit if total_cost < $1 (same math, but NOT "guaranteed")
+            # Validate the synthetic — returns None if bad pairing
             synthetic_info = _build_synthetic_info(best_yes_market, best_no_market)
+            if synthetic_info is None:
+                continue  # Invalid synthetic (same-direction, high loss prob, etc.)
+
             spread = 1.0 - total_cost
-            # Discount synthetic profit to reflect that it's not guaranteed
-            # Only 2/3 scenarios win vs 3/3 for pure arb
-            effective_profit_pct = spread * 100.0 * 0.667  # discount by win probability
+            # Discount by win probability (win_conditions / 3 scenarios)
+            win_ratio = synthetic_info.get("win_conditions", 2) / 3.0
+            # Further discount by loss probability
+            loss_prob = synthetic_info.get("loss_probability", 0.33)
+            effective_profit_pct = spread * 100.0 * (1.0 - loss_prob)
             if effective_profit_pct < min_spread * 100:
                 continue
 

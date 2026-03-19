@@ -144,7 +144,7 @@ def _extract_crypto(title: str) -> dict:
 
     if re.search(r'\b(above|over|exceed|surpass|reach|hit|higher)\b', lower):
         result["direction"] = "above"
-    elif re.search(r'\b(below|under|drop|fall|lower)\b', lower):
+    elif re.search(r'\b(below|under|drop|fall|lower|dip|sink|crash|plunge|decline)\b', lower):
         result["direction"] = "below"
 
     return result
@@ -331,10 +331,12 @@ def _passes_quick_filter(ent_a: dict, ent_b: dict, title_a: str, title_b: str) -
 # PREDICTIT TITLE HANDLING
 # ============================================================
 def _clean_predictit_title(title: str) -> str:
-    """Extract the core question from PredictIt's 'Market: Contract' format."""
-    parts = title.split(": ")
-    if len(parts) >= 2:
-        return parts[0]
+    """Keep PredictIt's full 'Market: Contract' title for accurate matching.
+
+    Previously stripped to just the market name, but that caused false matches:
+    'Who will win most seats: Fidesz' and 'Who will win most seats: MSZP'
+    would both become 'Who will win most seats' and match the same external events.
+    """
     return title
 
 
