@@ -5,7 +5,11 @@ Flow:
     1. User POSTs a free-text prompt to /api/generate-asset/screen
     2. intent_parser() asks a local Ollama LLM to extract structured screening
        rules from the prompt.
-    3. swarm_evaluator() filters a ~200-stock mock universe against those rules.
+    3. swarm_evaluator() filters against real fundamentals data via 4-path fallback:
+       Path 1: FMP screener (all US stocks, needs API key)
+       Path 2: S&P 500 fundamentals cache (yfinance/Yahoo v8 API)
+       Path 3: Full universe cache (9,920+ SEC EDGAR tickers, progressively fetched)
+       Path 4: Mock universe (~350 stocks, last resort)
     4. The matching tickers, parsed rules, and counts are returned as JSON.
 """
 
@@ -435,7 +439,7 @@ class ScreenResponse(BaseModel):
     tickers: list[str]
     rules: dict[str, Any]
     count: int
-    universe_size: int = 200
+    universe_size: int = 9920
     unresolved: list[str] = []
     notes: str = ""
 
@@ -1047,6 +1051,160 @@ def _fetch_fmp_fundamentals(symbols: list[str]) -> dict[str, dict]:
     return universe
 
 
+# ---------------------------------------------------------------------------
+# Full universe cache — progressive fundamentals fetching for 9,920+ tickers
+# ---------------------------------------------------------------------------
+import os
+import time
+import threading
+from pathlib import Path
+
+_UNIVERSE_CACHE_DIR = Path(__file__).parent / "data" / "universe_cache"
+_UNIVERSE_CACHE_FILE = _UNIVERSE_CACHE_DIR / "fundamentals.json"
+_UNIVERSE_CACHE_MAX_AGE = 7 * 86400  # 7 days
+_universe_fetch_lock = threading.Lock()
+_universe_fetch_running = False
+
+
+def _load_full_universe_cache() -> dict[str, dict] | None:
+    """Load cached fundamentals for full universe. Returns None if cache is empty/stale."""
+    if not _UNIVERSE_CACHE_FILE.exists():
+        # Trigger background fetch on first call
+        _trigger_universe_fetch()
+        return None
+    try:
+        raw = json.loads(_UNIVERSE_CACHE_FILE.read_text())
+        if time.time() - raw.get("fetched_at", 0) > _UNIVERSE_CACHE_MAX_AGE:
+            _trigger_universe_fetch()  # refresh in background
+            # Still use stale data for this request
+        stocks = raw.get("stocks", {})
+        if len(stocks) < 100:
+            _trigger_universe_fetch()
+            return None
+        return stocks
+    except (json.JSONDecodeError, OSError, KeyError):
+        return None
+
+
+def _trigger_universe_fetch():
+    """Kick off background thread to fetch fundamentals for full universe."""
+    global _universe_fetch_running
+    with _universe_fetch_lock:
+        if _universe_fetch_running:
+            return
+        _universe_fetch_running = True
+    t = threading.Thread(target=_fetch_universe_fundamentals_bg, daemon=True)
+    t.start()
+
+
+def _fetch_universe_fundamentals_bg():
+    """Background: fetch fundamentals for all US tickers from SEC EDGAR universe.
+
+    Uses strategy_engine's get_sp500_fundamentals() which already handles
+    yfinance -> Yahoo v8 API fallbacks with rate limit backoff.
+    Fetches in batches, saves progressively.
+    """
+    global _universe_fetch_running
+    try:
+        from research.stock_universe import get_universe
+        from strategy_engine import get_sp500_fundamentals
+
+        # Get all US ticker symbols
+        all_stocks = get_universe(exchange=None, include_hkex=False)
+        all_tickers = [s["ticker"] if isinstance(s, dict) else s for s in all_stocks]
+        logger.info("Universe fetch: %d tickers to process", len(all_tickers))
+
+        # Load existing cache to do incremental updates
+        existing = {}
+        if _UNIVERSE_CACHE_FILE.exists():
+            try:
+                raw = json.loads(_UNIVERSE_CACHE_FILE.read_text())
+                existing = raw.get("stocks", {})
+            except Exception:
+                pass
+
+        # Only fetch tickers we don't already have (or that are stale)
+        need_fetch = [t for t in all_tickers if t not in existing]
+        if not need_fetch:
+            logger.info("Universe cache is complete (%d tickers), skipping fetch", len(existing))
+            return
+
+        # Fetch in chunks of 500 (get_sp500_fundamentals does its own batching of 20 internally)
+        CHUNK = 500
+        for i in range(0, len(need_fetch), CHUNK):
+            chunk = need_fetch[i:i + CHUNK]
+            logger.info("Universe fetch: chunk %d-%d of %d", i, i + len(chunk), len(need_fetch))
+            try:
+                chunk_data = get_sp500_fundamentals(symbols=chunk)
+                existing.update(chunk_data)
+                # Save after each chunk (progressive)
+                _save_universe_cache(existing)
+                logger.info("Universe cache: %d total stocks cached", len(existing))
+            except Exception as e:
+                logger.warning("Universe fetch chunk failed: %s", e)
+                # Save what we have and stop
+                if existing:
+                    _save_universe_cache(existing)
+                break
+    except Exception as e:
+        logger.error("Universe fundamentals fetch failed: %s", e)
+    finally:
+        with _universe_fetch_lock:
+            _universe_fetch_running = False
+
+
+def _save_universe_cache(stocks: dict):
+    """Save universe fundamentals cache to disk."""
+    _UNIVERSE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    import tempfile
+    cache = {"fetched_at": time.time(), "count": len(stocks), "stocks": stocks}
+    tmp = str(_UNIVERSE_CACHE_FILE) + ".tmp"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(cache, f)
+        os.replace(tmp, str(_UNIVERSE_CACHE_FILE))
+    except Exception:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+@router.get(
+    "/api/generate-asset/universe-status",
+    summary="Check universe fundamentals cache status",
+    tags=["Swarm Engine"],
+)
+async def get_universe_status():
+    """Returns status of the full universe fundamentals cache."""
+    if not _UNIVERSE_CACHE_FILE.exists():
+        return {"cached": 0, "status": "not_started", "stale": True}
+    try:
+        raw = json.loads(_UNIVERSE_CACHE_FILE.read_text())
+        count = raw.get("count", 0)
+        fetched_at = raw.get("fetched_at", 0)
+        age_hours = (time.time() - fetched_at) / 3600
+        return {
+            "cached": count,
+            "status": "fetching" if _universe_fetch_running else "ready",
+            "age_hours": round(age_hours, 1),
+            "stale": age_hours > 168,  # 7 days
+        }
+    except Exception:
+        return {"cached": 0, "status": "error", "stale": True}
+
+
+@router.post(
+    "/api/generate-asset/universe-refresh",
+    summary="Trigger background refresh of universe fundamentals",
+    tags=["Swarm Engine"],
+)
+async def trigger_universe_refresh():
+    """Trigger a background fetch of fundamentals for all US tickers."""
+    if _universe_fetch_running:
+        return {"status": "already_running"}
+    _trigger_universe_fetch()
+    return {"status": "started"}
+
+
 @router.post(
     "/api/generate-asset/screen",
     response_model=ScreenResponse,
@@ -1121,7 +1279,25 @@ async def screen_stocks(body: ScreenRequest) -> ScreenResponse:
         except Exception as e:
             logger.debug("SP500 cache fallback failed: %s", e)
 
-    # Path 3: Mock universe fallback
+    # Path 3: Full universe fundamentals cache (9,920+ tickers from SEC EDGAR)
+    if not tickers:
+        try:
+            full_universe = _load_full_universe_cache()
+            if full_universe:
+                full_rules = dict(rules)
+                if "min_market_cap" in full_rules:
+                    full_rules["min_market_cap"] = full_rules["min_market_cap"] * 1e9
+                if "max_market_cap" in full_rules:
+                    full_rules["max_market_cap"] = full_rules["max_market_cap"] * 1e9
+                if "min_fcf" in full_rules:
+                    full_rules["min_fcf"] = full_rules["min_fcf"] * 1e6
+                tickers = swarm_evaluator(full_rules, full_universe)
+                universe_size = len(full_universe)
+                logger.info("Full universe screener: %d matches from %d stocks", len(tickers), universe_size)
+        except Exception as e:
+            logger.debug("Full universe cache fallback failed: %s", e)
+
+    # Path 4: Mock universe fallback
     if not tickers:
         tickers = swarm_evaluator(rules, MOCK_UNIVERSE)
         universe_size = len(MOCK_UNIVERSE)
@@ -1138,9 +1314,19 @@ async def screen_stocks(body: ScreenRequest) -> ScreenResponse:
         try:
             from strategy_engine import research_filter
             # Build sp500_list-like structure with company names for Wikipedia
+            # Pull names from stock_universe.py for tickers not in _COMPANY_NAMES
+            _universe_names = {}
+            try:
+                from research.stock_universe import get_universe
+                for s in get_universe(include_hkex=False):
+                    if isinstance(s, dict) and s.get("ticker") and s.get("company_name"):
+                        _universe_names[s["ticker"]] = s["company_name"]
+            except Exception:
+                pass
+
             ticker_list = []
             for t in tickers:
-                name = _COMPANY_NAMES.get(t, t)
+                name = _COMPANY_NAMES.get(t) or _universe_names.get(t, t)
                 ticker_list.append({"symbol": t, "name": name})
 
             # Try FMP for names we don't have in the map

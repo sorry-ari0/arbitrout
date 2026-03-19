@@ -26,7 +26,7 @@ MAX_CONCURRENT = 7           # Max 7 open packages (reserve 3 slots for news-dri
 MAX_TOTAL_EXPOSURE = 1400.0  # Max $1400 for auto trader (reserve $600 for news)
 PORTFOLIO_EXPOSURE_CAP = 0.40  # Kelly portfolio rule: never exceed 40% of total bankroll
 TOTAL_BANKROLL = 2000.0      # Total bankroll (auto_trader $1400 + news $600)
-SCAN_INTERVAL = 300          # 5 minutes between scans
+SCAN_INTERVAL = 300          # 5 minutes between self-initiated scans (safety net)
 MIN_SPREAD_PCT = 3.0         # Minimum 3% spread AFTER fees (lower threshold with limit orders)
 # Polymarket: 0% maker fee on limit orders. Use limit orders (maker) to enter,
 # taker to exit in worst case = ~2% one-way exit fee.
@@ -48,6 +48,8 @@ class AutoTrader:
         self._running = False
         self._trades_opened = 0
         self._trades_skipped = 0
+        self._last_trade_time = 0.0
+        self._scan_event = asyncio.Event()  # Fired by arb scanner after each scan
         # News scanner integration — thread-safe queue
         self._news_lock = asyncio.Lock()
         self._news_opportunities: list[dict] = []
@@ -77,6 +79,10 @@ class AutoTrader:
             self._task.cancel()
         logger.info("Auto trader stopped (opened=%d, skipped=%d)", self._trades_opened, self._trades_skipped)
 
+    async def notify_scan_complete(self):
+        """Called by arb scanner after each 60s scan — wakes up the trader immediately."""
+        self._scan_event.set()
+
     async def _loop(self):
         await asyncio.sleep(10)  # Let server fully start
         while self._running:
@@ -84,7 +90,15 @@ class AutoTrader:
                 await self._scan_and_trade()
             except Exception as e:
                 logger.error("Auto trader scan error: %s", e)
-            await asyncio.sleep(self.interval)
+            # Wait for EITHER the arb scanner to notify us OR the safety-net timeout.
+            # This means we react within seconds of a scan finding opportunities,
+            # instead of waiting up to 5 minutes.
+            self._scan_event.clear()
+            try:
+                await asyncio.wait_for(self._scan_event.wait(), timeout=self.interval)
+                logger.debug("Auto trader: woken by arb scanner notification")
+            except asyncio.TimeoutError:
+                logger.debug("Auto trader: safety-net timeout, running scheduled scan")
 
     def _get_open_market_ids(self, open_pkgs: list[dict]) -> set[str]:
         """Get condition IDs of markets we already have open positions on."""
@@ -131,17 +145,28 @@ class AutoTrader:
         remaining_slots = MAX_CONCURRENT - len(open_pkgs)
         open_market_ids = self._get_open_market_ids(open_pkgs)
 
-        # Scan for opportunities from ALL platforms
+        # Read opportunities from the arb scanner's cache (already scanned every 60s).
+        # No need to trigger another scan — the _auto_scan_loop handles that.
+        # This lets us evaluate and execute within seconds of data arriving.
         opportunities = []
         if self.scanner:
             try:
-                result = await self.scanner.scan()
-                logger.info("Auto trader: scanner fetched %d events from %d platforms, %d arb opportunities",
-                            result.get("events_count", 0), result.get("matched_count", 0),
-                            result.get("opportunities_count", 0))
+                # Use cached results first (fast — no network calls)
+                arb_opps = self.scanner.get_opportunities()
+                all_events = self.scanner.get_events()
+
+                # If cache is empty (first run or scanner hasn't scanned yet), do one scan
+                if not arb_opps and not all_events:
+                    result = await self.scanner.scan()
+                    logger.info("Auto trader: initial scan fetched %d events, %d opportunities",
+                                result.get("events_count", 0), result.get("opportunities_count", 0))
+                    arb_opps = self.scanner.get_opportunities()
+                    all_events = self.scanner.get_events()
+                else:
+                    logger.info("Auto trader: using cached scanner data (%d arb opps, %d events)",
+                                len(arb_opps), len(all_events))
 
                 # 1. Cross-platform arbitrage opportunities (highest priority)
-                arb_opps = self.scanner.get_opportunities()
                 for arb in arb_opps:
                     opp = self._arb_to_opportunity(arb)
                     if opp:
@@ -149,7 +174,6 @@ class AutoTrader:
                         opportunities.append(opp)
 
                 # 2. Single-platform directional bets from ALL platform events
-                all_events = self.scanner.get_events()  # MatchedEvent dicts
                 platform_opps = self._events_to_opportunities(all_events)
                 opportunities.extend(platform_opps)
 

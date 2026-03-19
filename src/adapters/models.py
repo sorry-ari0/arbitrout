@@ -74,6 +74,8 @@ class ArbitrageOpportunity:
     spread: float               # 1.0 - (yes + no) = profit per $1
     profit_pct: float           # spread * 100
     combined_volume: int
+    buy_yes_event_id: str = ""  # event_id of the YES market
+    buy_no_event_id: str = ""   # event_id of the NO market
     is_synthetic: bool = False          # True if markets have different price targets
     synthetic_info: dict = field(default_factory=dict)  # price targets, scenarios, etc.
 
@@ -94,8 +96,10 @@ class ArbitrageOpportunity:
             "matched_event": self.matched_event.to_dict(),
             "buy_yes_platform": self.buy_yes_platform,
             "buy_yes_price": self.buy_yes_price,
+            "buy_yes_event_id": self.buy_yes_event_id,
             "buy_no_platform": self.buy_no_platform,
             "buy_no_price": self.buy_no_price,
+            "buy_no_event_id": self.buy_no_event_id,
             "spread": round(self.spread, 4),
             "profit_pct": round(self.profit_pct, 2),
             "combined_volume": self.combined_volume,

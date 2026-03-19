@@ -286,7 +286,13 @@ def _passes_quick_filter(ent_a: dict, ent_b: dict, title_a: str, title_b: str) -
         # explicitly recognized as different market types
         if pa and pb:
             ratio = min(pa, pb) / max(pa, pb)
-            if ratio < 0.90:
+            # Tight threshold for same-direction matches to prevent
+            # grouping e.g. "BTC > $2000" with "BTC > $2200"
+            # Range/between markets use 0.90 since they cover wider spans
+            if dir_a == dir_b and dir_a in ("above", "below"):
+                if ratio < 0.98:
+                    return False
+            elif ratio < 0.90:
                 return False
         elif pa or pb:
             return False
@@ -350,16 +356,33 @@ def _title_hash(title: str) -> str:
 # ============================================================
 # EXPIRY CHECK
 # ============================================================
+def _parse_expiry_date(s: str):
+    """Parse an expiry string into a datetime, supporting multiple formats."""
+    from datetime import datetime
+    s = s.strip()
+    # ISO format: "2026-03-19" or "2026-03-19T..."
+    try:
+        return datetime.strptime(s[:10], "%Y-%m-%d")
+    except (ValueError, TypeError):
+        pass
+    # Limitless format: "Mar 19, 2026" or "March 19, 2026"
+    for fmt in ("%b %d, %Y", "%B %d, %Y", "%b %d %Y", "%B %d %Y"):
+        try:
+            return datetime.strptime(s, fmt)
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
 def _expiry_compatible(a: str, b: str, max_days: int = 7) -> bool:
     if a == "ongoing" or b == "ongoing":
         return True
-    try:
-        from datetime import datetime
-        da = datetime.strptime(a[:10], "%Y-%m-%d")
-        db = datetime.strptime(b[:10], "%Y-%m-%d")
+    da = _parse_expiry_date(a)
+    db = _parse_expiry_date(b)
+    if da and db:
         return abs((da - db).days) <= max_days
-    except (ValueError, TypeError):
-        return True
+    # If we can't parse either date, allow the match (conservative)
+    return True
 
 
 # ============================================================
@@ -467,6 +490,50 @@ def match_events(events: list[NormalizedEvent]) -> list[MatchedEvent]:
     for i in range(len(unlinked)):
         root = find(i)
         clusters.setdefault(root, []).append(i)
+
+    # --- Phase 2.5: Split mega-clusters ---
+    # If a cluster has crypto markets with >5% price divergence, split them
+    # This prevents Union-Find transitivity from merging A↔B↔C where A and C
+    # are actually different price targets
+    split_clusters: dict[int, list[int]] = {}
+    next_id = max(clusters.keys()) + 1 if clusters else 0
+    for root, indices in clusters.items():
+        if len(indices) <= 2:
+            split_clusters[root] = indices
+            continue
+        # Check if this is a crypto cluster with price data
+        crypto_prices = []
+        for idx in indices:
+            p = entities[idx].get("crypto_price")
+            if p:
+                crypto_prices.append((idx, p))
+        if len(crypto_prices) < 2:
+            split_clusters[root] = indices
+            continue
+        # Group by price proximity: markets within 5% of each other
+        price_groups: list[list[int]] = []
+        for idx, price in crypto_prices:
+            placed = False
+            for group in price_groups:
+                ref_price = entities[group[0]].get("crypto_price", 0)
+                if ref_price > 0 and min(price, ref_price) / max(price, ref_price) >= 0.95:
+                    group.append(idx)
+                    placed = True
+                    break
+            if not placed:
+                price_groups.append([idx])
+        # Non-crypto markets in the cluster go into the largest group
+        non_crypto = [i for i in indices if entities[i].get("crypto_price") is None]
+        if price_groups:
+            largest = max(price_groups, key=len)
+            largest.extend(non_crypto)
+        if len(price_groups) <= 1:
+            split_clusters[root] = indices
+        else:
+            for group in price_groups:
+                split_clusters[next_id] = group
+                next_id += 1
+    clusters = split_clusters
 
     # --- Phase 3: Build MatchedEvent objects ---
     results: list[MatchedEvent] = []

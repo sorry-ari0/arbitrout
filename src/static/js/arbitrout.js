@@ -215,7 +215,14 @@ function connectArbWs() {
 
     arbWs.onmessage = function(e) {
         var data = JSON.parse(e.data);
-        if (data.type === 'opportunities') {
+        if (data.type === 'init') {
+            // Initial state on connect
+            if (data.opportunities) renderOpportunities(data.opportunities);
+            if (data.feed) data.feed.forEach(function(item) { addFeedItem(item); });
+        } else if (data.type === 'scan_result') {
+            if (data.opportunities) renderOpportunities(data.opportunities);
+            if (data.feed) data.feed.forEach(function(item) { addFeedItem(item); });
+        } else if (data.type === 'opportunities') {
             renderOpportunities(data.data);
         } else if (data.type === 'feed') {
             addFeedItem(data.data);
@@ -409,6 +416,8 @@ function showEventDetail(opp) {
 
     var buyYesPlatform = opp.buy_yes_platform || '';
     var buyNoPlatform = opp.buy_no_platform || '';
+    var buyYesEventId = opp.buy_yes_event_id || '';
+    var buyNoEventId = opp.buy_no_event_id || '';
 
     markets.forEach(function(m) {
         var row = document.createElement('div');
@@ -419,10 +428,14 @@ function showEventDetail(opp) {
         nameEl.textContent = m.platform;
         row.appendChild(nameEl);
 
+        // Match by event_id (unique) instead of platform name (can have duplicates)
+        var isYesMatch = buyYesEventId ? (m.event_id === buyYesEventId) : (m.platform === buyYesPlatform);
+        var isNoMatch = buyNoEventId ? (m.event_id === buyNoEventId) : (m.platform === buyNoPlatform);
+
         var yesEl = document.createElement('div');
         yesEl.className = 'price-yes';
         yesEl.textContent = (m.yes_price * 100).toFixed(1) + '\u00A2';
-        if (m.platform === buyYesPlatform) {
+        if (isYesMatch) {
             yesEl.style.fontWeight = '700';
             yesEl.classList.add('price-best');
         }
@@ -431,19 +444,19 @@ function showEventDetail(opp) {
         var noEl = document.createElement('div');
         noEl.className = 'price-no';
         noEl.textContent = (m.no_price * 100).toFixed(1) + '\u00A2';
-        if (m.platform === buyNoPlatform) {
+        if (isNoMatch) {
             noEl.style.fontWeight = '700';
             noEl.classList.add('price-best');
         }
         row.appendChild(noEl);
 
-        // Action tag
+        // Action tag — match by event_id to avoid all-same-platform markets getting same action
         var actionEl = document.createElement('div');
         actionEl.style.cssText = 'font-size:9px;font-weight:700;';
-        if (m.platform === buyYesPlatform) {
+        if (isYesMatch) {
             actionEl.style.color = 'var(--arb-green)';
             actionEl.textContent = 'BUY YES';
-        } else if (m.platform === buyNoPlatform) {
+        } else if (isNoMatch) {
             actionEl.style.color = '#ff9800';
             actionEl.textContent = 'BUY NO';
         }

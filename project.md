@@ -319,8 +319,11 @@ signal_strength = 0.2 * normalized_insider_count
   - **Quoted terms:** Terms in quotes
   - **Key terms:** Non-stopword terms (3+ chars)
 - Entity overlap scoring (0.0-1.0): crypto ticker match (3pts), names (2pts), countries (1pt), quoted terms (2pts), key terms (2pts, proportional)
+- **Price ratio filter:** Same-direction crypto markets (both "above" or both "below") must have price ratio >= 0.98 (tight, prevents false matches between $90K and $100K targets). Range markets keep 0.90 threshold.
+- **Expiry date parsing:** Supports ISO `%Y-%m-%d` and Limitless formats (`%b %d, %Y`, `%B %d, %Y`)
 - Match threshold: 0.45 score required
 - Additional filters: same-platform events never match, category must be compatible, expiry must be within 7 days
+- **Mega-cluster splitting (Phase 2.5):** After Union-Find clustering, crypto clusters with >5% internal price divergence are split into sub-groups by price proximity. Prevents unrelated price targets (e.g., BTC $90K and $150K) from merging into one cluster.
 - PredictIt titles cleaned ("Market: Contract" → "Market")
 - Polymarket interval markets ("Up or Down - 9:55PM-10:00PM") only match other interval markets
 - Output: `MatchedEvent` objects with canonical title, category, all platform markets grouped
@@ -372,7 +375,8 @@ MatchedEvent:
 
 ArbitrageOpportunity:
   matched_event, buy_yes_platform, buy_yes_price, buy_no_platform, buy_no_price,
-  spread, profit_pct, combined_volume, yes_allocation_pct, no_allocation_pct
+  spread, profit_pct, combined_volume, buy_yes_event_id, buy_no_event_id,
+  yes_allocation_pct, no_allocation_pct, is_synthetic, synthetic_info
 ```
 
 ---
@@ -668,8 +672,8 @@ is_configured() → bool
 ## Frontend
 | File | Purpose |
 |------|---------|
-| `src/static/js/app.js` | Lobsterminal frontend (~2000 lines) |
-| `src/static/js/arbitrout.js` | Arbitrout frontend (533 lines) |
+| `src/static/js/app.js` | Lobsterminal frontend (~2300 lines) |
+| `src/static/js/arbitrout.js` | Arbitrout frontend (~960 lines) |
 | `src/static/css/terminal.css` | Terminal styles |
 | `src/static/css/arbitrout.css` | Arbitrout styles |
 
@@ -730,31 +734,41 @@ python -m uvicorn server:app --host 127.0.0.1 --port 8500 --log-level info
 - 32 closed packages, 12% win rate (improving — previous 28/32 were breakeven from same-platform both-sides bug)
 - AI advisor active via Groq (Llama 3.3 70B), ~500ms per review
 - Insider tracker: 100 traders monitored, 139 markets with signals
-- Auto trader: scanning every 5 min, directional bets, respecting $2K exposure limit, $5 min trade size
+- Auto trader: event-driven (wakes within seconds of each 60s arb scan), 5-min safety-net fallback, directional bets, respecting $2K exposure limit, $5 min trade size
 - Exit engine: 60s interval, 18 heuristic triggers, max 3 AI reviews/tick with 2s spacing
 - News scanner: 150s interval, 8 RSS feeds, two-pass AI pipeline (headline scan → deep analysis), breaking trades execute immediately
 - Decision logging: all buys, skips, trigger fires, AI verdicts, news signals logged to `decision_log.jsonl`
 - Arbitrage scanner: 1010 events from 8 adapters
 - **Recent changes (2026-03-18):**
-  - **Multi-platform executors:** Added 5 new executors: Limitless, Opinion Labs, Robinhood, CryptoSpot (CCXT), Kraken CLI. Server now registers 10 executors total (polymarket, kalshi, coinbase_spot, coinbase, predictit, limitless, opinion_labs, robinhood, crypto_spot, kraken).
-  - **Multi-platform auto trader:** Scanner integration fixed (was broken — `scanner.scan()` returns summary counts, not opportunity objects). Now uses `scanner.get_opportunities()` for cross-platform arb + `scanner.get_events()` for all-platform directional bets. Only trades on platforms with registered executors.
-  - **CCXT crypto executor:** 7-exchange priority chain (Kraken→Coinbase→Binance→Bybit→OKX→KuCoin→Bitget), public price fallback via Kraken/CoinGecko, synthetic probability markets for price targets.
-  - **Kraken CLI:** Rust binary in WSL Ubuntu, 19 MCP tools (market data + paper trading), `.mcp.json` configured for Claude Code integration.
-  - **ITM/OTM price filter:** Skip entries < $0.15 (lottery tickets) and > $0.85 (tiny upside).
-  - **Coinbase dual registration:** Adapter uses "coinbase", executor was keyed as "coinbase_spot" — now registered under both keys.
-  - **30-minute cooldown:** Auto trader won't re-enter a market within 30 min of exiting.
-  - **Directional betting:** Auto trader now buys ONE side (cheaper = higher upside) instead of both YES+NO on same platform. Cross-platform arb still buys both sides.
-  - **Multi-provider AI advisor:** Groq → Gemini → OpenRouter chain for paper (Anthropic first for live). Replaced single-provider Anthropic-only design.
-  - **Exit rule tuning:** Target 25% (was 15%), stop -20% (was -10%), trail 12% (was 8%) — wider for directional volatility
-  - **Market selection:** Skip near-50/50 (0.42-0.58), tighter resolved filter (0.92), 3-14 day expiry sweet spot (2x), volume >100K (1.5x), conviction >0.3 (1.5x)
-  - **Alert suppression:** Noisy triggers (vol_spike, new_ath, spread_compression) suppressed without AI. Rate limit: 3 AI reviews/tick, 2s spacing. Exit engine interval 30s→60s.
-  - **Decision logging:** New `decision_log.py` records all trading decisions to JSONL for later review and iteration
-  - **News scanner:** AI-powered RSS feed monitor with two-pass pipeline. 14 RSS feeds across 4 categories. Breaking news executes immediately; normal signals queue to auto trader with 2x score boost.
-  - **Lower minimums:** MIN_TRADE_SIZE reduced from $25 to $5 for smaller initial positions
-  - **exit_value fix:** Field was never set in position_manager. Fixed.
-  - **Dashboard P&L fix:** Was using stale `unrealized_pnl` for closed packages. Now calculates from `current_value - total_cost`.
-  - Split paper executor fee model: buy=maker, sell=taker (was using maker for both)
-  - Alert deduplication in `add_alert()` — cleared 1,540 stale pending alerts
+  - **Arbitrage display fixes (4):**
+    - Tightened crypto price ratio from 0.90 to 0.98 for same-direction matches (prevents false matches: $90K vs $100K)
+    - Limitless expiry date parsing (supports `%b %d, %Y` and `%B %d, %Y` formats)
+    - Mega-cluster splitting (Phase 2.5): crypto clusters with >5% internal price divergence get split
+    - ACTION column matches by `event_id` (unique) instead of `platform` name (can have duplicates)
+    - Added `buy_yes_event_id` and `buy_no_event_id` to ArbitrageOpportunity model
+  - **Full stock universe (9,920 tickers):**
+    - SEC EDGAR `company_tickers.json` provides all US tickers; 135 HKEX Hang Seng constituents hardcoded
+    - Universe browser UI: WATCHLIST/UNIVERSE toggle, search, exchange filter, HKEX checkbox, pagination (50/page)
+    - `.HK` ticker support: `_SYMBOL_RE` updated for dotted suffixes
+    - Full universe screener: background thread fetches fundamentals in chunks of 500, progressive cache saves
+    - New endpoints: `/api/research/universe`, `/api/research/universe/quotes`, `/api/generate-asset/universe-status`, `/api/generate-asset/universe-refresh`
+  - **Real data fallback chains (no mock data):**
+    - Quotes: yfinance → Yahoo v8 Chart API → Finnhub → Scrapling (Google Finance) → stale cache
+    - History: yfinance → Yahoo v8 Chart API → Finnhub → disk cache (7-day TTL at `data/history_cache/`)
+    - Backtest: yfinance → Yahoo v8 Chart API → Finnhub → Alpha Vantage → Scrapling Yahoo CSV (5 real sources)
+    - Screener: FMP → SP500 cache → Full universe cache → MOCK_UNIVERSE
+  - **Multi-platform executors:** Added 5 new executors: Limitless, Opinion Labs, Robinhood, CryptoSpot (CCXT), Kraken CLI. Server now registers 10 executors total.
+  - **Multi-platform auto trader:** Uses `scanner.get_opportunities()` for cross-platform arb + `scanner.get_events()` for all-platform directional bets.
+  - **CCXT crypto executor:** 7-exchange priority chain, public price fallback via Kraken/CoinGecko, synthetic probability markets.
+  - **Kraken CLI:** Rust binary in WSL Ubuntu, 19 MCP tools, `.mcp.json` configured for Claude Code.
+  - **Directional betting:** Auto trader buys ONE side (cheaper = higher upside). Cross-platform arb still buys both.
+  - **Multi-provider AI advisor:** Groq → Gemini → OpenRouter chain for paper (Anthropic first for live).
+  - **News scanner:** AI-powered RSS feed monitor with two-pass pipeline. 14 RSS feeds. Breaking news executes immediately.
+  - **Event-driven auto trader:** Auto trader now wakes within seconds of each 60s arb scan via `asyncio.Event` notification (was: independent 5-min polling loop). Reads cached scanner results instead of triggering redundant scans. Trade execution latency dropped from ~5 minutes to ~1-2 seconds.
+  - **Market feed fix:** WebSocket `init` and `scan_result` messages now handled by frontend. Auto-scan loop broadcasts feed + opportunities to all WS clients after each scan.
+  - **Decision logging:** All trading decisions to JSONL.
+  - Split paper executor fee model: buy=maker, sell=taker
+  - Alert deduplication, exit_value fix, dashboard P&L fix
   - All 48 tests passing
 
 ## Live Trading Requirements
@@ -800,3 +814,87 @@ The system validates: paper mode flag, platform keys, .env file permissions, .gi
 - Start: `wsl -d Ubuntu -- bash -c 'source $HOME/.cargo/env && kraken mcp -s market,paper'`
 - Dangerous tools (real orders, withdrawals) require `--allow-dangerous` flag and `"acknowledged": true` in args
 - To enable all services: change args to `["-s", "all"]` in `.mcp.json`
+
+---
+
+## Subsystem 4: Lobsterminal (Stock Terminal)
+
+### Files
+| File | Purpose |
+|------|---------|
+| `src/server.py` | Main backend — quotes, history, watchlist, portfolio, Dexter fundamentals, WebSocket |
+| `src/static/js/app.js` | Main frontend — market table, chart, watchlist, screener, portfolio, universe browser |
+| `src/static/index.html` | HTML shell with 6 panes + universe controls |
+| `src/static/css/terminal.css` | Terminal styles |
+| `src/swarm_engine.py` | AI stock screener — natural language → structured rules → filtered tickers |
+| `src/backtest_engine.py` | Backtesting engine — multi-source historical data, metrics, scoring |
+| `src/stock_universe.py` | SEC EDGAR universe — 9,920 US tickers + 135 HKEX Hang Seng constituents |
+| `src/portfolio_manager.py` | Portfolio CRUD, weight optimization, deployment |
+| `src/strategy_engine.py` | Strategy templates, research-based trading strategies |
+
+### Stock Universe (`stock_universe.py`)
+- **SEC EDGAR source:** Downloads `company_tickers.json` from SEC (~9,920 US tickers with CIK, name, exchange)
+- **HKEX:** 135 hardcoded Hang Seng Index constituents (e.g., `0700.HK` Tencent, `9988.HK` Alibaba)
+- **`get_universe(exchange, include_hk)`** — filter by exchange (ALL/NASDAQ/NYSE/AMEX), optionally include HKEX
+- **Ticker validation:** `_SYMBOL_RE` updated to `^[A-Z]{1,5}(\.[A-Z]{1,4})?$` for `.HK` tickers
+
+### Universe Browser (Frontend)
+- **WATCHLIST/UNIVERSE toggle** in Pane 1 header — switches between curated watchlist and full universe
+- **Universe controls bar:** search input (400ms debounce), exchange dropdown (All US/NASDAQ/NYSE), +HKEX checkbox, total counter, LOAD MORE button
+- **Pagination:** fetches 50 tickers per page from `/api/research/universe`, then quotes from `/api/research/universe/quotes`
+- **`universeState` object:** tracks mode, tickers, quotes, offset, pageSize, total, loading state
+
+### Data Fallback Architecture
+
+All data fetching uses multi-source fallback chains with persistent disk caching. No mock/fake data — every chain ends with a real data source or cached real data.
+
+**Quote Fallback Chain (server.py):**
+```
+yfinance → Yahoo v8 Chart API → Finnhub /api/v1/quote → Scrapling (Google Finance) → stale cache → mock (last resort)
+```
+
+**History Fallback Chain (server.py):**
+```
+yfinance → Yahoo v8 Chart API → Finnhub /api/v1/stock/candle → disk cache (7-day TTL) → mock
+```
+- Persistent history cache at `data/history_cache/` — auto-populated on every successful fetch, 7-day TTL
+
+**Backtest Fallback Chain (backtest_engine.py):**
+```
+yfinance → Yahoo v8 Chart API → Finnhub candles → Alpha Vantage TIME_SERIES_DAILY → Scrapling Yahoo CSV
+```
+- 5 real data sources, no mock fallback — if all fail, backtest returns error
+
+**Screener Fallback Chain (swarm_engine.py):**
+```
+FMP Screener API → SP500 fundamentals cache → Full universe cache (9,920 tickers) → MOCK_UNIVERSE
+```
+- Full universe cache at `data/universe_fundamentals.json` — background thread fetches fundamentals in chunks of 500
+- Progressive: cache saves after each chunk, so partial data available during fetch
+
+**Key API sources:**
+| Source | Endpoint | Used For |
+|--------|----------|----------|
+| yfinance | Python library | Quotes, history (primary) |
+| Yahoo v8 Chart | `query1.finance.yahoo.com/v8/finance/chart/` | Quotes, history (bypasses yfinance rate limiter) |
+| Finnhub | `finnhub.io/api/v1/` | Quotes (`/quote`), history (`/stock/candle`) |
+| Alpha Vantage | `alphavantage.co/query` | History (`TIME_SERIES_DAILY_ADJUSTED`) |
+| Scrapling | Web scraper | Google Finance quotes, Yahoo Finance CSV history |
+| FMP | `financialmodelingprep.com/api/v3/` | Screener, fundamentals |
+
+### Lobsterminal API Endpoints
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/research/quotes` | Real-time quotes (6-source fallback) |
+| GET | `/api/research/history` | Historical OHLCV (5-source fallback + disk cache) |
+| GET | `/api/research/universe` | Paginated ticker list from SEC EDGAR (offset, limit, search, exchange) |
+| GET | `/api/research/universe/quotes` | Quotes for a page of tickers (50 max) |
+| GET | `/api/generate-asset/universe-status` | Universe cache status (count, age, fetching?) |
+| POST | `/api/generate-asset/universe-refresh` | Trigger background universe fundamentals fetch |
+| POST | `/api/generate-asset/backtest` | Run backtest (5-source historical data) |
+| POST | `/api/generate-asset/screen` | AI stock screener (natural language → filtered tickers) |
+| GET | `/api/research/watchlist` | Get watchlist |
+| POST | `/api/research/watchlist` | Add to watchlist |
+| DELETE | `/api/research/watchlist` | Remove from watchlist |
+| GET | `/api/research/news` | RSS news aggregation |
+| WS | `/ws/prices` | Real-time price WebSocket |

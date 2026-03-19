@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 # --- Arbitrage imports ---
 try:
-    from arbitrage_router import router as arbitrage_router, init_scanner, get_scanner
+    from arbitrage_router import router as arbitrage_router, init_scanner, get_scanner, broadcast_update
     from adapters.registry import AdapterRegistry
     from adapters.kalshi import KalshiAdapter
     from adapters.polymarket import PolymarketAdapter
@@ -98,11 +98,11 @@ async def verify_api_key(api_key: str = Security(api_key_header)):
 
 
 # --- C2 fix: Symbol validation ---
-_SYMBOL_RE = re.compile(r'^[A-Z]{1,5}$')
+_SYMBOL_RE = re.compile(r'^[A-Z]{1,5}(\.[A-Z]{1,4})?$')
 
 
 def _validate_symbol(symbol: str) -> str:
-    """Validate and normalize a ticker symbol."""
+    """Validate and normalize a ticker symbol. Supports US tickers and .HK suffix."""
     sym = symbol.strip().upper()
     if not _SYMBOL_RE.match(sym):
         raise HTTPException(status_code=400, detail=f"Invalid ticker symbol: {symbol}")
@@ -110,7 +110,7 @@ def _validate_symbol(symbol: str) -> str:
 
 
 class PositionRequest(BaseModel):
-    symbol: str = Field(..., min_length=1, max_length=5, pattern=r'^[A-Za-z]{1,5}$')
+    symbol: str = Field(..., min_length=1, max_length=8, pattern=r'^[A-Za-z]{1,5}(\.[A-Za-z]{1,4})?$')
     shares: float = Field(..., gt=0)
     avgCost: float = Field(..., gt=0)
 
@@ -131,19 +131,37 @@ cache_time: float = 0
 CACHE_TTL = 15  # seconds
 
 
+_auto_trader_ref = None  # Module-level ref so scan loop can notify trader
+
+
 async def _auto_scan_loop():
-    """Background task: auto-scan for arbitrage every 60 seconds."""
+    """Background task: auto-scan for arbitrage every 60 seconds.
+
+    After each scan, immediately notifies the auto trader so it can
+    evaluate and execute on opportunities within seconds — not minutes.
+    """
     await asyncio.sleep(5)  # wait for server to fully start
     while True:
         try:
             scanner = get_scanner()
             result = await scanner.scan()
+            opp_count = result.get("opportunities_count", 0)
             logger.info(
                 "Auto-scan: %d events, %d matched, %d opportunities",
                 result.get("events_count", 0),
                 result.get("multi_platform_matches", 0),
-                result.get("opportunities_count", 0),
+                opp_count,
             )
+            # Broadcast updated feed + opportunities to all WS clients
+            await broadcast_update({
+                "type": "scan_result",
+                "summary": result,
+                "opportunities": scanner.get_opportunities(),
+                "feed": scanner.get_feed(),
+            })
+            # Wake the auto trader immediately — trade execution takes priority
+            if _auto_trader_ref is not None:
+                await _auto_trader_ref.notify_scan_complete()
         except asyncio.CancelledError:
             break
         except Exception as exc:
@@ -267,7 +285,9 @@ async def lifespan(app: FastAPI):
             insider.start()
             _auto_trader = AutoTrader(pm, scanner=arb_scanner, insider_tracker=insider, decision_logger=decision_log)
             _auto_trader.start()
-            logger.info("Auto trader started — will scan for opportunities every 5 min")
+            global _auto_trader_ref
+            _auto_trader_ref = _auto_trader
+            logger.info("Auto trader started — reacts to arb scanner within seconds, 5min safety-net fallback")
             # News scanner — AI-powered RSS headline analysis + Scrapling deep dive
             news_ai = NewsAI(paper_mode=is_paper_mode())
             _news_scanner = NewsScanner(
@@ -371,16 +391,49 @@ try:
         return {"results": results, "count": len(results)}
 
     @app.get("/api/research/universe")
-    async def get_stock_universe(exchange: str = None, cap_tier: str = None, include_hkex: bool = False):
+    async def get_stock_universe(
+        exchange: str = None, cap_tier: str = None, include_hkex: bool = False,
+        offset: int = 0, limit: int = 200, search: str = None,
+    ):
         loop = _aio.get_running_loop()
         universe = await loop.run_in_executor(None, lambda: get_universe(exchange=exchange, cap_tier=cap_tier, include_hkex=include_hkex))
-        return {"tickers": universe[:500], "total": len(universe), "ticker_count": get_ticker_count()}
+        # Extract ticker strings from stock dicts
+        tickers = [s["ticker"] if isinstance(s, dict) else s for s in universe]
+        # Optional text search filter
+        if search:
+            q = search.upper()
+            tickers = [t for t in tickers if q in t.upper()]
+        total = len(tickers)
+        # Paginate (no hard cap — client controls page size)
+        page = tickers[offset:offset + limit]
+        return {"tickers": page, "total": total, "offset": offset, "limit": limit, "ticker_count": get_ticker_count()}
 
     @app.get("/api/research/strategies")
     async def get_strategies(force: bool = False):
         loop = _aio.get_running_loop()
         strategies = await loop.run_in_executor(None, lambda: research_strategies(force=force))
         return {"strategies": strategies, "count": len(strategies)}
+
+    @app.get("/api/research/universe/quotes")
+    async def get_universe_quotes(
+        tickers: str = "", offset: int = 0, limit: int = 50,
+        exchange: str = None, include_hkex: bool = False,
+    ):
+        """Get quotes for a page of universe tickers. If tickers param provided, uses those;
+        otherwise fetches from the full universe starting at offset."""
+        if tickers:
+            ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()]
+        else:
+            loop = _aio.get_running_loop()
+            all_stocks = await loop.run_in_executor(None, lambda: get_universe(exchange=exchange, include_hkex=include_hkex))
+            all_tickers = [s["ticker"] if isinstance(s, dict) else s for s in all_stocks]
+            ticker_list = all_tickers[offset:offset + limit]
+        if not ticker_list:
+            return {"quotes": [], "total": 0}
+        # Cap at 50 per request to avoid yfinance rate limits
+        ticker_list = ticker_list[:50]
+        quotes = await asyncio.get_event_loop().run_in_executor(None, _fetch_quotes_sync, ticker_list)
+        return {"quotes": quotes, "count": len(quotes), "offset": offset}
 
     logger.info("Research API endpoints registered")
 except ImportError as _research_err:
@@ -422,7 +475,10 @@ async def get_quotes(_=Depends(verify_api_key)):
 
 
 def _fetch_quotes_sync(symbols: list[str]) -> list[dict]:
-    """Fetch quotes synchronously (runs in thread pool). Retries once if rate-limited."""
+    """Fetch quotes synchronously (runs in thread pool). Retries once if rate-limited.
+
+    Falls back to Yahoo chart API direct HTTP if yfinance is blocked.
+    """
     for attempt in range(2):
         quotes = []
         try:
@@ -460,9 +516,115 @@ def _fetch_quotes_sync(symbols: list[str]) -> list[dict]:
             logger.warning("yfinance returned empty data, retrying in 2s...")
             time.sleep(2)
 
-    # All retries exhausted — fall back to mock
-    logger.warning("yfinance rate-limited after retries, using mock data")
+    # Fallback: Yahoo v8 chart API direct
+    logger.info("yfinance rate-limited, trying Yahoo chart API direct...")
+    chart_quotes = _fetch_quotes_yahoo_chart(symbols)
+    if chart_quotes and any(q.get("price", 0) > 0 for q in chart_quotes):
+        return chart_quotes
+
+    # Fallback: Finnhub quote API
+    if FINNHUB_KEY:
+        logger.info("Yahoo chart API failed, trying Finnhub...")
+        fh_quotes = _fetch_quotes_finnhub(symbols)
+        if fh_quotes and any(q.get("price", 0) > 0 for q in fh_quotes):
+            return fh_quotes
+
+    # Fallback: Scrapling (scrape Google Finance)
+    logger.info("API sources exhausted, trying Scrapling scrape...")
+    scrapling_quotes = _fetch_quotes_scrapling(symbols)
+    if scrapling_quotes and any(q.get("price", 0) > 0 for q in scrapling_quotes):
+        return scrapling_quotes
+
+    # Last resort: return cached prices if we have any
+    with _cache_lock:
+        if price_cache:
+            logger.warning("All live sources failed, returning stale cache")
+            return [price_cache.get(s, _mock_quote(s)) for s in symbols]
+
+    logger.warning("All quote sources exhausted and no cache, using mock data")
     return [_mock_quote(s) for s in symbols]
+
+
+def _fetch_quotes_yahoo_chart(symbols: list[str]) -> list[dict]:
+    """Fetch latest quotes via Yahoo Finance v8 chart API (bypasses yfinance rate limiter)."""
+    quotes = []
+    try:
+        with httpx.Client(timeout=10, follow_redirects=True) as client:
+            for sym in symbols:
+                try:
+                    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=2d"
+                    resp = client.get(url, headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                    })
+                    if resp.status_code != 200:
+                        quotes.append(_mock_quote(sym))
+                        continue
+                    data = resp.json()
+                    result = data.get("chart", {}).get("result", [])
+                    if not result:
+                        quotes.append(_mock_quote(sym))
+                        continue
+                    meta = result[0].get("meta", {})
+                    price = meta.get("regularMarketPrice", 0)
+                    prev = meta.get("chartPreviousClose", meta.get("previousClose", price))
+                    change = round(price - prev, 2) if prev else 0
+                    change_pct = round((change / prev * 100), 2) if prev else 0
+                    high = meta.get("regularMarketDayHigh", price)
+                    low = meta.get("regularMarketDayLow", price)
+                    vol = meta.get("regularMarketVolume", 0)
+                    quotes.append({
+                        "symbol": sym,
+                        "price": round(price, 2),
+                        "change": change,
+                        "changePercent": change_pct,
+                        "volume": vol or 0,
+                        "high": round(high or price, 2),
+                        "low": round(low or price, 2),
+                        "marketCap": 0,
+                    })
+                except Exception:
+                    quotes.append(_mock_quote(sym))
+    except Exception as e:
+        logger.warning("Yahoo chart API quotes failed: %s", e)
+    return quotes
+
+
+def _fetch_quotes_finnhub(symbols: list[str]) -> list[dict]:
+    """Fetch latest quotes via Finnhub API."""
+    quotes = []
+    try:
+        with httpx.Client(timeout=10) as client:
+            for sym in symbols:
+                try:
+                    url = f"https://finnhub.io/api/v1/quote?symbol={sym}"
+                    resp = client.get(url, headers={"X-Finnhub-Token": FINNHUB_KEY})
+                    if resp.status_code != 200:
+                        quotes.append(_mock_quote(sym))
+                        continue
+                    data = resp.json()
+                    price = data.get("c", 0)  # current
+                    prev = data.get("pc", price)  # previous close
+                    if not price or price == 0:
+                        quotes.append(_mock_quote(sym))
+                        continue
+                    change = round(price - prev, 2)
+                    change_pct = round((change / prev * 100), 2) if prev else 0
+                    quotes.append({
+                        "symbol": sym,
+                        "price": round(price, 2),
+                        "change": change,
+                        "changePercent": change_pct,
+                        "volume": 0,
+                        "high": round(data.get("h", price), 2),
+                        "low": round(data.get("l", price), 2),
+                        "marketCap": 0,
+                    })
+                    time.sleep(0.04)  # Finnhub free: 30 calls/sec
+                except Exception:
+                    quotes.append(_mock_quote(sym))
+    except Exception as e:
+        logger.warning("Finnhub quotes failed: %s", e)
+    return quotes
 
 
 @app.get("/api/history/{symbol}")
@@ -475,26 +637,154 @@ async def get_history(symbol: str, period: str = "6mo", interval: str = "1d", _=
 
 
 def _fetch_history_sync(symbol: str, period: str, interval: str) -> list[dict]:
-    """Fetch history synchronously (runs in thread pool)."""
+    """Fetch history synchronously (runs in thread pool).
+
+    Falls back through: yfinance → Yahoo chart API → Finnhub → mock.
+    """
+    # 1. yfinance
     try:
         t = yf.Ticker(symbol)
         df = t.history(period=period, interval=interval)
-        if df.empty:
-            return _generate_mock_history(symbol)
+        if not df.empty:
+            data = []
+            for idx, row in df.iterrows():
+                data.append({
+                    "time": idx.strftime("%Y-%m-%d"),
+                    "open": round(row["Open"], 2),
+                    "high": round(row["High"], 2),
+                    "low": round(row["Low"], 2),
+                    "close": round(row["Close"], 2),
+                    "volume": int(row["Volume"]),
+                })
+            if data:
+                _save_history_cache(symbol, period, data)
+                return data
+    except Exception:
+        logger.debug("yfinance history failed for %s", symbol)
+
+    # 2. Yahoo chart API direct
+    try:
+        data = _fetch_history_yahoo_chart(symbol, period, interval)
+        if data:
+            _save_history_cache(symbol, period, data)
+            return data
+    except Exception:
+        logger.debug("Yahoo chart API history failed for %s", symbol)
+
+    # 3. Finnhub candles
+    if FINNHUB_KEY:
+        try:
+            data = _fetch_history_finnhub(symbol, period)
+            if data:
+                _save_history_cache(symbol, period, data)
+                return data
+        except Exception:
+            logger.debug("Finnhub history failed for %s", symbol)
+
+    # 4. Cached historical data from a previous successful fetch
+    cached = _load_history_cache(symbol, period)
+    if cached:
+        logger.info("Using cached history for %s (%d points)", symbol, len(cached))
+        return cached
+
+    # 5. Mock fallback (only as absolute last resort)
+    logger.warning("All history sources failed for %s, using mock", symbol)
+    return _generate_mock_history(symbol)
+
+
+def _fetch_history_yahoo_chart(symbol: str, period: str, interval: str) -> list[dict]:
+    """Fetch OHLCV history via Yahoo v8 chart API."""
+    with httpx.Client(timeout=15, follow_redirects=True) as client:
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range={period}&interval={interval}"
+        resp = client.get(url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        })
+        if resp.status_code != 200:
+            return []
+        result = resp.json().get("chart", {}).get("result", [])
+        if not result:
+            return []
+        timestamps = result[0].get("timestamp", [])
+        quote = result[0].get("indicators", {}).get("quote", [{}])[0]
+        opens = quote.get("open", [])
+        highs = quote.get("high", [])
+        lows = quote.get("low", [])
+        closes = quote.get("close", [])
+        volumes = quote.get("volume", [])
+        if not timestamps or not closes:
+            return []
         data = []
-        for idx, row in df.iterrows():
+        for i, ts in enumerate(timestamps):
+            if closes[i] is None:
+                continue
+            dt = datetime.utcfromtimestamp(ts)
             data.append({
-                "time": idx.strftime("%Y-%m-%d"),
-                "open": round(row["Open"], 2),
-                "high": round(row["High"], 2),
-                "low": round(row["Low"], 2),
-                "close": round(row["Close"], 2),
-                "volume": int(row["Volume"]),
+                "time": dt.strftime("%Y-%m-%d"),
+                "open": round(opens[i] or closes[i], 2),
+                "high": round(highs[i] or closes[i], 2),
+                "low": round(lows[i] or closes[i], 2),
+                "close": round(closes[i], 2),
+                "volume": int(volumes[i] or 0),
             })
         return data
+
+
+def _fetch_history_finnhub(symbol: str, period: str) -> list[dict]:
+    """Fetch daily OHLCV history via Finnhub candles API."""
+    period_days = {"1d": 1, "5d": 5, "1mo": 30, "3mo": 90, "6mo": 180, "1y": 365, "2y": 730, "5y": 1825}
+    days = period_days.get(period, 365)
+    end_ts = int(time.time())
+    start_ts = end_ts - days * 86400
+
+    with httpx.Client(timeout=15) as client:
+        url = f"https://finnhub.io/api/v1/stock/candle?symbol={symbol}&resolution=D&from={start_ts}&to={end_ts}"
+        resp = client.get(url, headers={"X-Finnhub-Token": FINNHUB_KEY})
+        if resp.status_code != 200:
+            return []
+        d = resp.json()
+        if d.get("s") != "ok" or not d.get("t"):
+            return []
+        data = []
+        for i, ts in enumerate(d["t"]):
+            dt = datetime.utcfromtimestamp(ts)
+            data.append({
+                "time": dt.strftime("%Y-%m-%d"),
+                "open": round(d["o"][i], 2),
+                "high": round(d["h"][i], 2),
+                "low": round(d["l"][i], 2),
+                "close": round(d["c"][i], 2),
+                "volume": int(d["v"][i]),
+            })
+        return data
+
+
+# --- History cache (persists across restarts) ---
+HISTORY_CACHE_DIR = DATA_DIR / "history_cache"
+
+
+def _save_history_cache(symbol: str, period: str, data: list[dict]):
+    """Save fetched history to disk for offline fallback."""
+    HISTORY_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_file = HISTORY_CACHE_DIR / f"{symbol}_{period}.json"
+    try:
+        _atomic_write(cache_file, json.dumps({"symbol": symbol, "period": period, "fetched_at": time.time(), "data": data}))
     except Exception:
-        logger.exception("yfinance history failed for %s", symbol)
-        return _generate_mock_history(symbol)
+        pass
+
+
+def _load_history_cache(symbol: str, period: str) -> list[dict]:
+    """Load cached history from disk. Returns [] if not found or too stale (>7 days)."""
+    cache_file = HISTORY_CACHE_DIR / f"{symbol}_{period}.json"
+    if not cache_file.exists():
+        return []
+    try:
+        cached = json.loads(cache_file.read_text())
+        # Accept cache if less than 7 days old
+        if time.time() - cached.get("fetched_at", 0) > 7 * 86400:
+            return []
+        return cached.get("data", [])
+    except (json.JSONDecodeError, OSError, KeyError):
+        return []
 
 
 @app.get("/api/watchlist")
@@ -887,6 +1177,79 @@ def _load_portfolio() -> list:
 
 def _save_portfolio(portfolio: list):
     _atomic_write(DATA_DIR / "portfolio.json", json.dumps(portfolio))
+
+
+def _fetch_quotes_scrapling(symbols: list[str]) -> list[dict]:
+    """Fallback: scrape Google Finance for real-time quotes using Scrapling."""
+    try:
+        from scrapling import Fetcher
+    except ImportError:
+        logger.debug("Scrapling not available for quote fallback")
+        return []
+
+    quotes = []
+    fetcher = Fetcher(auto_match=False)
+    for sym in symbols:
+        try:
+            url = f"https://www.google.com/finance/quote/{sym}:NASDAQ"
+            page = fetcher.get(url)
+            if not page or not page.status == 200:
+                # Try NYSE
+                url = f"https://www.google.com/finance/quote/{sym}:NYSE"
+                page = fetcher.get(url)
+            if not page or not page.status == 200:
+                continue
+
+            # Google Finance price is in a div with data-last-price attribute
+            price_el = page.css('[data-last-price]')
+            if price_el:
+                price = float(price_el[0].attrib.get('data-last-price', '0'))
+            else:
+                # Fallback: look for the main price span
+                price_spans = page.css('div.YMlKec.fxKbKc')
+                if price_spans:
+                    price_text = price_spans[0].text.replace('$', '').replace(',', '').strip()
+                    price = float(price_text)
+                else:
+                    continue
+
+            if price <= 0:
+                continue
+
+            # Try to get change
+            change = 0.0
+            change_pct = 0.0
+            change_els = page.css('div.JwB6zf')
+            if change_els:
+                change_text = change_els[0].text.replace('$', '').replace(',', '').replace('+', '').strip()
+                try:
+                    change = float(change_text)
+                except (ValueError, TypeError):
+                    pass
+            pct_els = page.css('div.P2Luy.Ebnabc')
+            if not pct_els:
+                pct_els = page.css('div.JwB6zf + div')
+            if pct_els:
+                pct_text = pct_els[0].text.replace('%', '').replace('+', '').replace('(', '').replace(')', '').strip()
+                try:
+                    change_pct = float(pct_text)
+                except (ValueError, TypeError):
+                    pass
+
+            quotes.append({
+                "symbol": sym,
+                "price": round(price, 2),
+                "change": round(change, 2),
+                "changePercent": round(change_pct, 2),
+                "volume": 0,
+                "high": round(price, 2),
+                "low": round(price, 2),
+                "marketCap": 0,
+            })
+        except Exception as exc:
+            logger.debug("Scrapling quote failed for %s: %s", sym, exc)
+            continue
+    return quotes
 
 
 def _mock_quote(symbol: str) -> dict:
