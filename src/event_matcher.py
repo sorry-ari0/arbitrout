@@ -339,12 +339,15 @@ def _passes_quick_filter(ent_a: dict, ent_b: dict, title_a: str, title_b: str) -
             # Both have identifiers the other lacks = different contracts
             return False
 
-    # Shared person name — need shared CONTEXT terms beyond the name itself
+    # Shared person name — need at least 1 shared key_term beyond the name
+    # OR 2+ shared names (multiple person names = strong signal)
     shared_names = ent_a["names"] & ent_b["names"]
     if shared_names:
+        if len(shared_names) >= 2:
+            return True
         shared_terms = ent_a["key_terms"] & ent_b["key_terms"]
         context_terms = shared_terms - shared_names
-        if len(context_terms) >= 2:
+        if len(context_terms) >= 1:
             return True
 
     # Shared quoted term
