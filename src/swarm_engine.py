@@ -120,21 +120,21 @@ MOCK_UNIVERSE: dict[str, dict[str, Any]] = {
     "NIO":   {"market_cap": 10,   "fcf": -3200,  "debt_to_equity": 1.02, "sector": "Consumer Cyclical","revenue_growth": 12.9,  "industry": "Auto Manufacturers"},
 
     # --- Manufacturing / Industrials (Small-Mid Cap) ---
-    "RBC":   {"market_cap": 8.5,  "fcf": 250,    "debt_to_equity": 0.4,  "sector": "Industrials",     "revenue_growth": 8.2,   "industry": "Specialty Industrial Machinery"},
-    "GGG":   {"market_cap": 3.8,  "fcf": 120,    "debt_to_equity": 0.6,  "sector": "Industrials",     "revenue_growth": 5.1,   "industry": "Specialty Industrial Machinery"},
-    "AOS":   {"market_cap": 4.5,  "fcf": 180,    "debt_to_equity": 0.3,  "sector": "Industrials",     "revenue_growth": 6.4,   "industry": "Specialty Industrial Machinery"},
-    "GNRC":  {"market_cap": 7.2,  "fcf": 200,    "debt_to_equity": 1.1,  "sector": "Industrials",     "revenue_growth": -5.3,  "industry": "Specialty Industrial Machinery"},
-    "MIDD":  {"market_cap": 5.6,  "fcf": 160,    "debt_to_equity": 1.8,  "sector": "Industrials",     "revenue_growth": 3.2,   "industry": "Industrial Machinery"},
-    "WTS":   {"market_cap": 3.2,  "fcf": 90,     "debt_to_equity": 0.2,  "sector": "Industrials",     "revenue_growth": 7.1,   "industry": "Industrial Distribution"},
-    "MLI":   {"market_cap": 6.8,  "fcf": 280,    "debt_to_equity": 0.1,  "sector": "Industrials",     "revenue_growth": 12.5,  "industry": "Metal Fabrication"},
-    "ASTE":  {"market_cap": 0.8,  "fcf": 40,     "debt_to_equity": 0.3,  "sector": "Industrials",     "revenue_growth": 4.8,   "industry": "Farm & Heavy Construction Machinery"},
-    "NPO":   {"market_cap": 2.1,  "fcf": 70,     "debt_to_equity": 0.5,  "sector": "Industrials",     "revenue_growth": 9.3,   "industry": "Specialty Industrial Machinery"},
-    "EPAC":  {"market_cap": 4.3,  "fcf": 130,    "debt_to_equity": 2.5,  "sector": "Industrials",     "revenue_growth": 6.8,   "industry": "Specialty Chemicals"},
-    "SWK":   {"market_cap": 12.5, "fcf": 450,    "debt_to_equity": 1.2,  "sector": "Industrials",     "revenue_growth": -2.1,  "industry": "Tools & Accessories"},
-    "EMR":   {"market_cap": 65.0, "fcf": 2800,   "debt_to_equity": 0.5,  "sector": "Industrials",     "revenue_growth": 14.2,  "industry": "Industrial Automation"},
-    "ROK":   {"market_cap": 32.0, "fcf": 1200,   "debt_to_equity": 1.1,  "sector": "Industrials",     "revenue_growth": -3.5,  "industry": "Industrial Automation"},
-    "DOV":   {"market_cap": 22.0, "fcf": 900,    "debt_to_equity": 0.7,  "sector": "Industrials",     "revenue_growth": 5.8,   "industry": "Diversified Industrials"},
-    "ITW":   {"market_cap": 75.0, "fcf": 3200,   "debt_to_equity": 2.8,  "sector": "Industrials",     "revenue_growth": 1.2,   "industry": "Specialty Industrial Machinery"},
+    "RBC":   {"market_cap": 8.5,  "fcf": 250,    "debt_to_equity": 0.4,  "sector": "Industrials",     "revenue_growth": 8.2,   "industry": "Specialty Industrial Machinery", "pe_ratio": 22, "roe": 15},
+    "GGG":   {"market_cap": 3.8,  "fcf": 120,    "debt_to_equity": 0.6,  "sector": "Industrials",     "revenue_growth": 5.1,   "industry": "Specialty Industrial Machinery", "pe_ratio": 28, "roe": 18},
+    "AOS":   {"market_cap": 4.5,  "fcf": 180,    "debt_to_equity": 0.3,  "sector": "Industrials",     "revenue_growth": 6.4,   "industry": "Specialty Industrial Machinery", "pe_ratio": 20, "roe": 22},
+    "GNRC":  {"market_cap": 7.2,  "fcf": 200,    "debt_to_equity": 1.1,  "sector": "Industrials",     "revenue_growth": -5.3,  "industry": "Specialty Industrial Machinery", "pe_ratio": 35, "roe": 12},
+    "MIDD":  {"market_cap": 5.6,  "fcf": 160,    "debt_to_equity": 1.8,  "sector": "Industrials",     "revenue_growth": 3.2,   "industry": "Industrial Machinery", "pe_ratio": 14, "roe": 16},
+    "WTS":   {"market_cap": 3.2,  "fcf": 90,     "debt_to_equity": 0.2,  "sector": "Industrials",     "revenue_growth": 7.1,   "industry": "Industrial Distribution", "pe_ratio": 18, "roe": 14},
+    "MLI":   {"market_cap": 6.8,  "fcf": 280,    "debt_to_equity": 0.1,  "sector": "Industrials",     "revenue_growth": 12.5,  "industry": "Metal Fabrication", "pe_ratio": 16, "roe": 25},
+    "ASTE":  {"market_cap": 0.8,  "fcf": 40,     "debt_to_equity": 0.3,  "sector": "Industrials",     "revenue_growth": 4.8,   "industry": "Farm & Heavy Construction Machinery", "pe_ratio": 12, "roe": 10},
+    "NPO":   {"market_cap": 2.1,  "fcf": 70,     "debt_to_equity": 0.5,  "sector": "Industrials",     "revenue_growth": 9.3,   "industry": "Specialty Industrial Machinery", "pe_ratio": 24, "roe": 17},
+    "EPAC":  {"market_cap": 4.3,  "fcf": 130,    "debt_to_equity": 2.5,  "sector": "Industrials",     "revenue_growth": 6.8,   "industry": "Specialty Chemicals", "pe_ratio": 19, "roe": 20},
+    "SWK":   {"market_cap": 12.5, "fcf": 450,    "debt_to_equity": 1.2,  "sector": "Industrials",     "revenue_growth": -2.1,  "industry": "Tools & Accessories", "pe_ratio": 45, "roe": 5},
+    "EMR":   {"market_cap": 65.0, "fcf": 2800,   "debt_to_equity": 0.5,  "sector": "Industrials",     "revenue_growth": 14.2,  "industry": "Industrial Automation", "pe_ratio": 25, "roe": 18},
+    "ROK":   {"market_cap": 32.0, "fcf": 1200,   "debt_to_equity": 1.1,  "sector": "Industrials",     "revenue_growth": -3.5,  "industry": "Industrial Automation", "pe_ratio": 30, "roe": 15},
+    "DOV":   {"market_cap": 22.0, "fcf": 900,    "debt_to_equity": 0.7,  "sector": "Industrials",     "revenue_growth": 5.8,   "industry": "Diversified Industrials", "pe_ratio": 17, "roe": 19},
+    "ITW":   {"market_cap": 75.0, "fcf": 3200,   "debt_to_equity": 2.8,  "sector": "Industrials",     "revenue_growth": 1.2,   "industry": "Specialty Industrial Machinery", "pe_ratio": 23, "roe": 28},
 
     # --- Healthcare (Small-Mid Cap) ---
     "GMED":  {"market_cap": 4.1,  "fcf": 90,     "debt_to_equity": 0.4,  "sector": "Healthcare",      "revenue_growth": 11.2,  "industry": "Medical Devices", "pe_ratio": 22, "roe": 14},
@@ -215,6 +215,26 @@ _COMPANY_NAMES: dict[str, str] = {
     "RIVN": "Rivian", "LCID": "Lucid Motors", "F": "Ford Motor Company",
     "GM": "General Motors", "NEE": "NextEra Energy", "DUK": "Duke Energy",
     "SO": "Southern Company", "PLD": "Prologis", "AMT": "American Tower",
+    # Manufacturing / Industrials
+    "RBC": "Roper Technologies", "GGG": "Graco Inc.", "AOS": "A. O. Smith",
+    "GNRC": "Generac", "MIDD": "Middleby Corporation", "WTS": "Watts Water Technologies",
+    "MLI": "Mueller Industries", "ASTE": "Astec Industries", "NPO": "EnPro Industries",
+    "EPAC": "Enerpac Tool Group", "SWK": "Stanley Black & Decker",
+    "EMR": "Emerson Electric", "ROK": "Rockwell Automation",
+    "DOV": "Dover Corporation", "ITW": "Illinois Tool Works",
+    # Healthcare small-mid
+    "GMED": "Globus Medical", "IART": "Integra LifeSciences", "NVCR": "NovoCure",
+    "HALO": "Halozyme Therapeutics",
+    # Tech small-mid
+    "FOUR": "Shift4 Payments", "PCTY": "Paylocity", "CWAN": "Clearwater Analytics",
+    "BRZE": "Braze (company)", "JAMF": "Jamf",
+    # Consumer small-mid
+    "SHAK": "Shake Shack", "WING": "Wingstop", "CAVA": "Cava Group",
+    "BOOT": "Boot Barn",
+    # Financials small-mid
+    "STEP": "StepStone Group",
+    # NIO
+    "NIO": "NIO",
 }
 
 # ---------------------------------------------------------------------------
@@ -281,7 +301,8 @@ combination of these optional fields:
   profitable_only      — true if company must have positive earnings/net income (boolean)
   unresolved           — list of criteria from the user's request that CANNOT
                          be mapped to any of the above fields (list of strings).
-                         Examples: "non-MBA CEO", "high ARR", "female leadership",
+                         Examples: "non-MBA CEO", "CEO under 40 years old",
+                         "CEO going through divorce", "high ARR", "female leadership",
                          "ethical supply chain", "AI-first company".
                          ALWAYS include criteria you cannot quantify here.
 
@@ -302,6 +323,7 @@ Examples:
   "high FCF yield with EPS growth" -> {"min_fcf_yield": 5, "min_eps_growth": 10}
   "companies with non MBA CEOs in tech" -> {"sectors": ["Technology"], "unresolved": ["non-MBA CEO"]}
   "high ARR to expenses ratio" -> {"unresolved": ["high ARR to expenses ratio"]}
+  "small cap ceo under 40 in manufacturing" -> {"min_market_cap": 0.3, "max_market_cap": 2, "industry": "Manufacturing", "unresolved": ["CEO under 40 years old"]}
   "steel companies with PE under 15" -> {"industry": "Steel", "max_pe_ratio": 15}
   "low-beta utilities" -> {"sectors": ["Utilities"], "max_beta": 0.8}
 
