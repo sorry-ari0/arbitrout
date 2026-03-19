@@ -33,22 +33,21 @@ class CoinbaseAdapter(BaseAdapter):
 
     async def _fetch_via_kalshi(self) -> list[NormalizedEvent]:
         """Fetch Kalshi markets and relabel as Coinbase.
-        Tries authenticated API first, falls back to public API."""
+
+        NOTE: Coinbase prediction markets ARE Kalshi markets. To avoid
+        duplicate events (same market on both 'kalshi' and 'coinbase'),
+        this only runs when COINBASE_ADV_API_KEY is set (for execution).
+        Otherwise returns empty — the Kalshi adapter handles market data.
+        """
+        if not os.environ.get("COINBASE_ADV_API_KEY"):
+            return []  # Kalshi adapter covers market data
         try:
             client = await self._get_client()
-            # Try authenticated first, fall back to public
-            for url in [self.AUTH_URL, self.PUBLIC_URL]:
-                try:
-                    resp = await client.get(
-                        f"{url}/markets",
-                        params={"limit": 100, "status": "open"},
-                    )
-                    resp.raise_for_status()
-                    break
-                except Exception:
-                    if url == self.PUBLIC_URL:
-                        raise
-                    continue
+            resp = await client.get(
+                f"{self.AUTH_URL}/markets",
+                params={"limit": 100, "status": "open"},
+            )
+            resp.raise_for_status()
             data = resp.json()
             markets = data.get("markets", [])
 
