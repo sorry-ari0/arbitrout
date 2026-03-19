@@ -1,6 +1,7 @@
 """Coinbase prediction markets — tags Kalshi markets available on Coinbase,
 with Scrapling fallback for direct scraping."""
 import logging
+import os
 from .base import BaseAdapter
 from .models import NormalizedEvent
 
