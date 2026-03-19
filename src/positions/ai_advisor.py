@@ -82,6 +82,7 @@ class AIAdvisor:
         self._call_times: list[float] = []
         self._http: httpx.AsyncClient | None = None
         self._last_provider: str | None = None
+        self._disabled_providers: dict[str, float] = {}  # name → disabled_until timestamp
 
     @property
     def is_available(self) -> bool:
@@ -93,9 +94,19 @@ class AIAdvisor:
         """Return providers that have API keys configured, in priority order.
         Live: Anthropic → Groq → Gemini → OpenRouter
         Paper: Groq → Gemini → OpenRouter (skip Anthropic to save costs)
+        Skips providers temporarily disabled due to 402/payment errors.
         """
+        now = time.time()
         providers = PAPER_PROVIDERS if self._paper_mode else LIVE_PROVIDERS
-        return [p for p in providers if os.environ.get(p["env_var"], "")]
+        available = []
+        for p in providers:
+            if not os.environ.get(p["env_var"], ""):
+                continue
+            disabled_until = self._disabled_providers.get(p["name"], 0)
+            if now < disabled_until:
+                continue  # Still disabled
+            available.append(p)
+        return available
 
     async def _get_http(self) -> httpx.AsyncClient:
         if not self._http or self._http.is_closed:
@@ -420,7 +431,16 @@ Do NOT include reasoning, just verdict lines grouped by package."""
                 logger.warning("AI review via %s returned no parseable verdicts", provider["name"])
 
             except Exception as e:
-                logger.warning("AI review via %s failed: %s — trying next provider", provider["name"], e)
+                err_str = str(e)
+                # Disable provider for 1 hour on payment/auth failures (402, 401)
+                if "402" in err_str or "Payment Required" in err_str:
+                    self._disabled_providers[provider["name"]] = time.time() + 3600
+                    logger.warning("AI provider %s has no credits (402) — disabled for 1 hour", provider["name"])
+                elif "401" in err_str or "Unauthorized" in err_str:
+                    self._disabled_providers[provider["name"]] = time.time() + 3600
+                    logger.warning("AI provider %s unauthorized (401) — disabled for 1 hour", provider["name"])
+                else:
+                    logger.warning("AI review via %s failed: %s — trying next provider", provider["name"], e)
                 continue
 
         logger.warning("All AI providers failed for %s — falling back to auto-execute", pkg.get("id", "?"))

@@ -32,10 +32,15 @@ def _map_category(raw: str) -> str:
 # KALSHI ADAPTER
 # ============================================================
 class KalshiAdapter(BaseAdapter):
-    """Fetch markets from Kalshi trading API v2."""
+    """Fetch markets from Kalshi trading API v2.
+
+    Uses authenticated trading API when KALSHI_API_KEY is set,
+    falls back to public elections API (no auth needed).
+    """
 
     PLATFORM_NAME = "kalshi"
-    BASE_URL = "https://trading-api.kalshi.com/trade-api/v2"
+    AUTH_URL = "https://trading-api.kalshi.com/trade-api/v2"
+    PUBLIC_URL = "https://api.elections.kalshi.com/trade-api/v2"
     RATE_LIMIT_SECONDS = 1.0
 
     def __init__(self):
@@ -46,9 +51,20 @@ class KalshiAdapter(BaseAdapter):
     # FETCH IMPLEMENTATION
     # ============================================================
     async def _fetch(self) -> list[NormalizedEvent]:
+        # Try authenticated API first if key is set
+        if self._api_key:
+            try:
+                return await self._fetch_paginated(self.AUTH_URL, auth=True)
+            except Exception:
+                pass  # Fall through to public API
+
+        # Public elections API (no auth needed)
+        return await self._fetch_paginated(self.PUBLIC_URL, auth=False)
+
+    async def _fetch_paginated(self, base_url: str, auth: bool) -> list[NormalizedEvent]:
         client = await self._get_client()
         headers = {}
-        if self._api_key:
+        if auth and self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
 
         events: list[NormalizedEvent] = []
@@ -62,7 +78,7 @@ class KalshiAdapter(BaseAdapter):
                 params["cursor"] = cursor
 
             resp = await client.get(
-                f"{self.BASE_URL}/markets",
+                f"{base_url}/markets",
                 headers=headers,
                 params=params,
             )

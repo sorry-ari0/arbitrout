@@ -18,7 +18,8 @@ class CoinbaseAdapter(BaseAdapter):
     """
 
     PLATFORM_NAME = "coinbase"
-    BASE_URL = "https://trading-api.kalshi.com/trade-api/v2"
+    AUTH_URL = "https://trading-api.kalshi.com/trade-api/v2"
+    PUBLIC_URL = "https://api.elections.kalshi.com/trade-api/v2"
     RATE_LIMIT_SECONDS = 2.0
 
     # ============================================================
@@ -31,14 +32,23 @@ class CoinbaseAdapter(BaseAdapter):
         return events
 
     async def _fetch_via_kalshi(self) -> list[NormalizedEvent]:
-        """Fetch Kalshi markets and relabel as Coinbase."""
+        """Fetch Kalshi markets and relabel as Coinbase.
+        Tries authenticated API first, falls back to public API."""
         try:
             client = await self._get_client()
-            resp = await client.get(
-                f"{self.BASE_URL}/markets",
-                params={"limit": 100, "status": "open"},
-            )
-            resp.raise_for_status()
+            # Try authenticated first, fall back to public
+            for url in [self.AUTH_URL, self.PUBLIC_URL]:
+                try:
+                    resp = await client.get(
+                        f"{url}/markets",
+                        params={"limit": 100, "status": "open"},
+                    )
+                    resp.raise_for_status()
+                    break
+                except Exception:
+                    if url == self.PUBLIC_URL:
+                        raise
+                    continue
             data = resp.json()
             markets = data.get("markets", [])
 
