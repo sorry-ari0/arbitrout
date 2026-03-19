@@ -408,15 +408,94 @@ async def _call_gemini(prompt: str) -> str | None:
         return None
 
 
+def _regex_intent_parser(prompt: str) -> dict[str, Any] | None:
+    """Fallback: extract screening rules from prompt using regex patterns.
+
+    Handles common queries without needing any LLM provider.
+    Returns None if the prompt is too complex to parse with regex.
+    """
+    lower = prompt.lower()
+    rules: dict[str, Any] = {}
+
+    # Sector detection
+    sector_map = {
+        "tech": "technology", "technology": "technology",
+        "health": "health care", "healthcare": "health care", "pharma": "health care",
+        "biotech": "health care",
+        "financ": "financials", "bank": "financials",
+        "energy": "energy", "oil": "energy", "gas": "energy",
+        "consumer": "consumer discretionary", "retail": "consumer discretionary",
+        "industrial": "industrials", "manufactur": "industrials",
+        "real estate": "real estate", "reit": "real estate",
+        "utilit": "utilities",
+        "material": "materials", "mining": "materials",
+        "communicat": "communication services", "media": "communication services",
+        "telecom": "communication services",
+    }
+    for keyword, sector in sector_map.items():
+        if keyword in lower:
+            rules["sectors"] = [sector]
+            break
+
+    # Market cap
+    if "large cap" in lower or "large-cap" in lower or "mega cap" in lower:
+        rules["min_market_cap"] = 10
+    elif "mid cap" in lower or "mid-cap" in lower or "midcap" in lower:
+        rules["min_market_cap"] = 2
+        rules["max_market_cap"] = 10
+    elif "small cap" in lower or "small-cap" in lower or "smallcap" in lower:
+        rules["max_market_cap"] = 2
+    elif "micro cap" in lower or "penny" in lower:
+        rules["max_market_cap"] = 0.3
+
+    # Revenue/earnings growth
+    if "high growth" in lower or "high revenue growth" in lower or "fast growing" in lower:
+        rules["min_revenue_growth"] = 15
+    elif "growth" in lower and "revenue" in lower:
+        rules["min_revenue_growth"] = 10
+
+    # Value metrics
+    if "undervalued" in lower or "value stock" in lower or "cheap" in lower:
+        rules["max_pe_ratio"] = 15
+    if "low pe" in lower or "low p/e" in lower:
+        rules["max_pe_ratio"] = 12
+
+    # Dividend
+    if "dividend" in lower or "income" in lower or "yield" in lower:
+        rules["min_dividend_yield"] = 2.0
+
+    # Debt
+    if "low debt" in lower or "no debt" in lower or "debt free" in lower:
+        rules["max_debt_to_equity"] = 0.5
+
+    # Profitability
+    if "profitable" in lower or "high margin" in lower:
+        rules["min_profit_margin"] = 10
+
+    # FCF
+    if "free cash flow" in lower or "fcf" in lower or "cash flow" in lower:
+        rules["min_fcf"] = 100
+
+    # Beta / volatility
+    if "volatile" in lower or "high beta" in lower:
+        rules["min_beta"] = 1.5
+    elif "stable" in lower or "low beta" in lower or "defensive" in lower:
+        rules["max_beta"] = 0.8
+
+    if rules:
+        logger.info("Screener intent parsed via regex fallback: %s", rules)
+        return rules
+    return None
+
+
 async def intent_parser(prompt: str) -> dict[str, Any]:
     """Extract structured screening rules from a natural-language prompt.
 
-    Tries providers in order: Ollama (local) -> Groq -> Gemini.
-    Falls back through the chain if any provider is unavailable.
+    Tries providers in order: Ollama (local) -> Groq -> Gemini -> regex fallback.
     """
     raw_text = None
 
-    # Try each provider in order
+    # Try each LLM provider in order
     for name, caller in [("ollama", _call_ollama), ("groq", _call_groq), ("gemini", _call_gemini)]:
         raw_text = await caller(prompt)
         if raw_text:
@@ -424,9 +503,13 @@ async def intent_parser(prompt: str) -> dict[str, Any]:
             break
 
     if not raw_text:
+        # Regex fallback — no LLM needed
+        regex_rules = _regex_intent_parser(prompt)
+        if regex_rules:
+            return regex_rules
         raise HTTPException(
             status_code=502,
-            detail="No LLM provider available — need Ollama running or GROQ_API_KEY / GEMINI_API_KEY set",
+            detail="No LLM provider available and query too complex for regex fallback",
         )
 
     rules = _parse_llm_json(raw_text)
