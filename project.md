@@ -1,7 +1,7 @@
 # Project: Arbitrout (Prediction Market Arbitrage + Auto Trading)
 Status: ACTIVE
 Phase: BUILD
-Last Updated: 2026-03-18
+Last Updated: 2026-03-19
 Repo: https://github.com/sorry-ari0/arbitrout.git
 Branch: feat/derivative-position-manager
 
@@ -247,7 +247,7 @@ For each crypto market opportunity:
     score *= (1.0 + signal_strength * 2.0)
     if suspicious insiders:       score *= 1.5
 
-  ENTER if: score >= 3.0 AND net_profit >= 3%
+  ENTER if: score >= 3.0 AND net_profit >= 5% (MIN_SPREAD_PCT)
   STRATEGY: directional bet (one side) on same-platform, arb (both sides) on cross-platform
   SIZE: min($200, remaining_budget/2), floor $25
   LIMITS: 10 concurrent, $2000 total exposure
@@ -316,8 +316,10 @@ signal_strength = 0.2 * normalized_insider_count
   - **Crypto:** Ticker normalization (30+ aliases: "bitcoin"→BTC, "ethereum"→ETH, etc.), price targets, direction (above/below)
   - **Names:** Capitalized proper nouns (3+ chars), excluding common words and countries
   - **Countries:** 30+ country/nationality patterns
+  - **Acronyms:** Party names, tickers, PredictIt contract identifiers (e.g., MSZP, TISZA, KDNP, Fidesz). Used to reject false matches where both events have unique non-overlapping acronyms.
   - **Quoted terms:** Terms in quotes
   - **Key terms:** Non-stopword terms (3+ chars)
+- **Acronym conflict check:** If both events have unique acronyms with no overlap (e.g., MSZP vs TISZA), the match is rejected even if other entities overlap. Prevents false cross-platform matches on multi-contract political markets.
 - Entity overlap scoring (0.0-1.0): crypto ticker match (3pts), names (2pts), countries (1pt), quoted terms (2pts), key terms (2pts, proportional)
 - **Price ratio filter:** Same-direction crypto markets (both "above" or both "below") must have price ratio >= 0.98 (tight, prevents false matches between $90K and $100K targets). Range markets keep 0.90 threshold.
 - **Expiry date parsing:** Supports ISO `%Y-%m-%d` and Limitless formats (`%b %d, %Y`, `%B %d, %Y`)
@@ -340,6 +342,7 @@ signal_strength = 0.2 * normalized_insider_count
 
 **Step 4: Price feed (arbitrage_engine.py)**
 - `compute_feed()` tracks price changes between scans using `_previous_prices` dict (thread-safe with `threading.Lock`)
+- `_previous_prices` stores `(price, timestamp)` tuples with 24-hour TTL pruning and 5K entry cap to prevent memory leaks
 - Returns recent changes sorted by absolute change, capped at 50 items
 - Each feed item: platform, event_id, title, yes_price, previous, change, change_pct, timestamp
 
@@ -466,15 +469,22 @@ The exit engine runs a 60-second scan loop evaluating all open packages.
 | 16 | platform_error | Platform | review | No |
 | 17 | liquidity_gap | Platform | review | No (placeholder) |
 | 18 | fee_spike | Platform | review | No (placeholder) |
+| 19 | stale_position | Time | review | No |
+| 20 | longshot_decay | Research | review | No |
 
 **Safety overrides (triggers 7, 10, 11):**
 - Execute immediately — no AI review, no escalation
 - Spread inversion: YES + NO prices > 1.0 (guaranteed loss if held)
 - Time <24h / <6h: expiry approaching, must exit regardless of P&L
 
-**Non-safety trigger routing (with rate limiting: max 3 AI reviews per tick, 2s spacing):**
-- If AI advisor available → batch non-safety triggers to AI for review (Groq → Gemini → OpenRouter chain)
-- AI returns: APPROVE (execute), MODIFY (adjust rule params within bounds), REJECT (skip with reason)
+**Non-safety trigger routing (batched AI review):**
+- All non-safety triggers from ALL packages are collected per tick, then sent in a SINGLE batched AI call (reduces Groq/Gemini 429 rate limit hits)
+- Batched prompt uses `[PKG:id]` markers so AI can address each package separately
+- Provider chain: Groq → Gemini → OpenRouter (Anthropic first in live mode)
+- AI returns per-package: APPROVE (execute), MODIFY (adjust rule params within bounds), REJECT (skip with reason)
+- AI prompt is nuanced per trigger type:
+  - `time_decay`: REJECT if 3+ days left and P&L only slightly negative (>-5%). APPROVE only if deeply negative (<-10%) or <2 days left
+  - `negative_drift`: REJECT if loss is small (<5%). APPROVE only for sustained large losses (>8%)
 - If AI fails or unavailable → auto-execute mechanical triggers (target_hit, stop_loss, trailing_stop)
 - Noisy triggers (vol_spike, new_ath, spread_compression) suppressed without AI — not actionable
 - Escalation triggers (correlation_break, time_decay, negative_drift, platform_error) create alerts
@@ -489,9 +499,9 @@ The exit engine runs a 60-second scan loop evaluating all open packages.
 - Mode-aware: `AIAdvisor(paper_mode=True)` selects the provider chain
 - Three API styles: OpenAI-compatible (Groq, OpenRouter), Gemini REST, Anthropic Messages
 - All calls via `httpx.AsyncClient` (30s timeout)
-- Builds structured prompt with: package context (legs, P&L, rules), triggered proposals
-- Expects response format: `<rule_id>: APPROVE | MODIFY <value> | REJECT <reason>`
-- Parses response into verdicts dict
+- **Batched review:** `_build_batched_prompt()` combines multiple packages into a single prompt with `[PKG:id]` markers; `_parse_batched_response()` splits response by markers into per-package verdicts
+- Expects response format: `[PKG:id] <rule_id>: APPROVE | MODIFY <value> | REJECT <reason>`
+- Conservative guidance: time_decay rejects unless deeply negative or near expiry; negative_drift rejects unless sustained large loss
 - On failure: logs warning, tries next provider. All fail → returns empty dict (caller auto-executes)
 - API keys configured in `.env`: `GROQ_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`
 
@@ -508,7 +518,7 @@ The exit engine runs a 60-second scan loop evaluating all open packages.
 6. Calculates profit potential AFTER estimated round-trip fees: `raw_profit = ((1.0 - favored_price) / favored_price) * 100`, then `net_profit = raw_profit - 2%` round-trip fees
 7. Scores each market: `profit_pct * crypto_boost(2x) * expiry_boost(2x if 3-14d, 1.5x if 14-30d) * volume_boost(1.5x if >100K, 1.2x if >10K) * conviction_boost(1.5x if >0.3) * insider_boost`
 8. Insider signal boost: if insiders have positions, `score *= (1 + strength * 2)`. Suspicious insiders add extra 1.5x
-9. Requires minimum 3% net spread after fees to enter
+9. Requires minimum 5% gross spread to enter (ensures ~3% net margin after 2% round-trip fees)
 10. **Directional bets (same platform):** picks ONE side based on conviction — cheaper side = higher upside. Buying both YES and NO on the same platform locks in the spread minus fees = guaranteed loss
 11. **Cross-platform arb:** buys both sides on different platforms (spread capture)
 12. **Cooldown:** 30-minute re-entry cooldown after exiting a market
@@ -653,7 +663,7 @@ is_configured() → bool
 
 - Paper executor uses separate buy/sell fee rates: buys at maker rate, sells always at taker rate
 - P&L always calculated AFTER fees (estimated 1% sell-side for unrealized)
-- Auto trader deducts 2% round-trip from profit assessment before entering
+- Auto trader deducts 2% round-trip from profit assessment before entering (0% maker entry + ~2% taker exit = 2% total)
 - Trade journal records buy_fees, sell_fees, total_fees per completed trade
 - Trade journal recalculates exit value from per-leg exit data (not stale pkg current_value)
 
@@ -729,17 +739,27 @@ python -m uvicorn server:app --host 127.0.0.1 --port 8500 --log-level info
 | crypto_spot | crypto_spot | Working (paper) | CCXT, public Kraken + CoinGecko prices |
 | kraken | kraken | Working (paper) | CLI via WSL, 19 MCP tools |
 
-## Current Status (2026-03-18)
-- Paper trading: 10 open positions, $1,837 invested, +$38 unrealized, +$422 realized P&L
-- 32 closed packages, 12% win rate (improving — previous 28/32 were breakeven from same-platform both-sides bug)
-- AI advisor active via Groq (Llama 3.3 70B), ~500ms per review
+## Current Status (2026-03-19)
+- Paper trading: 10 open positions, ~$1,800 invested, -$142.73 realized P&L (3 wins / 26 losses, 10.3% win rate)
+- Root cause of losses: AI advisor was blanket-approving time_decay/negative_drift exits → all 7 time_decay exits lost money. Fixed with nuanced AI prompt.
+- AI advisor active via Groq (Llama 3.3 70B), batched reviews (~1 call per tick instead of 8)
 - Insider tracker: 100 traders monitored, 139 markets with signals
-- Auto trader: event-driven (wakes within seconds of each 60s arb scan), 5-min safety-net fallback, directional bets, respecting $2K exposure limit, $5 min trade size
-- Exit engine: 60s interval, 18 heuristic triggers, max 3 AI reviews/tick with 2s spacing
-- News scanner: 150s interval, 8 RSS feeds, two-pass AI pipeline (headline scan → deep analysis), breaking trades execute immediately
+- Auto trader: event-driven, MIN_SPREAD_PCT raised 3%→5% (ensures 3% net margin after 2% fees), $2K exposure limit, $5 min trade size
+- Exit engine: 60s interval, 20 heuristic triggers, batched AI reviews (single LLM call for all packages per tick)
+- News scanner: 150s interval, 14 RSS feeds, two-pass AI pipeline (headline scan → deep analysis), breaking trades execute immediately
 - Decision logging: all buys, skips, trigger fires, AI verdicts, news signals logged to `decision_log.jsonl`
-- Arbitrage scanner: 1010 events from 8 adapters
-- **Recent changes (2026-03-18):**
+- Arbitrage scanner: ~1170 events from 8 adapters
+- **Recent changes (2026-03-19):**
+  - **False opportunity fixes:**
+    - Hungarian MSZP election: added acronym extraction (`_extract_acronyms()`) to entity matcher. Extracts party names, tickers, PredictIt contract identifiers. Rejects matches where both events have unique non-overlapping acronyms (e.g., MSZP vs TISZA).
+    - BTC $74K-$76K range synthetic: added `_build_range_synthetic_info()` with proper 4-scenario analysis for range markets. Sorts boundaries into zones, calculates per-zone payoff, rejects if win_count <= loss_count or loss_prob > 60%.
+  - **Batched AI exit reviews:** Exit engine now collects ALL non-safety triggers across ALL packages per tick, sends single batched prompt with `[PKG:id]` markers. Reduces Groq/Gemini 429 rate limit hits (was: 8 separate calls → now: 1).
+  - **Conservative AI prompt rewrite:** time_decay: REJECT if 3+ days left and P&L > -5%. negative_drift: REJECT if loss < 5%. Stops blanket-approving exits that were causing 90% loss rate.
+  - **MIN_SPREAD_PCT raised 3%→5%:** Ensures minimum 3% net margin after 2% round-trip fees.
+  - **Memory leak fix:** `_previous_prices` dict in arbitrage_engine.py now stores `(price, timestamp)` tuples with 24h TTL pruning and 5K entry cap.
+  - **Bare except cleanup:** Fixed bare `except:` → `except Exception as e:` with logging in kalshi_executor.py, predictit_executor.py, coinbase_spot_executor.py.
+  - **Exit engine trigger count:** 18 → 20 heuristic triggers (added research_invalidation, funding_rate_divergence).
+- **Previous changes (2026-03-18):**
   - **Arbitrage display fixes (4):**
     - Tightened crypto price ratio from 0.90 to 0.98 for same-direction matches (prevents false matches: $90K vs $100K)
     - Limitless expiry date parsing (supports `%b %d, %Y` and `%B %d, %Y` formats)
@@ -766,7 +786,7 @@ python -m uvicorn server:app --host 127.0.0.1 --port 8500 --log-level info
   - **News scanner:** AI-powered RSS feed monitor with two-pass pipeline. 14 RSS feeds. Breaking news executes immediately.
   - **Event-driven auto trader:** Auto trader now wakes within seconds of each 60s arb scan via `asyncio.Event` notification (was: independent 5-min polling loop). Reads cached scanner results instead of triggering redundant scans. Trade execution latency dropped from ~5 minutes to ~1-2 seconds.
   - **Market feed fix:** WebSocket `init` and `scan_result` messages now handled by frontend. Auto-scan loop broadcasts feed + opportunities to all WS clients after each scan.
-  - **Synthetic derivative validation:** Direction-aware scenario analysis (accounts for above/below/between/dip). Rejects invalid synthetics: same-direction doubling (both legs bet same move), loss probability >40%, strike gap >10%. Added "dip/sink/crash/plunge/decline" to below-direction keywords.
+  - **Synthetic derivative validation:** Direction-aware scenario analysis (accounts for above/below/between/dip). Rejects invalid synthetics: same-direction doubling (both legs bet same move), loss probability >40%, strike gap >10%. Added "dip/sink/crash/plunge/decline" to below-direction keywords. **Range synthetics** (direction="between") now use dedicated 4-scenario analysis (`_build_range_synthetic_info`): sorts all boundaries into zones, calculates per-zone payoff for both range and directional legs, rejects if win_count <= loss_count or loss probability > 60%.
   - **PredictIt contract matching fix:** Stopped stripping contract names from "Market: Contract" titles. Previously "Who will win: Fidesz" and "Who will win: MSZP" both became "Who will win" and false-matched external events.
   - **Decision logging:** All trading decisions to JSONL.
   - Split paper executor fee model: buy=maker, sell=taker

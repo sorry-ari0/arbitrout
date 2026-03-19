@@ -304,9 +304,16 @@ class ExitEngine:
             await asyncio.sleep(self.interval)
 
     async def _tick(self):
-        """Process one scan cycle — evaluate all open packages."""
+        """Process one scan cycle — evaluate all open packages.
+
+        Batches AI reviews: collects all non-safety triggers across packages,
+        sends them in a single LLM call, then applies verdicts. This avoids
+        Groq/Gemini 429 rate limiting from multiple calls per tick.
+        """
         open_pkgs = self.pm.list_packages("open")
-        ai_reviews_this_tick = 0
+        # Collect triggers per package and handle safety overrides immediately
+        batched_ai_work: list[tuple[dict, list[dict]]] = []  # (pkg, ai_triggers)
+
         for pkg in open_pkgs:
             await self._update_prices(pkg)
             self.pm.update_pnl(pkg["id"])
@@ -346,18 +353,122 @@ class ExitEngine:
             if self.dlog:
                 self.dlog.log_triggers_fired(pkg_id, pkg.get("name", "?"), filtered)
 
-            # Limit AI reviews to 3 per tick to avoid rate limiting
-            has_ai_triggers = any(not t.get("safety_override") for t in filtered)
-            if has_ai_triggers and ai_reviews_this_tick >= 3:
-                continue  # will catch up on next tick
-            if has_ai_triggers:
-                ai_reviews_this_tick += 1
+            # Execute safety overrides immediately (no AI needed)
+            safety_triggers = [t for t in filtered if t.get("safety_override")]
+            ai_triggers = [t for t in filtered if not t.get("safety_override")]
 
-            await self._process_triggers(pkg, filtered)
+            for trigger in safety_triggers:
+                logger.warning("SAFETY OVERRIDE [%s] on %s: %s", trigger["name"], pkg["id"], trigger["details"])
+                if self.dlog:
+                    self.dlog.log_safety_override(pkg["id"], trigger["name"], trigger["details"])
+                pkg["_exiting"] = True
+                try:
+                    for leg in pkg["legs"]:
+                        if leg["status"] == "open":
+                            await self.pm.exit_leg(pkg["id"], leg["leg_id"], trigger=trigger["name"])
+                finally:
+                    pkg.pop("_exiting", None)
 
-            # Brief delay between packages to space out API calls
-            if has_ai_triggers:
-                await asyncio.sleep(2)
+            # Collect AI triggers for batched review
+            if ai_triggers and not pkg.get("_exiting"):
+                batched_ai_work.append((pkg, ai_triggers))
+
+        # Batch AI review: single LLM call for all packages
+        if batched_ai_work and self.ai and self.ai.is_available:
+            await self._batched_ai_review(batched_ai_work)
+        elif batched_ai_work:
+            # No AI available — auto-execute mechanical triggers only
+            for pkg, ai_triggers in batched_ai_work:
+                await self._auto_execute_triggers(pkg, ai_triggers)
+
+    async def _batched_ai_review(self, work: list[tuple[dict, list[dict]]]):
+        """Send all packages' triggers in a single LLM call to avoid rate limiting."""
+        try:
+            t0 = time.time()
+            # Build a combined prompt
+            combined_prompt = self.ai._build_batched_prompt(work)
+            providers = self.ai._get_available_providers()
+            if not providers or not self.ai._rate_check():
+                for pkg, ai_triggers in work:
+                    await self._auto_execute_triggers(pkg, ai_triggers)
+                return
+
+            response_text = None
+            for provider in providers:
+                try:
+                    logger.info("Trying batched AI review via %s for %d packages",
+                                provider["name"], len(work))
+                    response_text = await self.ai._call_provider(provider, combined_prompt)
+                    self.ai._call_times.append(time.time())
+                    self.ai._last_provider = provider["name"]
+                    break
+                except Exception as e:
+                    logger.warning("Batched AI review via %s failed: %s — trying next", provider["name"], e)
+                    continue
+
+            if not response_text:
+                logger.warning("All AI providers failed for batched review — auto-executing")
+                for pkg, ai_triggers in work:
+                    await self._auto_execute_triggers(pkg, ai_triggers)
+                return
+
+            elapsed_ms = int((time.time() - t0) * 1000)
+
+            # Parse response — sections separated by package ID markers
+            verdicts_by_pkg = self.ai._parse_batched_response(response_text, [pkg["id"] for pkg, _ in work])
+
+            for pkg, ai_triggers in work:
+                pkg_verdicts = verdicts_by_pkg.get(pkg["id"], {})
+                if pkg_verdicts:
+                    await self._apply_verdicts(pkg, ai_triggers, pkg_verdicts)
+                    logger.info("AI reviewed %d triggers for %s", len(ai_triggers), pkg["id"])
+                    if self.dlog:
+                        self.dlog.log_ai_review(
+                            pkg["id"],
+                            provider=self.ai._last_provider or "?",
+                            triggers=[t["name"] for t in ai_triggers],
+                            verdicts=pkg_verdicts,
+                            elapsed_ms=elapsed_ms,
+                        )
+                else:
+                    await self._auto_execute_triggers(pkg, ai_triggers)
+
+        except Exception as e:
+            logger.error("Batched AI review failed: %s — auto-executing", e)
+            for pkg, ai_triggers in work:
+                await self._auto_execute_triggers(pkg, ai_triggers)
+
+    async def _auto_execute_triggers(self, pkg: dict, triggers: list[dict]):
+        """Auto-execute mechanical triggers when AI is unavailable."""
+        for trigger in triggers:
+            if trigger["name"] in ("target_hit", "stop_loss", "trailing_stop"):
+                logger.info("Auto-executing %s on %s: %s",
+                            trigger["name"], pkg["id"], trigger["details"])
+                if self.dlog:
+                    self.dlog.log_auto_execute(pkg["id"], trigger["name"],
+                                               trigger.get("action", "full_exit"), trigger["details"])
+                if trigger.get("action") == "full_exit":
+                    for leg in pkg["legs"]:
+                        if leg["status"] == "open":
+                            await self.pm.exit_leg(pkg["id"], leg["leg_id"],
+                                trigger=f"auto:{trigger['name']}")
+            elif trigger["name"] == "partial_profit":
+                logger.info("Auto-executing partial_profit on %s: %s", pkg["id"], trigger["details"])
+                if self.dlog:
+                    self.dlog.log_auto_execute(pkg["id"], "partial_profit",
+                                               "partial_exit", trigger["details"])
+                for leg in pkg["legs"]:
+                    if leg["status"] == "open":
+                        await self.pm.exit_leg(pkg["id"], leg["leg_id"],
+                            trigger=f"auto:{trigger['name']}")
+                        break
+            elif trigger["name"] in ("correlation_break", "time_decay", "negative_drift",
+                                       "platform_error", "stale_position", "longshot_decay"):
+                self.pm.add_alert(pkg["id"], trigger["trigger_id"], trigger["name"],
+                    {"details": trigger["details"], "action": trigger["action"]})
+            else:
+                if self.dlog:
+                    self.dlog.log_trigger_suppressed(pkg["id"], trigger["name"], "noisy_without_ai")
 
     async def _update_prices(self, pkg: dict):
         """Fetch current prices for all open legs via their platform executors."""
@@ -384,87 +495,6 @@ class ExitEngine:
             except Exception as e:
                 logger.warning("Price fetch failed for %s: %s", leg["asset_id"], e)
                 pkg["_platform_errors"] = pkg.get("_platform_errors", 0) + 1
-
-    async def _process_triggers(self, pkg: dict, triggers: list[dict]):
-        """Route triggers — safety overrides execute immediately, others go to AI."""
-        # C5 fix: guard against double-fire on same package
-        if pkg.get("_exiting"):
-            return
-        pkg["_exiting"] = True
-        try:
-            safety_triggers = [t for t in triggers if t.get("safety_override")]
-            ai_triggers = [t for t in triggers if not t.get("safety_override")]
-
-            # Safety overrides — immediate exit, no AI
-            for trigger in safety_triggers:
-                logger.warning("SAFETY OVERRIDE [%s] on %s: %s", trigger["name"], pkg["id"], trigger["details"])
-                if self.dlog:
-                    self.dlog.log_safety_override(pkg["id"], trigger["name"], trigger["details"])
-                for leg in pkg["legs"]:
-                    if leg["status"] == "open":
-                        await self.pm.exit_leg(pkg["id"], leg["leg_id"], trigger=trigger["name"])
-
-            # Non-safety triggers — try AI advisor first, fall back to auto-execute
-            if ai_triggers:
-                ai_handled = False
-                if self.ai and self.ai.is_available:
-                    try:
-                        t0 = time.time()
-                        verdicts = await self.ai.review_proposals(pkg, ai_triggers)
-                        elapsed_ms = int((time.time() - t0) * 1000)
-                        if verdicts:
-                            await self._apply_verdicts(pkg, ai_triggers, verdicts)
-                            ai_handled = True
-                            logger.info("AI reviewed %d triggers for %s", len(ai_triggers), pkg["id"])
-                            if self.dlog:
-                                self.dlog.log_ai_review(
-                                    pkg["id"],
-                                    provider=getattr(self.ai, '_last_provider', '?'),
-                                    triggers=[t["name"] for t in ai_triggers],
-                                    verdicts=verdicts,
-                                    elapsed_ms=elapsed_ms,
-                                )
-                    except Exception as e:
-                        logger.error("AI review failed for %s: %s — falling back to auto-execute", pkg["id"], e)
-                        if self.dlog:
-                            self.dlog.log_ai_failure(pkg["id"], str(e))
-
-                if not ai_handled:
-                    # No AI available or AI returned empty — auto-execute mechanical triggers
-                    for trigger in ai_triggers:
-                        if trigger["name"] in ("target_hit", "stop_loss", "trailing_stop"):
-                            logger.info("Auto-executing %s on %s: %s",
-                                        trigger["name"], pkg["id"], trigger["details"])
-                            if self.dlog:
-                                self.dlog.log_auto_execute(pkg["id"], trigger["name"],
-                                                           trigger.get("action", "full_exit"), trigger["details"])
-                            if trigger.get("action") == "full_exit":
-                                for leg in pkg["legs"]:
-                                    if leg["status"] == "open":
-                                        await self.pm.exit_leg(pkg["id"], leg["leg_id"],
-                                            trigger=f"auto:{trigger['name']}")
-                        elif trigger["name"] == "partial_profit":
-                            logger.info("Auto-executing partial_profit on %s: %s",
-                                        pkg["id"], trigger["details"])
-                            if self.dlog:
-                                self.dlog.log_auto_execute(pkg["id"], "partial_profit",
-                                                           "partial_exit", trigger["details"])
-                            for leg in pkg["legs"]:
-                                if leg["status"] == "open":
-                                    await self.pm.exit_leg(pkg["id"], leg["leg_id"],
-                                        trigger=f"auto:{trigger['name']}")
-                                    break
-                        elif trigger["name"] in ("correlation_break", "time_decay", "negative_drift",
-                                                   "platform_error", "stale_position", "longshot_decay"):
-                            # Only escalate truly actionable ambiguous triggers
-                            self.pm.add_alert(pkg["id"], trigger["trigger_id"], trigger["name"],
-                                {"details": trigger["details"], "action": trigger["action"]})
-                        else:
-                            # Skip noisy triggers (vol_spike, new_ath, spread_compression) — not actionable without AI
-                            if self.dlog:
-                                self.dlog.log_trigger_suppressed(pkg["id"], trigger["name"], "noisy_without_ai")
-        finally:
-            pkg.pop("_exiting", None)
 
     def _find_verdict(self, trigger: dict, verdicts: dict) -> dict:
         """Find the verdict for a trigger, handling various AI response key formats.

@@ -136,9 +136,9 @@ class AIAdvisor:
             f"- Trigger #{p.get('trigger_id', '?')} ({p.get('name', '?')}): {p.get('details', '')} → proposed action: {p.get('action', '?')}"
             for p in proposals
         )
-        mode_note = "This is PAPER TRADING — favor action over inaction to test the exit pipeline." if self._paper_mode else "This is LIVE TRADING — balance risk carefully."
+        mode_note = "This is PAPER TRADING mode." if self._paper_mode else "This is LIVE TRADING — balance risk carefully."
 
-        return f"""You are a prediction market exit execution advisor. Your job is to help execute exits, not to protect positions.
+        return f"""You are a prediction market exit execution advisor.
 
 {mode_note}
 
@@ -157,17 +157,19 @@ trigger_name: REJECT <short reason>
 
 EXAMPLE OUTPUT (for triggers named trailing_stop and time_decay):
 trailing_stop: APPROVE
-time_decay: MODIFY 3
+time_decay: REJECT position has 5 days left and P&L is only -1%
 
 VERDICT RULES:
-- APPROVE = execute the exit. USE THIS when the trigger condition is genuinely met.
+- APPROVE = execute the exit. USE THIS when the trigger condition is genuinely met AND the position should close.
 - MODIFY = adjust parameter (within bounds). Use sparingly.
-- REJECT = trigger fired incorrectly (stale data, calculation error). NOT "position might recover".
+- REJECT = the trigger fired but the position should stay open.
 
 GUIDELINES:
-- stop_loss, target_hit, trailing_stop: APPROVE. These are mechanical — the threshold was set for a reason.
-- time_decay, negative_drift: APPROVE in paper mode. We need exit data to learn from.
-- REJECT should be rare. Hoping a position recovers is NOT a valid reason.
+- stop_loss, target_hit: APPROVE. These are mechanical — the threshold was set for a reason.
+- trailing_stop: APPROVE only if the drawdown is significant (>5% from peak). Small drawdowns on volatile markets are normal.
+- time_decay: REJECT if the position still has 3+ days and P&L is only slightly negative (>-5%). Prediction markets often move sharply near expiry — premature exits destroy value. APPROVE only if P&L is deeply negative (< -10%) or the position has <2 days left.
+- negative_drift: REJECT if the drift is small (<5% loss). Markets fluctuate. APPROVE only for sustained large losses (>8%) over many ticks.
+- stale_position, longshot_decay: APPROVE — capital shouldn't be locked in non-performing positions.
 Do NOT include trigger numbers, parentheses, reasoning lines, or any text other than the verdict lines."""
 
     # Pattern to detect a valid verdict line: the part after the colon must
@@ -309,6 +311,82 @@ Do NOT include trigger numbers, parentheses, reasoning lines, or any text other 
         elif provider["style"] == "anthropic":
             return await self._call_anthropic(provider, prompt)
         raise ValueError(f"Unknown API style: {provider['style']}")
+
+    def _build_batched_prompt(self, work: list[tuple[dict, list[dict]]]) -> str:
+        """Build a single prompt reviewing triggers for multiple packages.
+
+        Each package section is marked with [PKG:id] so the response can be
+        parsed back into per-package verdicts. This avoids multiple API calls
+        (and 429 rate limits) when reviewing several packages per tick.
+        """
+        mode_note = "This is PAPER TRADING mode." if self._paper_mode else "This is LIVE TRADING — balance risk carefully."
+        sections = []
+        for pkg, proposals in work:
+            context = self._build_context(pkg)
+            proposal_text = "\n".join(
+                f"- {p.get('name', '?')}: {p.get('details', '')} → proposed action: {p.get('action', '?')}"
+                for p in proposals
+            )
+            sections.append(f"[PKG:{pkg.get('id', '?')}]\n{context}\nTRIGGERS:\n{proposal_text}")
+
+        combined = "\n\n---\n\n".join(sections)
+
+        return f"""You are a prediction market exit execution advisor.
+
+{mode_note}
+
+Review exit triggers for {len(work)} packages below. For each package, provide verdicts grouped under the package marker.
+
+{combined}
+
+---
+
+FORMAT — repeat the package marker, then one verdict per trigger:
+[PKG:package_id]
+trigger_name: APPROVE
+trigger_name: REJECT <short reason>
+
+VERDICT RULES:
+- APPROVE = execute the exit when the trigger condition is genuinely met AND the position should close.
+- MODIFY <new_value> = adjust parameter within bounds.
+- REJECT = the trigger fired but the position should stay open.
+
+GUIDELINES:
+- stop_loss, target_hit: APPROVE. These are mechanical.
+- trailing_stop: APPROVE only if drawdown is significant (>5% from peak).
+- time_decay: REJECT if 3+ days left and P&L is only slightly negative (>-5%). APPROVE only if deeply negative (<-10%) or <2 days left.
+- negative_drift: REJECT if loss is small (<5%). APPROVE only for sustained large losses (>8%).
+- stale_position, longshot_decay: APPROVE — free up capital.
+Do NOT include reasoning, just verdict lines grouped by package."""
+
+    def _parse_batched_response(self, text: str, pkg_ids: list[str]) -> dict[str, dict]:
+        """Parse a batched AI response into per-package verdicts.
+
+        Looks for [PKG:id] markers. If no markers found, falls back to
+        parsing the entire response as verdicts for the first package.
+        """
+        result: dict[str, dict] = {}
+
+        # Split by package markers
+        import re as _re
+        sections = _re.split(r'\[PKG:([^\]]+)\]', text)
+
+        # sections[0] = preamble (before first marker), then alternating id, content
+        if len(sections) >= 3:
+            for i in range(1, len(sections), 2):
+                pkg_id = sections[i].strip()
+                content = sections[i + 1] if i + 1 < len(sections) else ""
+                verdicts = self._parse_response(content)
+                if verdicts:
+                    result[pkg_id] = verdicts
+        else:
+            # No markers found — assign all verdicts to first package
+            if pkg_ids:
+                verdicts = self._parse_response(text)
+                if verdicts:
+                    result[pkg_ids[0]] = verdicts
+
+        return result
 
     async def review_proposals(self, pkg: dict, proposals: list[dict]) -> dict:
         """Review exit proposals via LLM chain. Returns verdicts dict.
