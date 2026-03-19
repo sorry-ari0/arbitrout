@@ -47,7 +47,9 @@ class KalshiExecutor(BaseExecutor):
         try:
             r = await (await self._get_http()).get("/portfolio/balance"); r.raise_for_status()
             d = r.json(); return BalanceResult(float(d.get("available_balance",0))/100, float(d.get("portfolio_value",0))/100)
-        except: return BalanceResult(0,0)
+        except Exception as e:
+            logger.warning("Kalshi get_balance failed: %s", e)
+            return BalanceResult(0,0)
 
     async def get_positions(self) -> list[PositionInfo]: return []
 
@@ -56,7 +58,8 @@ class KalshiExecutor(BaseExecutor):
             ticker = asset_id.split(":")[0] if ":" in asset_id else asset_id
             r = await (await self._get_http()).get(f"/markets/{ticker}")
             if r.status_code == 200: return float(r.json().get("market",{}).get("last_price",50))/100
-        except: pass
+        except Exception as e:
+            logger.warning("Kalshi get_current_price failed for %s: %s", asset_id, e)
         return 0.0
 
     async def close(self):
