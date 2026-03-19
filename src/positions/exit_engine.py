@@ -103,7 +103,7 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
             "action": "tighten_trail", "safety_override": False})
 
     # ── 6: Correlation Break ────────────────────────────────────────────────
-    if strategy == "cross_platform_arb" and len(legs) >= 2:
+    if strategy in ("cross_platform_arb", "synthetic_derivative") and len(legs) >= 2:
         yes_legs = [l for l in legs if "yes" in l.get("type", "").lower()]
         no_legs = [l for l in legs if "no" in l.get("type", "").lower()]
         if yes_legs and no_legs:
@@ -116,7 +116,7 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
                     "action": "review", "safety_override": False})
 
     # ── 7: Spread Inversion (SAFETY) ────────────────────────────────────────
-    if strategy == "cross_platform_arb" and len(legs) >= 2:
+    if strategy in ("cross_platform_arb", "synthetic_derivative") and len(legs) >= 2:
         yes_price = sum(l.get("current_price", 0) for l in legs if "yes" in l.get("type", "").lower())
         no_price = sum(l.get("current_price", 0) for l in legs if "no" in l.get("type", "").lower())
         combined = yes_price + no_price
@@ -126,7 +126,7 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
                 "action": "immediate_exit", "safety_override": True})
 
     # ── 8: Spread Compression ───────────────────────────────────────────────
-    if strategy == "cross_platform_arb" and len(legs) >= 2:
+    if strategy in ("cross_platform_arb", "synthetic_derivative") and len(legs) >= 2:
         yes_price = sum(l.get("current_price", 0) for l in legs if "yes" in l.get("type", "").lower())
         no_price = sum(l.get("current_price", 0) for l in legs if "no" in l.get("type", "").lower())
         spread = 1.0 - (yes_price + no_price)

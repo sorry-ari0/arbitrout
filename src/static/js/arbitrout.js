@@ -317,7 +317,12 @@ function renderOpportunities(opps) {
 
         var spreadEl = document.createElement('div');
         spreadEl.className = 'opp-spread positive';
-        spreadEl.textContent = '+' + (opp.profit_pct || opp.spread * 100).toFixed(1) + '%';
+        var pctText = '+' + (opp.profit_pct || opp.spread * 100).toFixed(1) + '%';
+        if (opp.is_synthetic) {
+            spreadEl.style.color = '#e040fb';
+            pctText += ' \u2726';  // synthetic indicator
+        }
+        spreadEl.textContent = pctText;
         row.appendChild(spreadEl);
 
         // Quick buy signal line
@@ -502,11 +507,54 @@ function showEventDetail(opp) {
         step2.appendChild(document.createTextNode(' @ ' + (noCost * 100).toFixed(1) + '\u00A2 (' + noAlloc.toFixed(1) + '% of capital)'));
         tradeEl.appendChild(step2);
 
-        // Profit
+        var isSynthetic = opp.is_synthetic || false;
+        var synthInfo = opp.synthetic_info || {};
+
+        // Profit header
         var profitLine = document.createElement('div');
-        profitLine.style.cssText = 'color:var(--arb-green);font-weight:700;margin-top:6px;font-size:12px;';
-        profitLine.textContent = 'GUARANTEED PROFIT: ' + profitPct.toFixed(1) + '%';
+        profitLine.style.cssText = 'font-weight:700;margin-top:6px;font-size:12px;';
+        if (isSynthetic) {
+            profitLine.style.color = '#e040fb';
+            profitLine.textContent = 'SYNTHETIC DERIVATIVE: +' + profitPct.toFixed(1) + '% (wins 2/3 scenarios)';
+        } else {
+            profitLine.style.color = 'var(--arb-green)';
+            profitLine.textContent = 'GUARANTEED PROFIT: ' + profitPct.toFixed(1) + '%';
+        }
         tradeEl.appendChild(profitLine);
+
+        // Synthetic scenario breakdown
+        if (isSynthetic && synthInfo.scenarios) {
+            var scenDiv = document.createElement('div');
+            scenDiv.style.cssText = 'margin-top:6px;padding:6px;background:rgba(224,64,251,0.08);border:1px solid rgba(224,64,251,0.2);border-radius:3px;font-size:10px;';
+            var scenTitle = document.createElement('div');
+            scenTitle.style.cssText = 'color:#e040fb;font-weight:700;margin-bottom:4px;';
+            scenTitle.textContent = 'SCENARIO ANALYSIS';
+            scenDiv.appendChild(scenTitle);
+
+            var scenarios = synthInfo.scenarios;
+            var scenOrder = ['above_both', 'between', 'below_both'];
+            var scenIcons = {above_both: '\u2705', between: '\u2705', below_both: '\u274C'};
+            scenOrder.forEach(function(key) {
+                var s = scenarios[key];
+                if (!s) return;
+                var line = document.createElement('div');
+                line.style.cssText = 'padding:2px 0;color:var(--arb-text);';
+                var icon = scenIcons[key] || '';
+                var color = s.net > 0 ? 'var(--arb-green)' : '#ff5252';
+                line.innerHTML = icon + ' ' + s.condition +
+                    ': <span style="color:' + color + ';font-weight:700;">' +
+                    (s.net > 0 ? '+' : '') + (s.return_pct).toFixed(1) + '%</span>';
+                scenDiv.appendChild(line);
+            });
+
+            if (synthInfo.high_strike && synthInfo.low_strike) {
+                var range = document.createElement('div');
+                range.style.cssText = 'margin-top:4px;color:var(--arb-muted);font-style:italic;';
+                range.textContent = 'Range: $' + synthInfo.low_strike.toLocaleString() + ' - $' + synthInfo.high_strike.toLocaleString();
+                scenDiv.appendChild(range);
+            }
+            tradeEl.appendChild(scenDiv);
+        }
 
         // Dollar example
         var exLine = document.createElement('div');
@@ -514,7 +562,7 @@ function showEventDetail(opp) {
         var yesSpend = (100 * yesAlloc / 100);
         var noSpend = (100 * noAlloc / 100);
         var profit = (100 * profitPct / 100);
-        exLine.textContent = '$100 invested = $' + yesSpend.toFixed(0) + ' YES + $' + noSpend.toFixed(0) + ' NO = $' + profit.toFixed(2) + ' profit';
+        exLine.textContent = '$100 invested = $' + yesSpend.toFixed(0) + ' YES + $' + noSpend.toFixed(0) + ' NO = $' + profit.toFixed(2) + (isSynthetic ? ' expected' : ' profit');
         tradeEl.appendChild(exLine);
 
         // Cost per $1 payout

@@ -74,6 +74,8 @@ class ArbitrageOpportunity:
     spread: float               # 1.0 - (yes + no) = profit per $1
     profit_pct: float           # spread * 100
     combined_volume: int
+    is_synthetic: bool = False          # True if markets have different price targets
+    synthetic_info: dict = field(default_factory=dict)  # price targets, scenarios, etc.
 
     @property
     def yes_allocation_pct(self) -> float:
@@ -88,7 +90,7 @@ class ArbitrageOpportunity:
         return round((self.buy_yes_price / total) * 100, 1) if total > 0 else 50.0
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "matched_event": self.matched_event.to_dict(),
             "buy_yes_platform": self.buy_yes_platform,
             "buy_yes_price": self.buy_yes_price,
@@ -99,4 +101,8 @@ class ArbitrageOpportunity:
             "combined_volume": self.combined_volume,
             "yes_allocation_pct": self.yes_allocation_pct,
             "no_allocation_pct": self.no_allocation_pct,
+            "is_synthetic": self.is_synthetic,
         }
+        if self.synthetic_info:
+            d["synthetic_info"] = self.synthetic_info
+        return d

@@ -304,12 +304,16 @@ class AutoTrader:
                     self.dlog.log_opportunity_skip(opp_title, "cooldown_after_exit")
                 continue
 
-            # Determine which side to bet on
-            # If cross-platform arb (different platforms), buy both sides for spread capture
-            # If same platform, make a directional bet on one side
+            # Determine strategy:
+            # - synthetic_derivative: related markets with different price targets (wins 2/3 scenarios)
+            # - cross_platform_arb: same market on different platforms (guaranteed spread)
+            # - pure_prediction: directional bet on one side
             is_cross_platform = buy_yes_platform != buy_no_platform and yes_market_id and no_market_id
+            is_synthetic = opp.get("is_synthetic", False)
 
-            if is_cross_platform:
+            if is_synthetic and is_cross_platform:
+                strategy = "synthetic_derivative"
+            elif is_cross_platform:
                 strategy = "cross_platform_arb"
             else:
                 strategy = "pure_prediction"
@@ -320,7 +324,7 @@ class AutoTrader:
                 pkg = create_package(f"Auto: {trade_title[:60]}", "pure_prediction")
 
             if is_cross_platform:
-                # Cross-platform arb: buy both sides on different platforms
+                # Cross-platform: buy both sides on different platforms
                 # Skip if either side has no real price (zero-price markets have no liquidity)
                 if buy_yes_price < 0.01 or buy_no_price < 0.01:
                     self._trades_skipped += 1
@@ -330,21 +334,40 @@ class AutoTrader:
                                                        no_price=round(buy_no_price, 4))
                     continue
 
-                half = round(trade_size / 2, 2)
+                # For synthetics, size by total cost efficiency
+                # Lower total cost = higher potential return per dollar
+                if is_synthetic:
+                    synth = opp.get("synthetic_info", {})
+                    total_cost = synth.get("total_cost", buy_yes_price + buy_no_price)
+                    # Allocate proportionally to each leg's price
+                    if total_cost > 0:
+                        yes_alloc = round(trade_size * (buy_yes_price / total_cost), 2)
+                        no_alloc = round(trade_size * (buy_no_price / total_cost), 2)
+                    else:
+                        yes_alloc = no_alloc = round(trade_size / 2, 2)
+                    yes_label = f"YES @ {buy_yes_platform} (strike: ${synth.get('yes_target', '?'):,.0f})"
+                    no_label = f"NO @ {buy_no_platform} (strike: ${synth.get('no_target', '?'):,.0f})"
+                else:
+                    yes_alloc = no_alloc = round(trade_size / 2, 2)
+                    yes_label = f"YES @ {buy_yes_platform}"
+                    no_label = f"NO @ {buy_no_platform}"
+
                 if yes_market_id:
                     pkg["legs"].append(create_leg(
                         platform=buy_yes_platform, leg_type="prediction_yes",
-                        asset_id=f"{yes_market_id}:YES", asset_label=f"YES @ {buy_yes_platform}",
+                        asset_id=f"{yes_market_id}:YES", asset_label=yes_label,
                         entry_price=buy_yes_price,
-                        cost=half, expiry=expiry[:10] if expiry else "2026-12-31",
+                        cost=yes_alloc, expiry=expiry[:10] if expiry else "2026-12-31",
                     ))
                 if no_market_id:
                     pkg["legs"].append(create_leg(
                         platform=buy_no_platform, leg_type="prediction_no",
-                        asset_id=f"{no_market_id}:NO", asset_label=f"NO @ {buy_no_platform}",
+                        asset_id=f"{no_market_id}:NO", asset_label=no_label,
                         entry_price=buy_no_price,
-                        cost=half, expiry=expiry[:10] if expiry else "2026-12-31",
+                        cost=no_alloc, expiry=expiry[:10] if expiry else "2026-12-31",
                     ))
+                if is_synthetic:
+                    pkg["_synthetic_info"] = opp.get("synthetic_info", {})
             else:
                 # Directional bet: pick ONE side based on EXPECTED VALUE
                 # Historical data shows: NO bets at 0.33-0.84 resolving to $1 = all profits
@@ -428,7 +451,7 @@ class AutoTrader:
 
             # Execute
             pkg_name = pkg.get("name", opp_title)
-            bet_side = pkg.get("_bet_side", "BOTH" if is_cross_platform else "?")
+            bet_side = pkg.get("_bet_side", "SYNTHETIC" if is_synthetic else ("BOTH" if is_cross_platform else "?"))
             bet_conviction = pkg.get("_entry_conviction", round(abs(buy_yes_price - 0.5), 3))
             entry_price = side_price if not is_cross_platform else buy_yes_price
             try:
@@ -488,7 +511,7 @@ class AutoTrader:
         if buy_yes_price < 0.01 or buy_no_price < 0.01:
             return None
 
-        return {
+        opp = {
             "title": title,
             "canonical_title": title,
             "buy_yes_platform": arb.get("buy_yes_platform", ""),
@@ -502,6 +525,11 @@ class AutoTrader:
             "volume": arb.get("combined_volume", 0),
             "matched_event": matched,
         }
+        # Pass through synthetic derivative info
+        if arb.get("is_synthetic"):
+            opp["is_synthetic"] = True
+            opp["synthetic_info"] = arb.get("synthetic_info", {})
+        return opp
 
     def _events_to_opportunities(self, matched_events: list[dict]) -> list[dict]:
         """Convert matched events from ALL platforms into directional bet opportunities.
