@@ -144,12 +144,12 @@ function showSplash(mode) {
 }
 
 // === TAB SWITCHING ===
-function switchMode(mode) {
-    if (mode === arbMode) return;
+function switchMode(mode, isInit) {
+    if (mode === arbMode && !isInit) return;
     arbMode = mode;
     localStorage.setItem('arbMode', arbMode); // Save current mode
 
-    showSplash(mode);
+    if (!isInit) showSplash(mode);
 
     var lobster = document.getElementById('lobsterminal-container');
     var arb = document.getElementById('arbitrout-container');
@@ -896,7 +896,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Initialize mode based on saved preference, then load opportunities if in arbitrout mode
-    switchMode(arbMode);
+    switchMode(arbMode, true);
 
     // Init positions dashboard if container exists
     if (document.getElementById('pos-packages-list')) {

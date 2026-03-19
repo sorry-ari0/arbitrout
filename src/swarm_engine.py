@@ -309,74 +309,12 @@ Omit any field the user did not mention.  Always respond with valid JSON only.\
 """
 
 
-async def intent_parser(prompt: str) -> dict[str, Any]:
-    """Call the local Ollama model to extract structured screening rules.
-
-    Sends the user's free-text prompt to Ollama's chat endpoint and parses
-    the returned JSON into a dict of screening rules.
-
-    Args:
-        prompt: Natural-language screening request from the user.
-
-    Returns:
-        A dict that may contain keys such as ``min_market_cap``,
-        ``max_market_cap``, ``min_fcf``, ``max_debt_to_equity``,
-        ``sectors``, and ``min_revenue_growth``.
-
-    Raises:
-        HTTPException: If Ollama is unreachable, times out, or returns
-            unparseable JSON.
-    """
-    payload = {
-        "model": OLLAMA_MODEL,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
-        ],
-        "stream": False,
-        "options": {"temperature": 0.0},
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(OLLAMA_URL, json=payload)
-            resp.raise_for_status()
-    except httpx.TimeoutException:
-        logger.error("Ollama request timed out")
-        raise HTTPException(
-            status_code=504,
-            detail="LLM request timed out — is Ollama running?",
-        )
-    except httpx.HTTPError as exc:
-        logger.error("Ollama HTTP error: %s", exc)
-        raise HTTPException(
-            status_code=502,
-            detail=f"Could not reach Ollama: {exc}",
-        )
-
-    # Extract the assistant's reply text
-    try:
-        raw_text: str = resp.json()["message"]["content"]
-    except (KeyError, TypeError) as exc:
-        logger.error("Unexpected Ollama response shape: %s", exc)
-        raise HTTPException(
-            status_code=502,
-            detail="Ollama returned an unexpected response format.",
-        )
-
-    # Strip markdown fences and leading/trailing whitespace
+def _parse_llm_json(raw_text: str) -> dict | None:
+    """Extract first valid JSON object from LLM response text."""
     cleaned = raw_text.strip()
+    cleaned = re.sub(r"```(?:json)?", "", cleaned).strip()
 
-    # Remove ALL markdown code fences (local models often emit multiple blocks)
-    cleaned = re.sub(r"```(?:json)?", "", cleaned)
-    cleaned = cleaned.strip()
-
-    # If the LLM returned multiple JSON blocks separated by text like "or",
-    # extract the first valid JSON object.
-    rules = None
     json_candidates: list[str] = []
-
-    # Try to find JSON objects by matching balanced braces
     brace_depth = 0
     start_idx = None
     for i, ch in enumerate(cleaned):
@@ -390,24 +328,113 @@ async def intent_parser(prompt: str) -> dict[str, Any]:
                 json_candidates.append(cleaned[start_idx : i + 1])
                 start_idx = None
 
-    # If no brace-matched candidates, try the whole string as-is
     if not json_candidates:
         json_candidates = [cleaned]
 
     for candidate in json_candidates:
-        # Handle trailing commas (common with local models)
         candidate = re.sub(r",\s*([}\]])", r"\1", candidate)
         try:
-            rules = json.loads(candidate)
-            break  # Use the first successfully parsed JSON object
+            return json.loads(candidate)
         except json.JSONDecodeError:
             continue
+    return None
 
+
+async def _call_ollama(prompt: str) -> str | None:
+    """Try Ollama local LLM. Returns raw text or None on failure."""
+    payload = {
+        "model": OLLAMA_MODEL,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        "stream": False,
+        "options": {"temperature": 0.0},
+    }
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(OLLAMA_URL, json=payload)
+            resp.raise_for_status()
+        return resp.json()["message"]["content"]
+    except Exception as exc:
+        logger.warning("Ollama failed: %s", exc)
+        return None
+
+
+async def _call_groq(prompt: str) -> str | None:
+    """Try Groq cloud LLM. Returns raw text or None on failure."""
+    api_key = os.environ.get("GROQ_API_KEY", "")
+    if not api_key:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": "llama-3.3-70b-versatile",
+                    "messages": [
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": 0.0,
+                },
+            )
+            resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
+    except Exception as exc:
+        logger.warning("Groq failed: %s", exc)
+        return None
+
+
+async def _call_gemini(prompt: str) -> str | None:
+    """Try Gemini cloud LLM. Returns raw text or None on failure."""
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    if not api_key:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
+                json={
+                    "contents": [{"parts": [{"text": f"{SYSTEM_PROMPT}\n\nUser query: {prompt}"}]}],
+                    "generationConfig": {"temperature": 0.0},
+                },
+            )
+            resp.raise_for_status()
+        return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+    except Exception as exc:
+        logger.warning("Gemini failed: %s", exc)
+        return None
+
+
+async def intent_parser(prompt: str) -> dict[str, Any]:
+    """Extract structured screening rules from a natural-language prompt.
+
+    Tries providers in order: Ollama (local) -> Groq -> Gemini.
+    Falls back through the chain if any provider is unavailable.
+    """
+    raw_text = None
+
+    # Try each provider in order
+    for name, caller in [("ollama", _call_ollama), ("groq", _call_groq), ("gemini", _call_gemini)]:
+        raw_text = await caller(prompt)
+        if raw_text:
+            logger.info("Screener intent parsed via %s", name)
+            break
+
+    if not raw_text:
+        raise HTTPException(
+            status_code=502,
+            detail="No LLM provider available — need Ollama running or GROQ_API_KEY / GEMINI_API_KEY set",
+        )
+
+    rules = _parse_llm_json(raw_text)
     if rules is None:
-        logger.error("Could not parse LLM output as JSON: %s", cleaned)
+        logger.error("Could not parse LLM output as JSON: %s", raw_text[:300])
         raise HTTPException(
             status_code=422,
-            detail=f"LLM returned invalid JSON: {cleaned[:300]}",
+            detail=f"LLM returned invalid JSON: {raw_text[:300]}",
         )
 
     # Remove null values — treat them as "not specified" (same as omitted)
