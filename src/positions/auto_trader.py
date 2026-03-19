@@ -171,6 +171,15 @@ class AutoTrader:
             if remaining_budget < MIN_TRADE_SIZE:
                 break
 
+            # Filter: skip zero-price markets (no liquidity, phantom opportunities)
+            buy_yes_price = opp.get("buy_yes_price", 0)
+            buy_no_price = opp.get("buy_no_price", 0)
+            if buy_yes_price < 0.01 and buy_no_price < 0.01:
+                self._trades_skipped += 1
+                if self.dlog:
+                    self.dlog.log_opportunity_skip(opp_title, "zero_price")
+                continue
+
             # Filter: require minimum spread
             spread_pct = opp.get("profit_pct", 0)
             if spread_pct < MIN_SPREAD_PCT:
@@ -312,19 +321,28 @@ class AutoTrader:
 
             if is_cross_platform:
                 # Cross-platform arb: buy both sides on different platforms
+                # Skip if either side has no real price (zero-price markets have no liquidity)
+                if buy_yes_price < 0.01 or buy_no_price < 0.01:
+                    self._trades_skipped += 1
+                    if self.dlog:
+                        self.dlog.log_opportunity_skip(opp_title, "zero_price_arb",
+                                                       yes_price=round(buy_yes_price, 4),
+                                                       no_price=round(buy_no_price, 4))
+                    continue
+
                 half = round(trade_size / 2, 2)
                 if yes_market_id:
                     pkg["legs"].append(create_leg(
                         platform=buy_yes_platform, leg_type="prediction_yes",
                         asset_id=f"{yes_market_id}:YES", asset_label=f"YES @ {buy_yes_platform}",
-                        entry_price=buy_yes_price if buy_yes_price > 0 else 0.5,
+                        entry_price=buy_yes_price,
                         cost=half, expiry=expiry[:10] if expiry else "2026-12-31",
                     ))
                 if no_market_id:
                     pkg["legs"].append(create_leg(
                         platform=buy_no_platform, leg_type="prediction_no",
                         asset_id=f"{no_market_id}:NO", asset_label=f"NO @ {buy_no_platform}",
-                        entry_price=buy_no_price if buy_no_price > 0 else 0.5,
+                        entry_price=buy_no_price,
                         cost=half, expiry=expiry[:10] if expiry else "2026-12-31",
                     ))
             else:
@@ -464,13 +482,19 @@ class AutoTrader:
             if m.get("platform") == arb.get("buy_no_platform"):
                 buy_no_market_id = m.get("event_id", "")
 
+        buy_yes_price = arb.get("buy_yes_price", 0)
+        buy_no_price = arb.get("buy_no_price", 0)
+        # Skip if either side has no real price (0 or near-0)
+        if buy_yes_price < 0.01 or buy_no_price < 0.01:
+            return None
+
         return {
             "title": title,
             "canonical_title": title,
             "buy_yes_platform": arb.get("buy_yes_platform", ""),
-            "buy_yes_price": arb.get("buy_yes_price", 0.5),
+            "buy_yes_price": buy_yes_price,
             "buy_no_platform": arb.get("buy_no_platform", ""),
-            "buy_no_price": arb.get("buy_no_price", 0.5),
+            "buy_no_price": buy_no_price,
             "buy_yes_market_id": buy_yes_market_id,
             "buy_no_market_id": buy_no_market_id,
             "profit_pct": arb.get("profit_pct", 0),
@@ -511,7 +535,11 @@ class AutoTrader:
 
                 yes_price = market.get("yes_price", 0)
                 no_price = market.get("no_price", 0)
-                if not yes_price and not no_price:
+                # Skip markets with no real prices
+                if yes_price < 0.01 and no_price < 0.01:
+                    continue
+                # Skip markets where either side is essentially zero (no liquidity)
+                if yes_price < 0.01 or no_price < 0.01:
                     continue
 
                 # Same filters as _scan_polymarket
