@@ -175,12 +175,23 @@ VERDICT RULES:
 - MODIFY = adjust parameter (within bounds). Use sparingly.
 - REJECT = the trigger fired but the position should stay open.
 
+CRITICAL CONTEXT — PAPER TRADING PERFORMANCE DATA:
+Out of 31 closed trades, every single automated exit lost money:
+- trailing_stop: 5 exits, 0 wins, -$59 total
+- AI-approved time_decay: 7 exits, 0 wins, -$29 total
+- AI-approved negative_drift: 4 exits, 0 wins, -$55 total
+- manual exits (human held positions): 13 exits, 3 wins, -$2 total (near break-even)
+The #1 cause of losses is PREMATURE EXITS. Your default should be REJECT.
+
 GUIDELINES:
+- DEFAULT ACTION IS REJECT. Prediction markets resolve to $0 or $1 — patience wins, panic selling loses. Only approve exits when there is overwhelming evidence the position is wrong.
 - stop_loss, target_hit: APPROVE. These are mechanical — the threshold was set for a reason.
-- trailing_stop: APPROVE only if the drawdown is significant (>5% from peak). Small drawdowns on volatile markets are normal.
-- time_decay: REJECT if the position still has 3+ days and P&L is only slightly negative (>-5%). Prediction markets often move sharply near expiry — premature exits destroy value. APPROVE only if P&L is deeply negative (< -10%) or the position has <2 days left.
-- negative_drift: REJECT if the drift is small (<5% loss). Markets fluctuate. APPROVE only for sustained large losses (>8%) over many ticks.
-- stale_position, longshot_decay: APPROVE — capital shouldn't be locked in non-performing positions.
+- trailing_stop: REJECT unless drawdown exceeds 25% from peak AND the position has been open more than 24 hours. Small drawdowns are normal in prediction markets — a YES at $0.35 routinely swings 20%.
+- time_decay: REJECT in almost all cases. Prediction markets move most in the final hours before resolution — exiting early forfeits the entire thesis. APPROVE only if P&L is deeply negative (< -20%) AND the position has less than 12 hours left.
+- negative_drift: REJECT unless loss exceeds 15% sustained over many ticks. A -5% or -8% dip is normal volatility, not a reason to exit. Markets mean-revert.
+- stale_position: REJECT if P&L is between -10% and +10% — the position may still be developing. APPROVE only if truly stagnant (>10 days, <2% absolute move).
+- longshot_decay: APPROVE only if the position has lost >30% of its entry value.
+- new_ath, vol_spike, spread_compression: REJECT — these are informational, not actionable.
 Do NOT include trigger numbers, parentheses, reasoning lines, or any text other than the verdict lines."""
 
     # Pattern to detect a valid verdict line: the part after the colon must
@@ -386,12 +397,17 @@ VERDICT RULES:
 - MODIFY <new_value> = adjust parameter within bounds.
 - REJECT = the trigger fired but the position should stay open.
 
+CRITICAL — PERFORMANCE DATA: Every automated exit lost money (17 exits, 0 wins, -$143). Default is REJECT.
+
 GUIDELINES:
-- stop_loss, target_hit: APPROVE. These are mechanical.
-- trailing_stop: APPROVE only if drawdown is significant (>5% from peak).
-- time_decay: REJECT if 3+ days left and P&L is only slightly negative (>-5%). APPROVE only if deeply negative (<-10%) or <2 days left.
-- negative_drift: REJECT if loss is small (<5%). APPROVE only for sustained large losses (>8%).
-- stale_position, longshot_decay: APPROVE — free up capital.
+- DEFAULT IS REJECT. Prediction markets resolve to $0 or $1 — patience wins, panic selling loses.
+- stop_loss, target_hit: APPROVE. Mechanical triggers.
+- trailing_stop: REJECT unless drawdown >25% from peak AND position open >24 hours.
+- time_decay: REJECT almost always. APPROVE only if P&L < -20% AND <12 hours left.
+- negative_drift: REJECT unless loss >15% sustained over many ticks.
+- stale_position: REJECT if P&L between -10% and +10%. APPROVE only if >10 days and <2% move.
+- longshot_decay: APPROVE only if position lost >30% of entry value.
+- new_ath, vol_spike, spread_compression: REJECT — informational only.
 Do NOT include reasoning, just verdict lines grouped by package."""
 
     def _parse_batched_response(self, text: str, pkg_ids: list[str]) -> dict[str, dict]:

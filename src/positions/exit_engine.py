@@ -156,7 +156,7 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
             try:
                 exp = datetime.strptime(leg["expiry"], "%Y-%m-%d").date()
                 days_left = (exp - date.today()).days
-                if 3 <= days_left <= 7:
+                if 1 <= days_left <= 3:
                     triggers.append({"trigger_id": T_TIME_DECAY, "name": "time_decay",
                         "details": f"Leg {leg['leg_id']} expires in {days_left} days",
                         "action": "review", "safety_override": False})
@@ -178,8 +178,10 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
     pass
 
     # ── 15: Negative Drift ──────────────────────────────────────────────────
+    # Hardened: was -2% + 3 ticks (normal noise). Data showed 4 AI-approved
+    # negative_drift exits, 0 wins, -$55. Now requires genuine deterioration.
     neg_streak = pkg.get("_neg_streak", 0)
-    if pnl_pct < -2 and neg_streak >= 3:
+    if pnl_pct < -8 and neg_streak >= 5:
         triggers.append({"trigger_id": T_NEGATIVE_DRIFT, "name": "negative_drift",
             "details": f"Sustained negative P&L ({pnl_pct:.1f}%) for {neg_streak} ticks",
             "action": "review", "safety_override": False})
