@@ -13,7 +13,7 @@ STATUS_OPEN = "open"
 STATUS_CLOSED = "closed"
 STATUS_PARTIAL = "partial_exit"
 
-STRATEGY_TYPES = ("spot_plus_hedge", "cross_platform_arb", "pure_prediction")
+STRATEGY_TYPES = ("spot_plus_hedge", "cross_platform_arb", "pure_prediction", "news_driven")
 
 
 def create_package(name: str, strategy_type: str) -> dict:
@@ -273,8 +273,11 @@ class PositionManager:
             leg["exit_price"] = result.filled_price
             leg["exit_quantity"] = result.filled_quantity
             leg["sell_fees"] = result.fees
-            # Update leg's current_value to reflect actual exit
-            leg["current_value"] = round(result.filled_quantity * result.filled_price, 4)
+            leg["exit_trigger"] = trigger
+            # exit_value = gross proceeds from the sell (before fees deducted)
+            leg["exit_value"] = round(result.filled_quantity * result.filled_price, 4)
+            # current_value tracks net (after fees) for P&L display
+            leg["current_value"] = round(result.filled_quantity * result.filled_price - result.fees, 4)
             pkg["execution_log"].append({
                 "action": "sell", "leg_id": leg_id, "platform": leg["platform"],
                 "tx_id": result.tx_id, "price": result.filled_price,
@@ -347,8 +350,13 @@ class PositionManager:
         total_invested = sum(p.get("total_cost", 0) for p in open_pkgs)
         total_value = sum(p.get("current_value", 0) for p in open_pkgs)
         total_pnl = total_value - total_invested
-        closed_pnl = sum(p.get("unrealized_pnl", 0) for p in closed_pkgs)
-        wins = sum(1 for p in closed_pkgs if p.get("unrealized_pnl", 0) > 0)
+        # Realized P&L: calculate from actual exit data (current_value - total_cost)
+        closed_pnl = sum(
+            p.get("current_value", 0) - p.get("total_cost", 0)
+            for p in closed_pkgs
+        )
+        wins = sum(1 for p in closed_pkgs
+                   if p.get("current_value", 0) - p.get("total_cost", 0) > 0.01)
         return {
             "open_packages": len(open_pkgs),
             "closed_packages": len(closed_pkgs),

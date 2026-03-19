@@ -8,8 +8,9 @@ Branch: feat/derivative-position-manager
 ## Overview
 Arbitrout is a prediction market trading system with three core capabilities:
 1. **Cross-platform arbitrage scanner** — finds price discrepancies across Polymarket, PredictIt, Limitless, Kalshi, and more
-2. **Autonomous paper trading** — auto trader scans Polymarket for crypto markets, opens positions with risk management
+2. **Autonomous paper trading** — auto trader scans ALL platforms (9 adapters, 10 executors) for opportunities, opens directional bets and cross-platform arb with risk management
 3. **Insider/whale tracker** — monitors top Polymarket traders and uses their positions as trading signals
+4. **AI news scanner** — monitors RSS feeds, uses AI to match headlines to prediction markets, executes trades on breaking news before markets react
 
 Integrated into the Lobsterminal financial terminal as a switchable tab. Backend is Python FastAPI on port 8500.
 
@@ -21,20 +22,29 @@ Integrated into the Lobsterminal financial terminal as a switchable tab. Backend
 server.py creates all subsystems and injects dependencies:
 
   AdapterRegistry ──────────────────────> ArbitrageScanner ·····> AutoTrader
-  (10 platform adapters)                  (60s scan loop)         (optional
+  (8 platform adapters)                   (60s scan loop)         (multi-platform
                                                                    opp source)
 
   Real Executors ──> PaperExecutor ──────> PositionManager
-  (polymarket,       (simulated $,         (CRUD, execute,
-   kalshi, etc.)      real prices,          persist, P&L)
-                      maker/taker fees)        |
-                                               |──────> ExitEngine (30s loop)
+  (10 executors:     (simulated $,          (CRUD, execute,
+   polymarket,        real prices,           persist, P&L)
+   kalshi, coinbase,  maker/taker fees)
+   predictit,
+   limitless,
+   opinion_labs,
+   robinhood,
+   crypto_spot,
+   kraken)        |
+                                               |──────> ExitEngine (60s loop)
                                                |──────> AutoTrader (5m loop)
                                                |──────> InsiderTracker (15m loop)
+                                               |──────> NewsScanner (150s loop)
 
   TradeJournal <─── PositionManager        (records on close)
   AIAdvisor    <─── ExitEngine             (reviews non-safety triggers)
+  NewsAI       <─── NewsScanner            (headline scan + deep article analysis)
   InsiderTracker ──> AutoTrader            (signal boost for scoring)
+  NewsScanner  ──> AutoTrader              (queued opportunities via asyncio.Lock)
 ```
 
 ### Runtime Data Flow
@@ -83,7 +93,7 @@ server.py creates all subsystems and injects dependencies:
 |                  |         (real price lookup, simulated money)       |
 |                  +---> positions.json (atomic write)                 |
 |                                                                      |
-|  ExitEngine (every 30s)                                              |
+|  ExitEngine (every 60s)                                              |
 |       |                                                              |
 |       |  For each open package:                                      |
 |       |  1. Fetch current prices (PaperExecutor → real API)          |
@@ -124,6 +134,21 @@ server.py creates all subsystems and injects dependencies:
 |       +---> AutoTrader reads signals to boost trade scores           |
 |             signal = 0.2*count + 0.3*value + 0.2*suspicious          |
 |                      + 0.3*accuracy                                  |
+|                                                                      |
+|  NewsScanner (every 150s)                                            |
+|       |                                                              |
+|       |  1. Fetch 8 RSS feeds (crypto, macro, finance) concurrently  |
+|       |  2. Dedup: SHA-256 hash (24h) + >80% word overlap (30m)      |
+|       |  3. Pass 1: AI scans headlines vs 200 Polymarket markets     |
+|       |     (Groq → Gemini → OpenRouter chain)                       |
+|       |  4. Pass 2: Fetch full article (httpx → Scrapling fallback)  |
+|       |     + deep AI analysis for trade/no-trade decision           |
+|       |  5. Route by urgency:                                        |
+|       |     BREAKING (HIGH + confidence>=8) → execute immediately    |
+|       |     NORMAL (confidence>=7) → queue to AutoTrader             |
+|       |                                                              |
+|       +---> PositionManager.execute_package() (breaking trades)      |
+|       +---> AutoTrader.add_news_opportunity() (queued trades)        |
 +---------------------------------------------------------------------+
 ```
 
@@ -159,14 +184,13 @@ Derivative packages are synthetic positions — grouped bets with automated risk
 
 ```
 Package: "Auto: Will ETH hit $5000?"
-  Strategy: pure_prediction
+  Strategy: pure_prediction (directional bet)
   Legs:
-    - YES @ polymarket  entry=$0.35  qty=142.86  cost=$50
-    - NO  @ polymarket  entry=$0.65  qty=76.92   cost=$50
+    - YES @ polymarket  entry=$0.35  qty=285.71  cost=$100
   Exit Rules:
-    - target_profit: exit all if P&L >= +15%
-    - stop_loss:     exit all if P&L <= -10%
-    - trailing_stop: exit if drawdown from peak >= 8%
+    - target_profit: exit all if P&L >= +25%
+    - stop_loss:     exit all if P&L <= -20%
+    - trailing_stop: exit if drawdown from peak >= 12%
 
   P&L Calculation (every 30s):
     current_value   = sum(qty * current_price) for open legs
@@ -207,16 +231,24 @@ For each crypto market opportunity:
   raw_profit  = ((1.0 - favored_price) / favored_price) * 100
   net_profit  = raw_profit - 2%  (round-trip fee estimate)
 
+  SKIP if: yes_price > 0.92 or < 0.08  (near-resolved, no edge)
+  SKIP if: 0.42 < yes_price < 0.58     (near-50/50, no conviction)
+  SKIP if: days_to_expiry <= 2          (time_24h safety would close immediately)
+
   score = net_profit
   if crypto keyword in title:     score *= 2.0
-  if expiry <= 30 days:           score *= 1.5
-  if expiry <= 7 days:            score *= 2.0
+  if 3 <= expiry <= 14 days:      score *= 2.0  (sweet spot)
+  if 14 < expiry <= 30 days:      score *= 1.5
+  if volume > 100,000:            score *= 1.5
   if volume > 10,000:             score *= 1.2
+  if conviction > 0.3:            score *= 1.5
+  if conviction > 0.2:            score *= 1.2
   if insider signal exists:
     score *= (1.0 + signal_strength * 2.0)
     if suspicious insiders:       score *= 1.5
 
   ENTER if: score >= 3.0 AND net_profit >= 3%
+  STRATEGY: directional bet (one side) on same-platform, arb (both sides) on cross-platform
   SIZE: min($200, remaining_budget/2), floor $25
   LIMITS: 10 concurrent, $2000 total exposure
 ```
@@ -242,7 +274,7 @@ signal_strength = 0.2 * normalized_insider_count
 - **Framework:** Python FastAPI + uvicorn
 - **Server:** `src/server.py` — main app, lifespan init, all subsystem wiring
 - **Port:** 8500 (local only)
-- **Auto-scan:** Background tasks: arbitrage (60s), exit engine (30s), auto trader (5m), insider tracker (15m)
+- **Auto-scan:** Background tasks: arbitrage (60s), exit engine (60s), auto trader (5m), insider tracker (15m), news scanner (150s)
 - **GPU:** Intel Arc 140V (~7GB VRAM) — one 8B model at a time for Ollama
 
 ---
@@ -352,18 +384,21 @@ ArbitrageOpportunity:
 |------|---------|
 | `src/positions/position_manager.py` | CRUD, persistence, execution, rollback for derivative packages |
 | `src/positions/position_router.py` | FastAPI router at `/api/derivatives/` — all position endpoints + WebSocket |
-| `src/positions/exit_engine.py` | 30s scan loop, 18 heuristic triggers, safety overrides |
+| `src/positions/exit_engine.py` | 60s scan loop, 18 heuristic triggers, safety overrides, AI routing |
 | `src/positions/auto_trader.py` | Autonomous paper trader — scans Polymarket Gamma API for crypto markets |
 | `src/positions/trade_journal.py` | Records completed trades with P&L, fees, exit triggers, performance analytics |
 | `src/positions/insider_tracker.py` | Whale/insider monitor — leaderboard, positions, accuracy tracking, movement alerts |
-| `src/positions/ai_advisor.py` | Claude AI advisor for exit decisions (requires ANTHROPIC_API_KEY) |
+| `src/positions/ai_advisor.py` | Multi-provider AI advisor for exit decisions (Groq/Gemini/OpenRouter/Anthropic) |
+| `src/positions/news_scanner.py` | AI news scanner — RSS feed monitor, two-pass AI pipeline, trade execution |
+| `src/positions/news_ai.py` | Multi-provider LLM analysis for headline scanning and deep article review |
+| `src/positions/decision_log.py` | JSONL decision logger — records buys, skips, triggers, AI verdicts, exits, news signals |
 | `src/positions/wallet_config.py` | Paper/live mode config, .env loading, key validation, safe config API |
 
 ### How Derivative Packages Work
 
 **Package structure:**
 - A "package" is a grouped position with one or more "legs" (individual market bets) and "exit rules"
-- Strategy types: `spot_plus_hedge`, `cross_platform_arb`, `pure_prediction`
+- Strategy types: `spot_plus_hedge`, `cross_platform_arb`, `pure_prediction`, `news_driven`
 - Each package tracks: status (open/closed/partial_exit/rollback), total_cost, current_value, peak_value, unrealized_pnl, itm_status (ITM/OTM/ATM), execution_log, ai_strategy
 
 **Leg structure:**
@@ -396,7 +431,7 @@ ArbitrageOpportunity:
 
 ### How the Exit Engine Works
 
-The exit engine runs a 30-second scan loop evaluating all open packages.
+The exit engine runs a 60-second scan loop evaluating all open packages.
 
 **Each tick:**
 1. Fetch current prices for all open legs via platform executors
@@ -433,34 +468,49 @@ The exit engine runs a 30-second scan loop evaluating all open packages.
 - Spread inversion: YES + NO prices > 1.0 (guaranteed loss if held)
 - Time <24h / <6h: expiry approaching, must exit regardless of P&L
 
-**Non-safety trigger routing:**
-- If AI advisor available → batch all non-safety triggers to Claude for review
-- AI returns: APPROVE (execute), MODIFY (adjust rule params within bounds), REJECT (skip)
-- If AI fails or unavailable → escalate as alerts for human review
+**Non-safety trigger routing (with rate limiting: max 3 AI reviews per tick, 2s spacing):**
+- If AI advisor available → batch non-safety triggers to AI for review (Groq → Gemini → OpenRouter chain)
+- AI returns: APPROVE (execute), MODIFY (adjust rule params within bounds), REJECT (skip with reason)
+- If AI fails or unavailable → auto-execute mechanical triggers (target_hit, stop_loss, trailing_stop)
+- Noisy triggers (vol_spike, new_ath, spread_compression) suppressed without AI — not actionable
+- Escalation triggers (correlation_break, time_decay, negative_drift, platform_error) create alerts
+- All decisions logged to `decision_log.jsonl` for later review
 
 ### How the AI Advisor Works (`ai_advisor.py`)
 
-- Uses Claude API (default model: `claude-sonnet-4-20250514`, configurable via `CLAUDE_MODEL` env var)
+- **Multi-provider chain** — tries providers in priority order, falls back on failure:
+  - **Live trading:** Anthropic (Claude Sonnet 4) → Groq (Llama 3.3 70B) → Gemini 2.0 Flash → OpenRouter (Llama 3.1 70B)
+  - **Paper trading:** Groq → Gemini → OpenRouter (skips Anthropic to save costs)
 - Rate limited: max 10 calls/minute (sliding window)
-- Lazy-inits Anthropic client from `ANTHROPIC_API_KEY`
+- Mode-aware: `AIAdvisor(paper_mode=True)` selects the provider chain
+- Three API styles: OpenAI-compatible (Groq, OpenRouter), Gemini REST, Anthropic Messages
+- All calls via `httpx.AsyncClient` (30s timeout)
 - Builds structured prompt with: package context (legs, P&L, rules), triggered proposals
 - Expects response format: `<rule_id>: APPROVE | MODIFY <value> | REJECT <reason>`
 - Parses response into verdicts dict
-- Runs sync API call in `run_in_executor` to avoid blocking event loop
-- On failure: raises exception, exit engine catches and creates escalation alert
+- On failure: logs warning, tries next provider. All fail → returns empty dict (caller auto-executes)
+- API keys configured in `.env`: `GROQ_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`
 
 ### How the Auto Trader Works
 
-1. Every 5 minutes, scans Polymarket Gamma API for crypto prediction markets
-2. Fetches 200 markets in bulk (`GET gamma-api.polymarket.com/markets?closed=false&limit=100&order=volume`), filters by crypto keywords (btc, eth, sol, xrp, doge, etc.)
-3. Parses `outcomePrices` (JSON string like `'["0.475","0.525"]'`) → YES/NO prices
-4. Skips near-resolved markets (>0.95 or <0.05)
-5. Calculates profit potential AFTER estimated round-trip fees: `raw_profit = ((1.0 - favored_price) / favored_price) * 100`, then `net_profit = raw_profit - 2%` round-trip fees
-6. Scores each market: `profit_pct * crypto_boost(2x) * expiry_boost(1.5x if ≤30d, 2x if ≤7d) * volume_boost(1.2x if >10K) * insider_boost`
-7. Insider signal boost: if insiders have positions, `score *= (1 + strength * 2)`. Suspicious insiders add extra 1.5x
-8. Requires minimum 3% net spread after fees to enter
-9. Creates packages with YES and NO legs, exit rules: target profit (15%), stop loss (-10%), trailing stop (8%, bounds 3-20%)
-10. Position limits: $200 max per trade, $25 min, 10 concurrent positions, $2000 total exposure
+1. Every 5 minutes, scans ALL platforms via ArbitrageScanner (not just Polymarket)
+2. **Three opportunity sources:**
+   - Cross-platform arbitrage (highest priority, 3x score boost): from `scanner.get_opportunities()`
+   - Single-platform directional bets: from ALL platform events via `scanner.get_events()`, filtered to tradeable platforms only (those with registered executors)
+   - Queued news signals (2x score boost): from NewsScanner via `add_news_opportunity()`
+3. Fallback: direct Polymarket Gamma API scan if scanner fails entirely
+4. **ITM/OTM filter:** skips entries with side price > $0.85 (tiny upside) or < $0.15 (lottery tickets)
+5. **Filters:** skips near-resolved (>0.92 or <0.08), near-50/50 (0.42-0.58), and <2 day expiry
+6. Calculates profit potential AFTER estimated round-trip fees: `raw_profit = ((1.0 - favored_price) / favored_price) * 100`, then `net_profit = raw_profit - 2%` round-trip fees
+7. Scores each market: `profit_pct * crypto_boost(2x) * expiry_boost(2x if 3-14d, 1.5x if 14-30d) * volume_boost(1.5x if >100K, 1.2x if >10K) * conviction_boost(1.5x if >0.3) * insider_boost`
+8. Insider signal boost: if insiders have positions, `score *= (1 + strength * 2)`. Suspicious insiders add extra 1.5x
+9. Requires minimum 3% net spread after fees to enter
+10. **Directional bets (same platform):** picks ONE side based on conviction — cheaper side = higher upside. Buying both YES and NO on the same platform locks in the spread minus fees = guaranteed loss
+11. **Cross-platform arb:** buys both sides on different platforms (spread capture)
+12. **Cooldown:** 30-minute re-entry cooldown after exiting a market
+13. Exit rules tuned for directional bets: target profit (25%), stop loss (-20%), trailing stop (12%, bounds 5-30%)
+14. Position limits: $200 max per trade, $5 min, 10 concurrent positions, $2000 total exposure
+15. **Decision logging:** all buys, skips (with reason), and failures logged to `decision_log.jsonl`
 
 ### How the Insider Tracker Works
 
@@ -521,6 +571,11 @@ The exit engine runs a 30-second scan loop evaluating all open packages.
 | `src/execution/coinbase_spot_executor.py` | Coinbase spot trading |
 | `src/execution/predictit_executor.py` | PredictIt share trading |
 | `src/execution/robinhood_advisor.py` | Advisory-only (no execution, user trades manually) |
+| `src/execution/limitless_executor.py` | Limitless Exchange — public API price lookups, paper-only trading |
+| `src/execution/opinion_labs_executor.py` | Opinion Labs — REST API with optional API key, paper-only trading |
+| `src/execution/robinhood_executor.py` | Robinhood — paper-only (no public price API, uses fallback_price) |
+| `src/execution/crypto_spot_executor.py` | CCXT-based crypto spot — 7-exchange priority chain (Kraken→Coinbase→Binance→Bybit→OKX→KuCoin→Bitget), synthetic probability markets |
+| `src/execution/kraken_cli.py` | Kraken CLI via WSL — Rust binary wrapper for spot trading + MCP server |
 
 ### Executor Interface
 All executors implement `BaseExecutor`:
@@ -541,17 +596,41 @@ is_configured() → bool
   - Kalshi: 0.5% maker / 1% taker
   - Coinbase: 0.4% maker / 0.6% taker
   - PredictIt: 5% / 5%
+  - Limitless: 0.5% maker / 1% taker
+  - Opinion Labs: 1% maker / 2% taker
+  - Robinhood: 0% / 0% (commission-free)
+  - Crypto Spot: 0% / 0% (synthetic, no real fees)
+  - Kraken: 0.16% maker / 0.26% taker
 - **Buys use maker rate** (limit orders, 0% for Polymarket), **sells always use taker rate** (2% for Polymarket)
 - `sell(asset_id, quantity, last_known_price=0)` — tries real price first, falls back to `last_known_price` (from exit engine's last scan), then entry price
 - `get_current_price(asset_id)` — returns real price or 0 (does NOT fall back to entry price, so stale prices don't mask failures)
 - Tracks positions, fills at real market prices
 
+### CryptoSpot Executor (CCXT)
+- Uses CCXT library (v4.5.44) for universal exchange access (113 exchanges)
+- Exchange priority chain: Kraken, Coinbase, Binance, Bybit, OKX, KuCoin, Bitget (first with API keys wins)
+- Two asset_id formats: direct spot (BTC/USDT) and synthetic probability (crypto-btc-100000:YES)
+- Price fallback chain: configured exchange, CCXT public Kraken API, CoinGecko
+- Synthetic probability: Black-Scholes log-normal model converts spot prices into implied probabilities
+- is_configured() = True always (public API price lookups work without keys)
+- Trading requires API keys set in .env (e.g., KRAKEN_API_KEY, KRAKEN_API_SECRET)
+
+### Kraken CLI Executor
+- Wraps Kraken CLI (Rust binary, v0.2.0) installed in WSL Ubuntu
+- CLI handles auth, nonce management, HMAC signing internally
+- Uses asyncio.create_subprocess_exec with explicit argument lists (no shell injection)
+- Pair mapping: BTC/USD to XBTUSD (Kraken native format), 10+ pairs mapped
+- Output: NDJSON parsed to Python dicts
+- MCP server: kraken mcp -s market,paper exposes 19 tools (10 market data, 9 paper trading) via .mcp.json
+- Public endpoints (ticker, orderbook, trades) work without API keys
+- Real trading requires Kraken API keys configured in WSL kraken CLI config
+
 ### Polymarket Price Lookup
-- Uses Gamma API: `GET gamma-api.polymarket.com/markets?condition_id={id}`
-- NOT `/markets/{id}` (returns 422 for conditionIds)
-- `outcomePrices` is a JSON string that must be parsed: `'["0.475","0.525"]'`
+- Uses Gamma API: GET gamma-api.polymarket.com/markets?condition_id={id}
+- NOT /markets/{id} (returns 422 for conditionIds)
+- outcomePrices is a JSON string that must be parsed: '["0.475","0.525"]'
 - YES price = parsed[0], NO price = 1.0 - YES price
-- Asset IDs formatted as `{conditionId}:YES` or `{conditionId}:NO`
+- Asset IDs formatted as {conditionId}:YES or {conditionId}:NO
 
 ---
 
@@ -562,6 +641,11 @@ is_configured() → bool
 | Kalshi | 0.5% | 1% | — |
 | Coinbase | 0.4% | 0.6% | — |
 | PredictIt | 5% | 5% | — |
+| Limitless | 0.5% | 1% | — |
+| Opinion Labs | 1% | 2% | — |
+| Robinhood | 0% | 0% | Commission-free |
+| Crypto Spot | 0% | 0% | Synthetic (no real fees) |
+| Kraken | 0.16% | 0.26% | CLI via WSL |
 
 - Paper executor uses separate buy/sell fee rates: buys at maker rate, sells always at taker rate
 - P&L always calculated AFTER fees (estimated 1% sell-side for unrealized)
@@ -575,6 +659,8 @@ is_configured() → bool
 | `positions.json` | `src/data/positions/` | All packages, legs, alerts (atomic write via .tmp + os.replace) |
 | `trade_journal.json` | `src/data/positions/` | Completed trade history with fees, P&L, exit triggers |
 | `insider_signals.json` | `src/data/positions/` | Insider positions, accuracy scores, movement alerts |
+| `decision_log.jsonl` | `src/data/positions/` | All trading decisions: buys, skips, triggers, AI verdicts, exits, news signals |
+| `news_cache.json` | `src/data/positions/` | News scanner state: seen headline hashes (24h), daily trade counts, market cooldowns |
 | `cache.json` | `src/data/arbitrage/` | Latest fetched events from all platforms |
 | `saved_markets.json` | `src/data/arbitrage/` | User-bookmarked matched events |
 | `manual_links.json` | `src/data/arbitrage/` | User-created manual event links |
@@ -613,6 +699,8 @@ python -m uvicorn server:app --host 127.0.0.1 --port 8500 --log-level info
 ```
 
 ## Platform Status
+
+### Adapters (data feeds)
 | Platform | Status | Events |
 |----------|--------|--------|
 | Polymarket | Working | ~100 |
@@ -624,19 +712,49 @@ python -m uvicorn server:app --host 127.0.0.1 --port 8500 --log-level info
 | CryptoSpot | Working (CoinGecko) | ~45 |
 | Opinion Labs | Needs API key (401) | 0 |
 
+### Executors (trading)
+| Platform | Key | Status | Notes |
+|----------|-----|--------|-------|
+| polymarket | polymarket | Working | CLOB + Gamma API |
+| kalshi | kalshi | Needs API key | REST API |
+| coinbase_spot + coinbase | coinbase_spot, coinbase | Needs API key | Dual-registered (adapter uses "coinbase") |
+| predictit | predictit | Needs session cookie | No official API |
+| limitless | limitless | Working (paper) | Public API price lookups |
+| opinion_labs | opinion_labs | Working (paper) | Optional API key for full access |
+| robinhood | robinhood | Working (paper) | No public price API (uses fallback_price) |
+| crypto_spot | crypto_spot | Working (paper) | CCXT, public Kraken + CoinGecko prices |
+| kraken | kraken | Working (paper) | CLI via WSL, 19 MCP tools |
+
 ## Current Status (2026-03-18)
-- Paper trading: 8 open positions, $1,425 invested, ~$441 unrealized profit (31% ROI)
+- Paper trading: 10 open positions, $1,837 invested, +$38 unrealized, +$422 realized P&L
+- 32 closed packages, 12% win rate (improving — previous 28/32 were breakeven from same-platform both-sides bug)
+- AI advisor active via Groq (Llama 3.3 70B), ~500ms per review
 - Insider tracker: 100 traders monitored, 139 markets with signals
-- Auto trader: scanning every 5 min, respecting $2K exposure limit
-- Exit engine: reassessing every 30s with 18 heuristic triggers
+- Auto trader: scanning every 5 min, directional bets, respecting $2K exposure limit, $5 min trade size
+- Exit engine: 60s interval, 18 heuristic triggers, max 3 AI reviews/tick with 2s spacing
+- News scanner: 150s interval, 8 RSS feeds, two-pass AI pipeline (headline scan → deep analysis), breaking trades execute immediately
+- Decision logging: all buys, skips, trigger fires, AI verdicts, news signals logged to `decision_log.jsonl`
 - Arbitrage scanner: 1010 events from 8 adapters
-- **Recent fixes (2026-03-18):**
-  - Split paper executor fee model: buy=maker, sell=taker (was using maker for both → 0% exit fees on Polymarket)
-  - Added `last_known_price` fallback to sell() — prevents $0 P&L on closed trades when real price unavailable
-  - `get_current_price()` returns 0 on failure instead of falling back to entry price — prevents stale price masking
-  - Trade journal recalculates exit value from per-leg data instead of stale `pkg["current_value"]`
-  - Alert deduplication in `add_alert()` — cleared 1280 stale pending alerts
-  - Wallet config: .env loading, key validation, safe config API for live trading prep
+- **Recent changes (2026-03-18):**
+  - **Multi-platform executors:** Added 5 new executors: Limitless, Opinion Labs, Robinhood, CryptoSpot (CCXT), Kraken CLI. Server now registers 10 executors total (polymarket, kalshi, coinbase_spot, coinbase, predictit, limitless, opinion_labs, robinhood, crypto_spot, kraken).
+  - **Multi-platform auto trader:** Scanner integration fixed (was broken — `scanner.scan()` returns summary counts, not opportunity objects). Now uses `scanner.get_opportunities()` for cross-platform arb + `scanner.get_events()` for all-platform directional bets. Only trades on platforms with registered executors.
+  - **CCXT crypto executor:** 7-exchange priority chain (Kraken→Coinbase→Binance→Bybit→OKX→KuCoin→Bitget), public price fallback via Kraken/CoinGecko, synthetic probability markets for price targets.
+  - **Kraken CLI:** Rust binary in WSL Ubuntu, 19 MCP tools (market data + paper trading), `.mcp.json` configured for Claude Code integration.
+  - **ITM/OTM price filter:** Skip entries < $0.15 (lottery tickets) and > $0.85 (tiny upside).
+  - **Coinbase dual registration:** Adapter uses "coinbase", executor was keyed as "coinbase_spot" — now registered under both keys.
+  - **30-minute cooldown:** Auto trader won't re-enter a market within 30 min of exiting.
+  - **Directional betting:** Auto trader now buys ONE side (cheaper = higher upside) instead of both YES+NO on same platform. Cross-platform arb still buys both sides.
+  - **Multi-provider AI advisor:** Groq → Gemini → OpenRouter chain for paper (Anthropic first for live). Replaced single-provider Anthropic-only design.
+  - **Exit rule tuning:** Target 25% (was 15%), stop -20% (was -10%), trail 12% (was 8%) — wider for directional volatility
+  - **Market selection:** Skip near-50/50 (0.42-0.58), tighter resolved filter (0.92), 3-14 day expiry sweet spot (2x), volume >100K (1.5x), conviction >0.3 (1.5x)
+  - **Alert suppression:** Noisy triggers (vol_spike, new_ath, spread_compression) suppressed without AI. Rate limit: 3 AI reviews/tick, 2s spacing. Exit engine interval 30s→60s.
+  - **Decision logging:** New `decision_log.py` records all trading decisions to JSONL for later review and iteration
+  - **News scanner:** AI-powered RSS feed monitor with two-pass pipeline. 14 RSS feeds across 4 categories. Breaking news executes immediately; normal signals queue to auto trader with 2x score boost.
+  - **Lower minimums:** MIN_TRADE_SIZE reduced from $25 to $5 for smaller initial positions
+  - **exit_value fix:** Field was never set in position_manager. Fixed.
+  - **Dashboard P&L fix:** Was using stale `unrealized_pnl` for closed packages. Now calculates from `current_value - total_cost`.
+  - Split paper executor fee model: buy=maker, sell=taker (was using maker for both)
+  - Alert deduplication in `add_alert()` — cleared 1,540 stale pending alerts
   - All 48 tests passing
 
 ## Live Trading Requirements
@@ -654,8 +772,31 @@ To switch from paper to live trading:
    - `COINBASE_ADV_API_SECRET` — API secret
 5. **PredictIt (optional):**
    - `PREDICTIT_SESSION` — session cookie (PredictIt has no official API)
-6. **AI Advisor (optional):**
-   - `ANTHROPIC_API_KEY` — for Claude exit decision review
+6. **Crypto Spot via CCXT (optional — first exchange with keys wins):**
+   - `KRAKEN_API_KEY` + `KRAKEN_API_SECRET` — Kraken (priority 1)
+   - `COINBASE_ADV_API_KEY` + `COINBASE_ADV_API_SECRET` — Coinbase (priority 2)
+   - `BINANCE_API_KEY` + `BINANCE_API_SECRET` — Binance (priority 3)
+   - `BYBIT_API_KEY` + `BYBIT_API_SECRET` — Bybit (priority 4)
+   - `OKX_API_KEY` + `OKX_API_SECRET` + `OKX_PASSPHRASE` — OKX (priority 5)
+   - `KUCOIN_API_KEY` + `KUCOIN_API_SECRET` + `KUCOIN_PASSPHRASE` — KuCoin (priority 6)
+   - `BITGET_API_KEY` + `BITGET_API_SECRET` + `BITGET_PASSPHRASE` — Bitget (priority 7)
+7. **Kraken CLI (optional):** Requires kraken CLI installed in WSL Ubuntu with API keys configured via `kraken auth`
+8. **Opinion Labs (optional):** `OPINION_LABS_API_KEY` — API key for full access
+9. **AI Advisor (optional — at least one key recommended):**
+   - `ANTHROPIC_API_KEY` — Anthropic (Claude Sonnet 4, used first in live mode)
+   - `GROQ_API_KEY` — Groq (Llama 3.3 70B, free tier)
+   - `GEMINI_API_KEY` — Google Gemini (2.0 Flash, free tier)
+   - `OPENROUTER_API_KEY` — OpenRouter (Llama 3.1 70B, pay-per-use)
+10. **News Scanner AI (optional — separate keys prevent rate limit contention):**
+   - `NEWS_ANTHROPIC_API_KEY`, `NEWS_GROQ_API_KEY`, `NEWS_GEMINI_API_KEY`, `NEWS_OPENROUTER_API_KEY`
+   - Falls back to the base AI advisor keys above if not set
 
 Run `GET /api/derivatives/config` to verify which platforms show as "configured" vs "missing".
 The system validates: paper mode flag, platform keys, .env file permissions, .gitignore coverage.
+
+## MCP Integration
+- `.mcp.json` at project root configures Kraken MCP server for Claude Code
+- Exposes 19 tools: market data (ticker, orderbook, OHLC, trades, spreads) + paper trading (init, buy, sell, balance, history)
+- Start: `wsl -d Ubuntu -- bash -c 'source $HOME/.cargo/env && kraken mcp -s market,paper'`
+- Dangerous tools (real orders, withdrawals) require `--allow-dangerous` flag and `"acknowledged": true` in args
+- To enable all services: change args to `["-s", "all"]` in `.mcp.json`

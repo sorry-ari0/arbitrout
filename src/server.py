@@ -68,9 +68,17 @@ try:
     from execution.kalshi_executor import KalshiExecutor
     from execution.coinbase_spot_executor import CoinbaseSpotExecutor
     from execution.predictit_executor import PredictItExecutor
+    from execution.limitless_executor import LimitlessExecutor
+    from execution.opinion_labs_executor import OpinionLabsExecutor
+    from execution.robinhood_executor import RobinhoodExecutor
+    from execution.crypto_spot_executor import CryptoSpotExecutor
+    from execution.kraken_cli import KrakenCLIExecutor
     from positions.trade_journal import TradeJournal
     from positions.auto_trader import AutoTrader
     from positions.insider_tracker import InsiderTracker
+    from positions.decision_log import DecisionLogger
+    from positions.news_scanner import NewsScanner
+    from positions.news_ai import NewsAI
     _POSITIONS_AVAILABLE = True
 except (ImportError, SyntaxError) as _pos_err:
     logger.warning("Position system not available: %s", _pos_err)
@@ -175,6 +183,8 @@ async def lifespan(app: FastAPI):
         scan_task = asyncio.create_task(_auto_scan_loop())
     # Init Position system
     _exit_task = None
+    _news_scanner = None
+    news_ai = None
     if _POSITIONS_AVAILABLE:
         try:
             executors = {}
@@ -183,9 +193,21 @@ async def lifespan(app: FastAPI):
             kalshi_exec = KalshiExecutor()
             if kalshi_exec.is_configured(): executors["kalshi"] = kalshi_exec
             coinbase_exec = CoinbaseSpotExecutor()
-            if coinbase_exec.is_configured(): executors["coinbase_spot"] = coinbase_exec
+            if coinbase_exec.is_configured():
+                executors["coinbase_spot"] = coinbase_exec
+                executors["coinbase"] = coinbase_exec  # Adapter uses "coinbase" as platform name
             predictit_exec = PredictItExecutor()
             if predictit_exec.is_configured(): executors["predictit"] = predictit_exec
+            limitless_exec = LimitlessExecutor()
+            if limitless_exec.is_configured(): executors["limitless"] = limitless_exec
+            opinion_exec = OpinionLabsExecutor()
+            if opinion_exec.is_configured(): executors["opinion_labs"] = opinion_exec
+            robinhood_exec = RobinhoodExecutor()
+            if robinhood_exec.is_configured(): executors["robinhood"] = robinhood_exec
+            crypto_spot_exec = CryptoSpotExecutor()
+            if crypto_spot_exec.is_configured(): executors["crypto_spot"] = crypto_spot_exec
+            kraken_cli_exec = KrakenCLIExecutor()
+            if kraken_cli_exec.is_configured(): executors["kraken"] = kraken_cli_exec
 
             if is_paper_mode():
                 # Wrap all executors in PaperExecutor
@@ -232,16 +254,30 @@ async def lifespan(app: FastAPI):
                 rebuilt = sum(len(e.positions) for e in executors.values() if hasattr(e, 'positions'))
                 logger.info("Rebuilt %d paper positions from %d open packages", rebuilt, len(pm.list_packages("open")))
 
-            ai = AIAdvisor() if os.environ.get("ANTHROPIC_API_KEY") else None
-            exit_engine = ExitEngine(pm, ai_advisor=ai)
+            # AI advisor always created — checks for API keys dynamically
+            # Live: Anthropic → Groq → Gemini → OpenRouter
+            # Paper: Groq → Gemini → OpenRouter (skip Anthropic to save costs)
+            ai = AIAdvisor(paper_mode=is_paper_mode())
+            decision_log = DecisionLogger()
+            exit_engine = ExitEngine(pm, ai_advisor=ai, decision_logger=decision_log)
             exit_engine.start()
             # Start auto trader (works with or without arbitrage scanner)
             arb_scanner = get_scanner() if _ARBITRAGE_AVAILABLE else None
             insider = InsiderTracker(data_dir=DATA_DIR / "positions")
             insider.start()
-            _auto_trader = AutoTrader(pm, scanner=arb_scanner, insider_tracker=insider)
+            _auto_trader = AutoTrader(pm, scanner=arb_scanner, insider_tracker=insider, decision_logger=decision_log)
             _auto_trader.start()
             logger.info("Auto trader started — will scan for opportunities every 5 min")
+            # News scanner — AI-powered RSS headline analysis + Scrapling deep dive
+            news_ai = NewsAI(paper_mode=is_paper_mode())
+            _news_scanner = NewsScanner(
+                position_manager=pm,
+                news_ai=news_ai,
+                auto_trader=_auto_trader,
+                decision_logger=decision_log,
+            )
+            _news_scanner.start()
+            logger.info("News scanner started — will scan RSS feeds every 2.5 min")
             init_position_system(pm, exit_engine, ai, trade_journal=journal, auto_trader=_auto_trader, insider_tracker=insider)
             _exit_task = True
             logger.info("Position system initialized with %d executors", len(executors))
@@ -256,6 +292,10 @@ async def lifespan(app: FastAPI):
             exit_engine.stop()
             if _auto_trader:
                 _auto_trader.stop()
+            if _news_scanner:
+                _news_scanner.stop()
+            if news_ai:
+                await news_ai.close()
             if insider:
                 insider.stop()
         except Exception:

@@ -15,12 +15,22 @@ MAKER_FEE_RATES = {
     "kalshi": 0.005,          # 0.5% maker
     "coinbase_spot": 0.004,   # 0.4% maker
     "predictit": 0.05,        # 5% on profits (simplified)
+    "limitless": 0.005,       # ~0.5% estimated
+    "opinion_labs": 0.01,     # ~1% estimated
+    "robinhood": 0.0,         # 0% (Robinhood is commission-free)
+    "crypto_spot": 0.0,       # Synthetic — no real fees
+    "kraken": 0.0016,         # 0.16% maker
 }
 TAKER_FEE_RATES = {
     "polymarket": 0.02,       # ~2% for market orders
     "kalshi": 0.01,           # 1% taker
     "coinbase_spot": 0.006,   # 0.6% taker
     "predictit": 0.05,        # 5% on profits
+    "limitless": 0.01,        # ~1% estimated
+    "opinion_labs": 0.02,     # ~2% estimated
+    "robinhood": 0.0,         # 0% commission-free
+    "crypto_spot": 0.0,       # Synthetic — no real fees
+    "kraken": 0.0026,         # 0.26% taker
 }
 DEFAULT_FEE_RATE = 0.02  # 2% default (taker)
 
