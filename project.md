@@ -766,6 +766,8 @@ python -m uvicorn server:app --host 127.0.0.1 --port 8500 --log-level info
   - **News scanner:** AI-powered RSS feed monitor with two-pass pipeline. 14 RSS feeds. Breaking news executes immediately.
   - **Event-driven auto trader:** Auto trader now wakes within seconds of each 60s arb scan via `asyncio.Event` notification (was: independent 5-min polling loop). Reads cached scanner results instead of triggering redundant scans. Trade execution latency dropped from ~5 minutes to ~1-2 seconds.
   - **Market feed fix:** WebSocket `init` and `scan_result` messages now handled by frontend. Auto-scan loop broadcasts feed + opportunities to all WS clients after each scan.
+  - **Synthetic derivative validation:** Direction-aware scenario analysis (accounts for above/below/between/dip). Rejects invalid synthetics: same-direction doubling (both legs bet same move), loss probability >40%, strike gap >10%. Added "dip/sink/crash/plunge/decline" to below-direction keywords.
+  - **PredictIt contract matching fix:** Stopped stripping contract names from "Market: Contract" titles. Previously "Who will win: Fidesz" and "Who will win: MSZP" both became "Who will win" and false-matched external events.
   - **Decision logging:** All trading decisions to JSONL.
   - Split paper executor fee model: buy=maker, sell=taker
   - Alert deduplication, exit_value fix, dashboard P&L fix
