@@ -24,6 +24,8 @@ MAX_TRADE_SIZE = 200.0       # Max $200 per trade
 MIN_TRADE_SIZE = 5.0         # Min $5 per trade (supports small live accounts)
 MAX_CONCURRENT = 7           # Max 7 open packages (reserve 3 slots for news-driven trades)
 MAX_TOTAL_EXPOSURE = 1400.0  # Max $1400 for auto trader (reserve $600 for news)
+PORTFOLIO_EXPOSURE_CAP = 0.40  # Kelly portfolio rule: never exceed 40% of total bankroll
+TOTAL_BANKROLL = 2000.0      # Total bankroll (auto_trader $1400 + news $600)
 SCAN_INTERVAL = 300          # 5 minutes between scans
 MIN_SPREAD_PCT = 3.0         # Minimum 3% spread AFTER fees (lower threshold with limit orders)
 # Polymarket: 0% maker fee on limit orders. Use limit orders (maker) to enter,
@@ -113,7 +115,19 @@ class AutoTrader:
                 self.dlog.log_scan_skip("max_exposure", exposure=round(total_exposure, 2))
             return
 
-        remaining_budget = MAX_TOTAL_EXPOSURE - total_exposure
+        # Kelly portfolio rule: total exposure across ALL positions must not exceed
+        # 40% of bankroll. This prevents over-concentration even when individual
+        # Kelly fractions are correct. (Research: reduces 80% drawdown probability
+        # from 1-in-5 to 1-in-213 at 30% Kelly, we use 40% as generous cap.)
+        kelly_cap = TOTAL_BANKROLL * PORTFOLIO_EXPOSURE_CAP
+        if total_exposure >= kelly_cap:
+            logger.info("Auto trader: at Kelly portfolio cap ($%.2f / $%.2f), skipping",
+                        total_exposure, kelly_cap)
+            if self.dlog:
+                self.dlog.log_scan_skip("kelly_portfolio_cap", exposure=round(total_exposure, 2))
+            return
+
+        remaining_budget = min(MAX_TOTAL_EXPOSURE - total_exposure, kelly_cap - total_exposure)
         remaining_slots = MAX_CONCURRENT - len(open_pkgs)
         open_market_ids = self._get_open_market_ids(open_pkgs)
 
@@ -225,6 +239,20 @@ class AutoTrader:
                 score *= 2.0
             if is_near_expiry:
                 score *= 1.5
+
+            # Favorite-longshot bias (research-validated edge):
+            # - Contracts >$0.80: favorites win MORE than implied → boost
+            # - Contracts $0.15-$0.30: longshots lose MORE than implied → penalize
+            # - On Kalshi, buyers of contracts <$0.10 lose >60% of their money
+            favored = min(buy_yes_price, buy_no_price) if buy_no_price > 0 else buy_yes_price
+            if favored >= 0.80:
+                score *= 1.8  # Strong favorite — historically wins more than price implies
+            elif favored >= 0.70:
+                score *= 1.4  # Moderate favorite
+            elif favored <= 0.20:
+                score *= 0.4  # Longshot penalty — these lose far more than implied
+            elif favored <= 0.30:
+                score *= 0.7  # Mild longshot penalty
 
             # Insider signal boost: if whales/insiders have positions, boost score
             insider_signal = None
@@ -447,11 +475,28 @@ class AutoTrader:
                                                        side=side, price=round(side_price, 4))
                     continue
 
-                # Position sizing by conviction: higher implied probability = larger size
-                # 0.50 → 50% of max, 0.80 → 100% of max
-                conviction_factor = min(1.0, max(0.4, (side_price - 0.3) / 0.5))
-                sized_trade = round(trade_size * conviction_factor, 2)
-                sized_trade = max(MIN_TRADE_SIZE, sized_trade)
+                # Quarter Kelly position sizing (research-validated: retains 56% of
+                # max growth rate, ~3% chance of halving bankroll)
+                #
+                # Kelly f* = (b * p_true - (1 - p_true)) / b
+                # where b = net odds = (1 - market_price) / market_price
+                #       p_true = our edge estimate = market_price + edge_bonus
+                #
+                # Edge bonus: +5% for favorites (>0.70), +2% base edge assumption
+                edge_bonus = 0.02  # Base 2% edge assumption (we select favorable markets)
+                if side_price >= 0.70:
+                    edge_bonus = 0.05  # Favorite-longshot bias gives us more edge
+                elif side_price <= 0.30:
+                    edge_bonus = 0.01  # Less confident on longshots
+
+                p_true = min(0.95, side_price + edge_bonus)
+                net_odds = (1.0 - side_price) / side_price if side_price > 0 else 1.0
+                kelly_full = (net_odds * p_true - (1.0 - p_true)) / net_odds if net_odds > 0 else 0
+                kelly_quarter = max(0.0, kelly_full * 0.25)
+
+                # Apply Kelly fraction to remaining budget, capped at MAX_TRADE_SIZE
+                sized_trade = round(min(MAX_TRADE_SIZE, remaining_budget * kelly_quarter), 2)
+                sized_trade = max(MIN_TRADE_SIZE, min(sized_trade, trade_size))
 
                 pkg["legs"].append(create_leg(
                     platform=buy_yes_platform if side == "YES" else buy_no_platform,

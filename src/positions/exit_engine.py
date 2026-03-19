@@ -41,6 +41,10 @@ T_PLATFORM_ERROR = 16
 T_LIQUIDITY_GAP = 17
 T_FEE_SPIKE = 18
 
+# Category: Research-based (19-20)
+T_STALE_POSITION = 19        # Triple barrier time barrier: exit after N days with no movement
+T_LONGSHOT_DECAY = 20        # Favorite-longshot: longshots ($<0.30) decay faster than implied
+
 
 def evaluate_heuristics(pkg: dict) -> list[dict]:
     """Evaluate all 18 heuristic triggers against a package. Returns list of fired triggers."""
@@ -192,6 +196,30 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
     # Placeholder — requires fee monitoring
     pass
 
+    # ── 19: Stale Position (Triple Barrier time barrier) ──────────────────
+    # Research: exit after 7 days if position hasn't moved significantly.
+    # Prevents capital from being tied up in dead markets.
+    created_at = pkg.get("created_at", 0)
+    if created_at:
+        days_open = (time.time() - created_at) / 86400
+        if days_open >= 7 and abs(pnl_pct) < 5:
+            triggers.append({"trigger_id": T_STALE_POSITION, "name": "stale_position",
+                "details": f"Position open {days_open:.1f} days with only {pnl_pct:+.1f}% P&L — capital not working",
+                "action": "review", "safety_override": False})
+
+    # ── 20: Longshot Decay ────────────────────────────────────────────────
+    # Research (favorite-longshot bias): contracts bought <$0.30 decay faster
+    # than implied. If a longshot hasn't improved after 3 days, exit early.
+    for leg in legs:
+        entry = leg.get("entry_price", 0)
+        current = leg.get("current_price", 0)
+        if entry > 0 and entry < 0.30 and current > 0:
+            if created_at and (time.time() - created_at) / 86400 >= 3:
+                if current <= entry * 1.1:  # Hasn't moved up more than 10%
+                    triggers.append({"trigger_id": T_LONGSHOT_DECAY, "name": "longshot_decay",
+                        "details": f"Longshot leg {leg['leg_id']} (entry ${entry:.2f}, now ${current:.2f}) — no improvement after 3+ days",
+                        "action": "review", "safety_override": False})
+
     return triggers
 
 
@@ -236,6 +264,8 @@ class ExitEngine:
         "spread_compression": 1800,
         "negative_drift": 900,   # 15 min — more urgent
         "correlation_break": 600,
+        "stale_position": 86400, # 24 hours — daily check is enough
+        "longshot_decay": 43200, # 12 hours — check twice daily
     }
     # No cooldown: target_hit, stop_loss, trailing_stop, safety overrides
 
@@ -424,7 +454,8 @@ class ExitEngine:
                                     await self.pm.exit_leg(pkg["id"], leg["leg_id"],
                                         trigger=f"auto:{trigger['name']}")
                                     break
-                        elif trigger["name"] in ("correlation_break", "time_decay", "negative_drift", "platform_error"):
+                        elif trigger["name"] in ("correlation_break", "time_decay", "negative_drift",
+                                                   "platform_error", "stale_position", "longshot_decay"):
                             # Only escalate truly actionable ambiguous triggers
                             self.pm.add_alert(pkg["id"], trigger["trigger_id"], trigger["name"],
                                 {"details": trigger["details"], "action": trigger["action"]})
