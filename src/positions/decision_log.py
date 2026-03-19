@@ -171,6 +171,43 @@ class DecisionLogger:
             "deep_dive_result": deep_dive_result,
         })
 
+    # ── Arb Scanner decisions ─────────────────────────────────────────
+
+    def log_arb_scan_summary(self, events_count: int, matched_count: int,
+                              multi_platform: int, opportunities_count: int,
+                              elapsed_ms: int, platform_counts: dict):
+        """Log each arb scan cycle summary for monitoring."""
+        self._write({
+            "type": "arb_scan_summary",
+            "events_count": events_count,
+            "matched_count": matched_count,
+            "multi_platform_matches": multi_platform,
+            "opportunities_count": opportunities_count,
+            "elapsed_ms": elapsed_ms,
+            "platform_counts": platform_counts,
+        })
+
+    def log_opportunity_detected(self, title: str, strategy_type: str,
+                                  spread_pct: float, platforms: list[str],
+                                  yes_price: float, no_price: float,
+                                  is_synthetic: bool, volume: int,
+                                  event_ids: list[str]):
+        """Log every opportunity found by arb scanner (for hindsight analysis)."""
+        self._write({
+            "type": "opportunity_detected",
+            "title": title[:120],
+            "strategy_type": strategy_type,
+            "spread_pct": round(spread_pct, 2),
+            "platforms": platforms,
+            "yes_price": round(yes_price, 4),
+            "no_price": round(no_price, 4),
+            "is_synthetic": is_synthetic,
+            "volume": volume,
+            "event_ids": event_ids,
+        })
+
+    # ── News Scanner decisions ─────────────────────────────────────────
+
     def log_news_trade(self, pkg_id: str, title: str, market: str,
                        side: str, confidence: int, urgency: str,
                        size: float, reasoning: str):

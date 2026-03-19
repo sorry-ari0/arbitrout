@@ -611,8 +611,9 @@ def compute_feed(events: list[NormalizedEvent], max_items: int = 50) -> list[dic
 class ArbitrageScanner:
     """Orchestrates the full scan: fetch -> match -> arbitrage."""
 
-    def __init__(self, registry: AdapterRegistry):
+    def __init__(self, registry: AdapterRegistry, decision_logger=None):
         self.registry = registry
+        self._dlog = decision_logger
         self._last_events: list[NormalizedEvent] = []
         self._last_matched: list[MatchedEvent] = []
         self._last_opportunities: list[ArbitrageOpportunity] = []
@@ -622,6 +623,8 @@ class ArbitrageScanner:
 
     async def scan(self) -> dict:
         """Run a full scan cycle. Returns summary."""
+        scan_start = time.time()
+
         # 1. Fetch from all platforms
         events = await self.registry.fetch_all()
         with self._lock:
@@ -648,10 +651,46 @@ class ArbitrageScanner:
         # 5. Cache to disk
         self._save_cache(events)
 
+        multi_platform = sum(1 for m in matched if m.platform_count >= 2)
+        elapsed_ms = int((time.time() - scan_start) * 1000)
+
+        # 6. Log scan summary and all detected opportunities
+        if self._dlog:
+            # Platform breakdown for monitoring
+            platform_counts: dict[str, int] = {}
+            for e in events:
+                platform_counts[e.platform] = platform_counts.get(e.platform, 0) + 1
+
+            self._dlog.log_arb_scan_summary(
+                events_count=len(events),
+                matched_count=len(matched),
+                multi_platform=multi_platform,
+                opportunities_count=len(opportunities),
+                elapsed_ms=elapsed_ms,
+                platform_counts=platform_counts,
+            )
+
+            # Log every opportunity detected (for hindsight analysis)
+            for opp in opportunities:
+                self._dlog.log_opportunity_detected(
+                    title=opp.matched_event.canonical_title,
+                    strategy_type="synthetic_derivative" if opp.is_synthetic else "cross_platform_arb",
+                    spread_pct=opp.profit_pct,
+                    platforms=[opp.buy_yes_platform, opp.buy_no_platform],
+                    yes_price=opp.buy_yes_price,
+                    no_price=opp.buy_no_price,
+                    is_synthetic=opp.is_synthetic,
+                    volume=opp.combined_volume,
+                    event_ids=[opp.buy_yes_event_id, opp.buy_no_event_id],
+                )
+
+        logger.info("Scan complete: %d events, %d matched (%d multi-platform), %d opportunities, %dms",
+                     len(events), len(matched), multi_platform, len(opportunities), elapsed_ms)
+
         return {
             "events_count": len(events),
             "matched_count": len(matched),
-            "multi_platform_matches": sum(1 for m in matched if m.platform_count >= 2),
+            "multi_platform_matches": multi_platform,
             "opportunities_count": len(opportunities),
             "feed_changes": len(feed),
             "scan_time": self._last_scan_time,

@@ -183,6 +183,8 @@ async def lifespan(app: FastAPI):
     # Start portfolio scheduler
     from portfolio_manager import start_scheduler
     scheduler = start_scheduler()
+    # Create decision logger early so arb scanner can use it too
+    decision_log = DecisionLogger() if _POSITIONS_AVAILABLE else None
     # Init Arbitrage subsystem
     if _ARBITRAGE_AVAILABLE:
         arb_registry = AdapterRegistry()
@@ -196,7 +198,7 @@ async def lifespan(app: FastAPI):
         arb_registry.register(RobinhoodAdapter())
         arb_registry.register(CoinbaseAdapter())
         arb_registry.register(CryptoSpotAdapter())
-        init_scanner(arb_registry)
+        init_scanner(arb_registry, decision_logger=decision_log)
         (DATA_DIR / "arbitrage").mkdir(exist_ok=True)
         logger.info("Arbitrage subsystem initialized with %d adapters", len(arb_registry.list_platforms()))
         # Start auto-scan background task
@@ -278,7 +280,8 @@ async def lifespan(app: FastAPI):
             # Live: Anthropic → Groq → Gemini → OpenRouter
             # Paper: Groq → Gemini → OpenRouter (skip Anthropic to save costs)
             ai = AIAdvisor(paper_mode=is_paper_mode())
-            decision_log = DecisionLogger()
+            if decision_log is None:
+                decision_log = DecisionLogger()
             exit_engine = ExitEngine(pm, ai_advisor=ai, decision_logger=decision_log)
             exit_engine.start()
             # Start auto trader (works with or without arbitrage scanner)
