@@ -84,6 +84,24 @@ except (ImportError, SyntaxError) as _pos_err:
     logger.warning("Position system not available: %s", _pos_err)
     _POSITIONS_AVAILABLE = False
 
+# --- Political synthetic analysis ---
+try:
+    from political.analyzer import PoliticalAnalyzer
+    from political.router import router as political_router, init_political_router
+    _POLITICAL_AVAILABLE = True
+except (ImportError, SyntaxError) as _pol_err:
+    logger.warning("Political analysis not available: %s", _pol_err)
+    _POLITICAL_AVAILABLE = False
+
+# --- Eval logger ---
+try:
+    from eval_logger import EvalLogger
+    from eval_router import router as eval_router_mod, init_eval_router
+    _EVAL_AVAILABLE = True
+except (ImportError, SyntaxError) as _eval_err:
+    logger.warning("Eval logger not available: %s", _eval_err)
+    _EVAL_AVAILABLE = False
+
 # --- C1 fix: API Key Authentication ---
 API_KEY = os.environ.get("LOBSTERMINAL_API_KEY", "dev-local-only")
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -309,9 +327,53 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error("Position system init failed: %s", e)
 
+    # Political synthetic analyzer
+    _political_analyzer = None
+    if _POLITICAL_AVAILABLE and _ARBITRAGE_AVAILABLE:
+        try:
+            _political_analyzer = PoliticalAnalyzer(
+                scanner=arb_scanner if _ARBITRAGE_AVAILABLE else None,
+                ai_advisor=ai if _POSITIONS_AVAILABLE else None,
+                decision_logger=decision_log if _POSITIONS_AVAILABLE else None,
+                auto_trader=_auto_trader if _POSITIONS_AVAILABLE else None,
+            )
+            _political_analyzer.start()
+            if _POSITIONS_AVAILABLE and _auto_trader:
+                _auto_trader.set_political_analyzer(_political_analyzer)
+            init_political_router(_political_analyzer)
+            logger.info("Political analyzer started (15-min cycle)")
+        except Exception as e:
+            logger.warning("Political analyzer init failed: %s", e)
+
+    # Eval logger for hindsight analysis
+    _eval_log = None
+    _backfill_task = None
+    if _EVAL_AVAILABLE:
+        _eval_log = EvalLogger()
+        init_eval_router(_eval_log)
+        if _POLITICAL_AVAILABLE and _political_analyzer:
+            from political.router import set_eval_logger
+            set_eval_logger(_eval_log)
+        # Start hourly backfill task for skipped opportunity resolution checks
+        async def _backfill_loop():
+            while True:
+                await asyncio.sleep(3600)  # 1 hour
+                try:
+                    unresolved = _eval_log.get_unresolved_skips()
+                    if unresolved:
+                        logger.info("Eval backfill: %d unresolved skipped opportunities", len(unresolved))
+                except Exception as e:
+                    logger.warning("Eval backfill error: %s", e)
+        _backfill_task = asyncio.create_task(_backfill_loop())
+        logger.info("Eval logger initialized with hourly backfill")
+
     logger.info("Lobsterminal started on port 8500")
     yield
     # Shutdown
+    if _political_analyzer:
+        _political_analyzer.stop()
+    if _backfill_task:
+        _backfill_task.cancel()
     if _POSITIONS_AVAILABLE and _exit_task:
         try:
             exit_engine.stop()
@@ -370,6 +432,12 @@ if _ARBITRAGE_AVAILABLE:
 
 if _POSITIONS_AVAILABLE:
     app.include_router(position_router)
+
+if _POLITICAL_AVAILABLE:
+    app.include_router(political_router)
+
+if _EVAL_AVAILABLE:
+    app.include_router(eval_router_mod)
 
 # --- Research API Routes ---
 try:

@@ -45,6 +45,9 @@ T_FEE_SPIKE = 18
 T_STALE_POSITION = 19        # Triple barrier time barrier: exit after N days with no movement
 T_LONGSHOT_DECAY = 20        # Favorite-longshot: longshots ($<0.30) decay faster than implied
 
+# Category: Political (21)
+T_POLITICAL_EVENT_RESOLVED = 21  # Contract in cluster settled → evaluate all legs
+
 
 def evaluate_heuristics(pkg: dict) -> list[dict]:
     """Evaluate all 18 heuristic triggers against a package. Returns list of fired triggers."""
@@ -107,7 +110,7 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
             "action": "tighten_trail", "safety_override": False})
 
     # ── 6: Correlation Break ────────────────────────────────────────────────
-    if strategy in ("cross_platform_arb", "synthetic_derivative") and len(legs) >= 2:
+    if strategy in ("cross_platform_arb", "synthetic_derivative", "political_synthetic") and len(legs) >= 2:
         yes_legs = [l for l in legs if "yes" in l.get("type", "").lower()]
         no_legs = [l for l in legs if "no" in l.get("type", "").lower()]
         if yes_legs and no_legs:
@@ -120,7 +123,7 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
                     "action": "review", "safety_override": False})
 
     # ── 7: Spread Inversion (SAFETY) ────────────────────────────────────────
-    if strategy in ("cross_platform_arb", "synthetic_derivative") and len(legs) >= 2:
+    if strategy in ("cross_platform_arb", "synthetic_derivative", "political_synthetic") and len(legs) >= 2:
         yes_price = sum(l.get("current_price", 0) for l in legs if "yes" in l.get("type", "").lower())
         no_price = sum(l.get("current_price", 0) for l in legs if "no" in l.get("type", "").lower())
         combined = yes_price + no_price
@@ -130,7 +133,7 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
                 "action": "immediate_exit", "safety_override": True})
 
     # ── 8: Spread Compression ───────────────────────────────────────────────
-    if strategy in ("cross_platform_arb", "synthetic_derivative") and len(legs) >= 2:
+    if strategy in ("cross_platform_arb", "synthetic_derivative", "political_synthetic") and len(legs) >= 2:
         yes_price = sum(l.get("current_price", 0) for l in legs if "yes" in l.get("type", "").lower())
         no_price = sum(l.get("current_price", 0) for l in legs if "no" in l.get("type", "").lower())
         spread = 1.0 - (yes_price + no_price)
@@ -219,6 +222,17 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
                     triggers.append({"trigger_id": T_LONGSHOT_DECAY, "name": "longshot_decay",
                         "details": f"Longshot leg {leg['leg_id']} (entry ${entry:.2f}, now ${current:.2f}) — no improvement after 3+ days",
                         "action": "review", "safety_override": False})
+
+    # ── 21: Political Event Resolved ─────────────────────────────────────
+    if strategy == "political_synthetic":
+        for leg in legs:
+            cur = leg.get("current_price", 0)
+            if cur <= 0.01 or cur >= 0.99:
+                triggers.append({"trigger_id": T_POLITICAL_EVENT_RESOLVED,
+                    "name": "political_event_resolved",
+                    "details": f"Leg {leg['leg_id']} resolved (price={cur:.4f})",
+                    "action": "immediate_exit", "safety_override": True})
+                break
 
     return triggers
 
