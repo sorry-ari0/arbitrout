@@ -7,6 +7,7 @@ Rate limited to max_calls_per_min across all providers.
 import asyncio
 import logging
 import os
+import random
 import re
 import time
 
@@ -162,16 +163,18 @@ TRIGGERED EXIT PROPOSALS:
 For each triggered rule, respond with ONLY the trigger name and your verdict. One line per trigger. No preamble, no explanation, no numbering.
 
 FORMAT (use ONLY the trigger name before the colon):
-trigger_name: APPROVE
-trigger_name: MODIFY <new_value>
 trigger_name: REJECT <short reason>
+trigger_name: MODIFY <new_value>
+trigger_name: APPROVE
 
 EXAMPLE OUTPUT (for triggers named trailing_stop and time_decay):
-trailing_stop: APPROVE
 time_decay: REJECT position has 5 days left and P&L is only -1%
+trailing_stop: REJECT drawdown is only 8%, normal volatility
 
 VERDICT RULES:
-- APPROVE = execute the exit. USE THIS when the trigger condition is genuinely met AND the position should close.
+- REJECT = the trigger fired but the position should stay open. THIS IS YOUR DEFAULT. Most triggers should be rejected.
+- MODIFY = adjust parameter (within bounds). Use sparingly.
+- APPROVE = execute the exit. USE THIS ONLY when the trigger condition is genuinely met AND the position should close.
 - MODIFY = adjust parameter (within bounds). Use sparingly.
 - REJECT = the trigger fired but the position should stay open.
 
@@ -192,6 +195,7 @@ GUIDELINES:
 - stale_position: REJECT if P&L is between -10% and +10% — the position may still be developing. APPROVE only if truly stagnant (>10 days, <2% absolute move).
 - longshot_decay: APPROVE only if the position has lost >30% of its entry value.
 - new_ath, vol_spike, spread_compression: REJECT — these are informational, not actionable.
+- ANY trigger within 6 hours of expiry: REJECT. Prediction markets exhibit maximum gamma near settlement — the final hours contain 50%+ of total price movement. Exiting during this period forfeits the highest-value window. The ONLY exception is spread_inversion (safety override, handled automatically).
 Do NOT include trigger numbers, parentheses, reasoning lines, or any text other than the verdict lines."""
 
     # Pattern to detect a valid verdict line: the part after the colon must
@@ -389,13 +393,13 @@ Review exit triggers for {len(work)} packages below. For each package, provide v
 
 FORMAT — repeat the package marker, then one verdict per trigger:
 [PKG:package_id]
-trigger_name: APPROVE
 trigger_name: REJECT <short reason>
+trigger_name: APPROVE
 
 VERDICT RULES:
-- APPROVE = execute the exit when the trigger condition is genuinely met AND the position should close.
+- REJECT = the trigger fired but the position should stay open. THIS IS YOUR DEFAULT.
 - MODIFY <new_value> = adjust parameter within bounds.
-- REJECT = the trigger fired but the position should stay open.
+- APPROVE = execute the exit ONLY when genuinely warranted.
 
 CRITICAL — PERFORMANCE DATA: Every automated exit lost money (17 exits, 0 wins, -$143). Default is REJECT.
 
@@ -408,6 +412,7 @@ GUIDELINES:
 - stale_position: REJECT if P&L between -10% and +10%. APPROVE only if >10 days and <2% move.
 - longshot_decay: APPROVE only if position lost >30% of entry value.
 - new_ath, vol_spike, spread_compression: REJECT — informational only.
+- ANY trigger within 6 hours of expiry: REJECT (max gamma near settlement, exiting forfeits highest-value window).
 Do NOT include reasoning, just verdict lines grouped by package."""
 
     def _parse_batched_response(self, text: str, pkg_ids: list[str]) -> dict[str, dict]:
