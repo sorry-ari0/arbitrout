@@ -431,7 +431,12 @@ def find_arbitrage(matched: list[MatchedEvent],
         if match.platform_count < 2:
             continue
 
-        markets = match.markets
+        # Filter out zero-price markets (closed/no liquidity)
+        markets = [m for m in match.markets
+                   if not (m.yes_price == 0 and m.no_price == 0)]
+        if len(markets) < 2:
+            continue
+
         is_synthetic = not _markets_have_same_target(markets)
         combined_vol = sum(m.volume for m in markets)
 
