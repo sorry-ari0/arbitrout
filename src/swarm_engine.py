@@ -5,7 +5,11 @@ Flow:
     1. User POSTs a free-text prompt to /api/generate-asset/screen
     2. intent_parser() asks a local Ollama LLM to extract structured screening
        rules from the prompt.
-    3. swarm_evaluator() filters a 103-stock mock universe against those rules.
+    3. swarm_evaluator() filters against real fundamentals data via 4-path fallback:
+       Path 1: FMP screener (all US stocks, needs API key)
+       Path 2: S&P 500 fundamentals cache (yfinance/Yahoo v8 API)
+       Path 3: Full universe cache (9,920+ SEC EDGAR tickers, progressively fetched)
+       Path 4: Mock universe (~350 stocks, last resort)
     4. The matching tickers, parsed rules, and counts are returned as JSON.
 """
 
@@ -33,7 +37,7 @@ except ImportError:
 logger = logging.getLogger("swarm_engine")
 
 # ---------------------------------------------------------------------------
-# Mock universe — 83 real tickers with synthetic fundamentals
+# Mock universe — ~200 real tickers with synthetic fundamentals
 # ---------------------------------------------------------------------------
 
 MOCK_UNIVERSE: dict[str, dict[str, Any]] = {
@@ -106,13 +110,13 @@ MOCK_UNIVERSE: dict[str, dict[str, Any]] = {
     "PANW":  {"market_cap": 110,  "fcf": 3200,   "debt_to_equity": 1.85, "sector": "Technology",      "revenue_growth": 19.8,  "industry": "Software", "pe_ratio": 20, "roe": 14},
 
     # ── Ad-tech / Gaming ──────────────────────────────────────────────────
-    "TTD":   {"market_cap": 48,   "fcf": 600,    "debt_to_equity": 0.07, "sector": "Technology",      "revenue_growth": 23.3,  "industry": "Software"},
-    "RBLX":  {"market_cap": 30,   "fcf": -200,   "debt_to_equity": 2.10, "sector": "Communication Services","revenue_growth": 25.0, "industry": "Electronic Gaming"},
-    "U":     {"market_cap": 14,   "fcf": -180,   "debt_to_equity": 1.40, "sector": "Technology",      "revenue_growth": -2.5,  "industry": "Software"},
+    "TTD":   {"market_cap": 48,   "fcf": 600,    "debt_to_equity": 0.07, "sector": "Technology",      "revenue_growth": 23.3,  "industry": "Software", "pe_ratio": 45, "roe": 20},
+    "RBLX":  {"market_cap": 30,   "fcf": -200,   "debt_to_equity": 2.10, "sector": "Communication Services","revenue_growth": 25.0, "industry": "Electronic Gaming", "pe_ratio": 0, "roe": -15},
+    "U":     {"market_cap": 14,   "fcf": -180,   "debt_to_equity": 1.40, "sector": "Technology",      "revenue_growth": -2.5,  "industry": "Software", "pe_ratio": 0, "roe": -8},
 
     # ── Fintech / Consumer Finance ────────────────────────────────────────
-    "SOFI":  {"market_cap": 12,   "fcf": 350,    "debt_to_equity": 0.72, "sector": "Financial Services","revenue_growth": 34.5, "industry": "Credit Services"},
-    "HOOD":  {"market_cap": 20,   "fcf": 280,    "debt_to_equity": 0.31, "sector": "Financial Services","revenue_growth": 29.4, "industry": "Capital Markets"},
+    "SOFI":  {"market_cap": 12,   "fcf": 350,    "debt_to_equity": 0.72, "sector": "Financial Services","revenue_growth": 34.5, "industry": "Credit Services", "pe_ratio": 28, "roe": 6},
+    "HOOD":  {"market_cap": 20,   "fcf": 280,    "debt_to_equity": 0.31, "sector": "Financial Services","revenue_growth": 29.4, "industry": "Capital Markets", "pe_ratio": 35, "roe": 10},
 
     # ── EV ────────────────────────────────────────────────────────────────
     "RIVN":  {"market_cap": 15,   "fcf": -5400,  "debt_to_equity": 0.78, "sector": "Consumer Cyclical","revenue_growth": 167.4, "industry": "Auto Manufacturers"},
@@ -120,21 +124,21 @@ MOCK_UNIVERSE: dict[str, dict[str, Any]] = {
     "NIO":   {"market_cap": 10,   "fcf": -3200,  "debt_to_equity": 1.02, "sector": "Consumer Cyclical","revenue_growth": 12.9,  "industry": "Auto Manufacturers"},
 
     # --- Manufacturing / Industrials (Small-Mid Cap) ---
-    "RBC":   {"market_cap": 8.5,  "fcf": 250,    "debt_to_equity": 0.4,  "sector": "Industrials",     "revenue_growth": 8.2,   "industry": "Specialty Industrial Machinery"},
-    "GGG":   {"market_cap": 3.8,  "fcf": 120,    "debt_to_equity": 0.6,  "sector": "Industrials",     "revenue_growth": 5.1,   "industry": "Specialty Industrial Machinery"},
-    "AOS":   {"market_cap": 4.5,  "fcf": 180,    "debt_to_equity": 0.3,  "sector": "Industrials",     "revenue_growth": 6.4,   "industry": "Specialty Industrial Machinery"},
-    "GNRC":  {"market_cap": 7.2,  "fcf": 200,    "debt_to_equity": 1.1,  "sector": "Industrials",     "revenue_growth": -5.3,  "industry": "Specialty Industrial Machinery"},
-    "MIDD":  {"market_cap": 5.6,  "fcf": 160,    "debt_to_equity": 1.8,  "sector": "Industrials",     "revenue_growth": 3.2,   "industry": "Industrial Machinery"},
-    "WTS":   {"market_cap": 3.2,  "fcf": 90,     "debt_to_equity": 0.2,  "sector": "Industrials",     "revenue_growth": 7.1,   "industry": "Industrial Distribution"},
-    "MLI":   {"market_cap": 6.8,  "fcf": 280,    "debt_to_equity": 0.1,  "sector": "Industrials",     "revenue_growth": 12.5,  "industry": "Metal Fabrication"},
-    "ASTE":  {"market_cap": 0.8,  "fcf": 40,     "debt_to_equity": 0.3,  "sector": "Industrials",     "revenue_growth": 4.8,   "industry": "Farm & Heavy Construction Machinery"},
-    "NPO":   {"market_cap": 2.1,  "fcf": 70,     "debt_to_equity": 0.5,  "sector": "Industrials",     "revenue_growth": 9.3,   "industry": "Specialty Industrial Machinery"},
-    "EPAC":  {"market_cap": 4.3,  "fcf": 130,    "debt_to_equity": 2.5,  "sector": "Industrials",     "revenue_growth": 6.8,   "industry": "Specialty Chemicals"},
-    "SWK":   {"market_cap": 12.5, "fcf": 450,    "debt_to_equity": 1.2,  "sector": "Industrials",     "revenue_growth": -2.1,  "industry": "Tools & Accessories"},
-    "EMR":   {"market_cap": 65.0, "fcf": 2800,   "debt_to_equity": 0.5,  "sector": "Industrials",     "revenue_growth": 14.2,  "industry": "Industrial Automation"},
-    "ROK":   {"market_cap": 32.0, "fcf": 1200,   "debt_to_equity": 1.1,  "sector": "Industrials",     "revenue_growth": -3.5,  "industry": "Industrial Automation"},
-    "DOV":   {"market_cap": 22.0, "fcf": 900,    "debt_to_equity": 0.7,  "sector": "Industrials",     "revenue_growth": 5.8,   "industry": "Diversified Industrials"},
-    "ITW":   {"market_cap": 75.0, "fcf": 3200,   "debt_to_equity": 2.8,  "sector": "Industrials",     "revenue_growth": 1.2,   "industry": "Specialty Industrial Machinery"},
+    "RBC":   {"market_cap": 8.5,  "fcf": 250,    "debt_to_equity": 0.4,  "sector": "Industrials",     "revenue_growth": 8.2,   "industry": "Specialty Industrial Machinery", "pe_ratio": 22, "roe": 15},
+    "GGG":   {"market_cap": 3.8,  "fcf": 120,    "debt_to_equity": 0.6,  "sector": "Industrials",     "revenue_growth": 5.1,   "industry": "Specialty Industrial Machinery", "pe_ratio": 28, "roe": 18},
+    "AOS":   {"market_cap": 4.5,  "fcf": 180,    "debt_to_equity": 0.3,  "sector": "Industrials",     "revenue_growth": 6.4,   "industry": "Specialty Industrial Machinery", "pe_ratio": 20, "roe": 22},
+    "GNRC":  {"market_cap": 7.2,  "fcf": 200,    "debt_to_equity": 1.1,  "sector": "Industrials",     "revenue_growth": -5.3,  "industry": "Specialty Industrial Machinery", "pe_ratio": 35, "roe": 12},
+    "MIDD":  {"market_cap": 5.6,  "fcf": 160,    "debt_to_equity": 1.8,  "sector": "Industrials",     "revenue_growth": 3.2,   "industry": "Industrial Machinery", "pe_ratio": 14, "roe": 16},
+    "WTS":   {"market_cap": 3.2,  "fcf": 90,     "debt_to_equity": 0.2,  "sector": "Industrials",     "revenue_growth": 7.1,   "industry": "Industrial Distribution", "pe_ratio": 18, "roe": 14},
+    "MLI":   {"market_cap": 6.8,  "fcf": 280,    "debt_to_equity": 0.1,  "sector": "Industrials",     "revenue_growth": 12.5,  "industry": "Metal Fabrication", "pe_ratio": 16, "roe": 25},
+    "ASTE":  {"market_cap": 0.8,  "fcf": 40,     "debt_to_equity": 0.3,  "sector": "Industrials",     "revenue_growth": 4.8,   "industry": "Farm & Heavy Construction Machinery", "pe_ratio": 12, "roe": 10},
+    "NPO":   {"market_cap": 2.1,  "fcf": 70,     "debt_to_equity": 0.5,  "sector": "Industrials",     "revenue_growth": 9.3,   "industry": "Specialty Industrial Machinery", "pe_ratio": 24, "roe": 17},
+    "EPAC":  {"market_cap": 4.3,  "fcf": 130,    "debt_to_equity": 2.5,  "sector": "Industrials",     "revenue_growth": 6.8,   "industry": "Specialty Chemicals", "pe_ratio": 19, "roe": 20},
+    "SWK":   {"market_cap": 12.5, "fcf": 450,    "debt_to_equity": 1.2,  "sector": "Industrials",     "revenue_growth": -2.1,  "industry": "Tools & Accessories", "pe_ratio": 45, "roe": 5},
+    "EMR":   {"market_cap": 65.0, "fcf": 2800,   "debt_to_equity": 0.5,  "sector": "Industrials",     "revenue_growth": 14.2,  "industry": "Industrial Automation", "pe_ratio": 25, "roe": 18},
+    "ROK":   {"market_cap": 32.0, "fcf": 1200,   "debt_to_equity": 1.1,  "sector": "Industrials",     "revenue_growth": -3.5,  "industry": "Industrial Automation", "pe_ratio": 30, "roe": 15},
+    "DOV":   {"market_cap": 22.0, "fcf": 900,    "debt_to_equity": 0.7,  "sector": "Industrials",     "revenue_growth": 5.8,   "industry": "Diversified Industrials", "pe_ratio": 17, "roe": 19},
+    "ITW":   {"market_cap": 75.0, "fcf": 3200,   "debt_to_equity": 2.8,  "sector": "Industrials",     "revenue_growth": 1.2,   "industry": "Specialty Industrial Machinery", "pe_ratio": 23, "roe": 28},
 
     # --- Healthcare (Small-Mid Cap) ---
     "GMED":  {"market_cap": 4.1,  "fcf": 90,     "debt_to_equity": 0.4,  "sector": "Healthcare",      "revenue_growth": 11.2,  "industry": "Medical Devices", "pe_ratio": 22, "roe": 14},
@@ -185,6 +189,135 @@ MOCK_UNIVERSE: dict[str, dict[str, Any]] = {
     "ITCI":  {"market_cap": 1.6,  "fcf": 50,     "debt_to_equity": 0.0,  "sector": "Healthcare",      "revenue_growth": 35.0,  "industry": "Biotechnology", "pe_ratio": 28, "roe": 22},
     "ELF":   {"market_cap": 1.4,  "fcf": 65,     "debt_to_equity": 0.3,  "sector": "Consumer Defensive","revenue_growth": 48.1, "industry": "Household & Personal Products", "pe_ratio": 25, "roe": 24},
     "LNTH":  {"market_cap": 1.7,  "fcf": 80,     "debt_to_equity": 1.2,  "sector": "Healthcare",      "revenue_growth": 25.6,  "industry": "Drug Manufacturers", "pe_ratio": 19, "roe": 18},
+
+    # --- Large-Cap Missing (from _COMPANY_NAMES) ---
+    "V":     {"market_cap": 550,  "fcf": 18000,  "debt_to_equity": 1.73, "sector": "Financial Services","revenue_growth": 10.2,  "industry": "Credit Services", "pe_ratio": 30, "roe": 45},
+    "MA":    {"market_cap": 420,  "fcf": 12000,  "debt_to_equity": 5.20, "sector": "Financial Services","revenue_growth": 12.5,  "industry": "Credit Services", "pe_ratio": 35, "roe": 180},
+    "PG":    {"market_cap": 380,  "fcf": 16000,  "debt_to_equity": 0.73, "sector": "Consumer Defensive","revenue_growth": 2.8,   "industry": "Household & Personal Products", "pe_ratio": 26, "roe": 30},
+    "MRK":   {"market_cap": 260,  "fcf": 13000,  "debt_to_equity": 0.93, "sector": "Healthcare",       "revenue_growth": -1.2,  "industry": "Drug Manufacturers", "pe_ratio": 14, "roe": 35},
+    "ABBV":  {"market_cap": 310,  "fcf": 22000,  "debt_to_equity": 5.80, "sector": "Healthcare",       "revenue_growth": 4.1,   "industry": "Drug Manufacturers", "pe_ratio": 18, "roe": 65},
+    "KO":    {"market_cap": 270,  "fcf": 9500,   "debt_to_equity": 1.72, "sector": "Consumer Defensive","revenue_growth": 3.2,   "industry": "Beverages", "pe_ratio": 24, "roe": 40},
+    "PEP":   {"market_cap": 230,  "fcf": 7200,   "debt_to_equity": 2.38, "sector": "Consumer Defensive","revenue_growth": 2.3,   "industry": "Beverages", "pe_ratio": 22, "roe": 50},
+    "LLY":   {"market_cap": 700,  "fcf": 5800,   "debt_to_equity": 2.10, "sector": "Healthcare",       "revenue_growth": 32.0,  "industry": "Drug Manufacturers", "pe_ratio": 60, "roe": 55},
+    "TMO":   {"market_cap": 200,  "fcf": 7500,   "debt_to_equity": 0.75, "sector": "Healthcare",       "revenue_growth": 1.4,   "industry": "Medical Instruments", "pe_ratio": 30, "roe": 15},
+    "ABT":   {"market_cap": 190,  "fcf": 7000,   "debt_to_equity": 0.46, "sector": "Healthcare",       "revenue_growth": 2.5,   "industry": "Medical Devices", "pe_ratio": 25, "roe": 16},
+    "DHR":   {"market_cap": 180,  "fcf": 6800,   "debt_to_equity": 0.35, "sector": "Healthcare",       "revenue_growth": -3.2,  "industry": "Medical Instruments", "pe_ratio": 28, "roe": 10},
+    "LIN":   {"market_cap": 220,  "fcf": 6500,   "debt_to_equity": 0.32, "sector": "Basic Materials",  "revenue_growth": 2.1,   "industry": "Industrial Gases", "pe_ratio": 32, "roe": 12},
+    "ACN":   {"market_cap": 210,  "fcf": 8200,   "debt_to_equity": 0.18, "sector": "Technology",       "revenue_growth": 3.8,   "industry": "IT Services", "pe_ratio": 28, "roe": 30},
+    "CSCO":  {"market_cap": 220,  "fcf": 15000,  "debt_to_equity": 0.24, "sector": "Technology",       "revenue_growth": -5.7,  "industry": "Communication Equipment", "pe_ratio": 14, "roe": 28},
+    "GS":    {"market_cap": 165,  "fcf": 8000,   "debt_to_equity": 2.58, "sector": "Financial Services","revenue_growth": 12.3,  "industry": "Capital Markets", "pe_ratio": 16, "roe": 12},
+    "MS":    {"market_cap": 160,  "fcf": 7500,   "debt_to_equity": 2.81, "sector": "Financial Services","revenue_growth": 5.8,   "industry": "Capital Markets", "pe_ratio": 14, "roe": 13},
+    "CAT":   {"market_cap": 170,  "fcf": 9500,   "debt_to_equity": 2.04, "sector": "Industrials",      "revenue_growth": 3.1,   "industry": "Farm & Heavy Construction Machinery", "pe_ratio": 16, "roe": 55},
+    "GE":    {"market_cap": 190,  "fcf": 5800,   "debt_to_equity": 1.08, "sector": "Industrials",      "revenue_growth": 16.3,  "industry": "Aerospace & Defense", "pe_ratio": 30, "roe": 25},
+    "HON":   {"market_cap": 135,  "fcf": 5200,   "debt_to_equity": 1.21, "sector": "Industrials",      "revenue_growth": 3.4,   "industry": "Diversified Industrials", "pe_ratio": 20, "roe": 32},
+    "BA":    {"market_cap": 130,  "fcf": -4200,  "debt_to_equity": -6.5, "sector": "Industrials",      "revenue_growth": 16.8,  "industry": "Aerospace & Defense", "pe_ratio": 0, "roe": -40},
+    "IBM":   {"market_cap": 195,  "fcf": 11500,  "debt_to_equity": 2.51, "sector": "Technology",       "revenue_growth": 3.5,   "industry": "IT Services", "pe_ratio": 22, "roe": 35},
+    "LOW":   {"market_cap": 150,  "fcf": 7800,   "debt_to_equity": -15.0,"sector": "Consumer Cyclical", "revenue_growth": -2.1,  "industry": "Home Improvement Retail", "pe_ratio": 18, "roe": -200},
+    "SBUX":  {"market_cap": 105,  "fcf": 3600,   "debt_to_equity": -7.0, "sector": "Consumer Cyclical", "revenue_growth": 1.8,   "industry": "Restaurants", "pe_ratio": 25, "roe": -150},
+    "DE":    {"market_cap": 115,  "fcf": 5200,   "debt_to_equity": 2.15, "sector": "Industrials",      "revenue_growth": -15.2, "industry": "Farm & Heavy Construction Machinery", "pe_ratio": 14, "roe": 30},
+    "RTX":   {"market_cap": 150,  "fcf": 5000,   "debt_to_equity": 0.58, "sector": "Industrials",      "revenue_growth": 8.4,   "industry": "Aerospace & Defense", "pe_ratio": 22, "roe": 10},
+    "MMM":   {"market_cap": 70,   "fcf": 4200,   "debt_to_equity": 2.80, "sector": "Industrials",      "revenue_growth": -3.8,  "industry": "Diversified Industrials", "pe_ratio": 11, "roe": 30},
+    "F":     {"market_cap": 42,   "fcf": 3500,   "debt_to_equity": 3.50, "sector": "Consumer Cyclical", "revenue_growth": 5.2,   "industry": "Auto Manufacturers", "pe_ratio": 6, "roe": 12},
+    "GM":    {"market_cap": 48,   "fcf": 9200,   "debt_to_equity": 1.68, "sector": "Consumer Cyclical", "revenue_growth": 9.7,   "industry": "Auto Manufacturers", "pe_ratio": 5, "roe": 15},
+
+    # --- Utilities ---
+    "NEE":   {"market_cap": 155,  "fcf": 2000,   "debt_to_equity": 1.35, "sector": "Utilities",        "revenue_growth": 14.5,  "industry": "Utilities - Renewables", "pe_ratio": 22, "roe": 12, "dividend_yield": 2.8, "beta": 0.55},
+    "DUK":   {"market_cap": 88,   "fcf": 1200,   "debt_to_equity": 1.42, "sector": "Utilities",        "revenue_growth": 5.1,   "industry": "Utilities - Regulated Electric", "pe_ratio": 18, "roe": 9, "dividend_yield": 3.8, "beta": 0.45},
+    "SO":    {"market_cap": 92,   "fcf": 2800,   "debt_to_equity": 1.55, "sector": "Utilities",        "revenue_growth": 3.2,   "industry": "Utilities - Regulated Electric", "pe_ratio": 20, "roe": 12, "dividend_yield": 3.5, "beta": 0.50},
+    "AEP":   {"market_cap": 52,   "fcf": 800,    "debt_to_equity": 1.61, "sector": "Utilities",        "revenue_growth": 4.8,   "industry": "Utilities - Regulated Electric", "pe_ratio": 17, "roe": 10, "dividend_yield": 3.7, "beta": 0.48},
+    "D":     {"market_cap": 48,   "fcf": 1100,   "debt_to_equity": 1.38, "sector": "Utilities",        "revenue_growth": -2.5,  "industry": "Utilities - Regulated Electric", "pe_ratio": 15, "roe": 8, "dividend_yield": 4.8, "beta": 0.55},
+    "SRE":   {"market_cap": 55,   "fcf": 900,    "debt_to_equity": 1.20, "sector": "Utilities",        "revenue_growth": 8.3,   "industry": "Utilities - Diversified", "pe_ratio": 18, "roe": 11, "dividend_yield": 2.9, "beta": 0.60},
+
+    # --- Real Estate (REITs) ---
+    "PLD":   {"market_cap": 110,  "fcf": 3500,   "debt_to_equity": 0.40, "sector": "Real Estate",      "revenue_growth": 8.5,   "industry": "Industrial REITs", "pe_ratio": 40, "roe": 8, "dividend_yield": 3.2},
+    "AMT":   {"market_cap": 95,   "fcf": 2800,   "debt_to_equity": 3.40, "sector": "Real Estate",      "revenue_growth": 4.2,   "industry": "Telecom Tower REITs", "pe_ratio": 45, "roe": 18, "dividend_yield": 3.0},
+    "EQIX":  {"market_cap": 75,   "fcf": 2200,   "debt_to_equity": 1.15, "sector": "Real Estate",      "revenue_growth": 9.8,   "industry": "Data Center REITs", "pe_ratio": 80, "roe": 6, "dividend_yield": 2.1},
+    "O":     {"market_cap": 50,   "fcf": 1500,   "debt_to_equity": 0.55, "sector": "Real Estate",      "revenue_growth": 18.5,  "industry": "Retail REITs", "pe_ratio": 55, "roe": 3, "dividend_yield": 5.4},
+    "SPG":   {"market_cap": 55,   "fcf": 2000,   "debt_to_equity": 8.50, "sector": "Real Estate",      "revenue_growth": 5.1,   "industry": "Retail REITs", "pe_ratio": 20, "roe": 45, "dividend_yield": 5.0},
+
+    # --- Basic Materials ---
+    "APD":   {"market_cap": 65,   "fcf": 2500,   "debt_to_equity": 0.52, "sector": "Basic Materials",  "revenue_growth": -3.1,  "industry": "Industrial Gases", "pe_ratio": 25, "roe": 14},
+    "ECL":   {"market_cap": 60,   "fcf": 1800,   "debt_to_equity": 0.83, "sector": "Basic Materials",  "revenue_growth": 5.2,   "industry": "Specialty Chemicals", "pe_ratio": 35, "roe": 20},
+    "SHW":   {"market_cap": 85,   "fcf": 2600,   "debt_to_equity": 2.75, "sector": "Basic Materials",  "revenue_growth": 3.8,   "industry": "Specialty Chemicals", "pe_ratio": 30, "roe": 65},
+    "NUE":   {"market_cap": 32,   "fcf": 2200,   "debt_to_equity": 0.30, "sector": "Basic Materials",  "revenue_growth": -18.5, "industry": "Steel", "pe_ratio": 8, "roe": 18},
+    "FCX":   {"market_cap": 58,   "fcf": 3500,   "debt_to_equity": 0.54, "sector": "Basic Materials",  "revenue_growth": 15.2,  "industry": "Copper", "pe_ratio": 20, "roe": 22},
+    "NEM":   {"market_cap": 50,   "fcf": 2800,   "debt_to_equity": 0.35, "sector": "Basic Materials",  "revenue_growth": 30.1,  "industry": "Gold", "pe_ratio": 15, "roe": 12},
+    "DOW":   {"market_cap": 28,   "fcf": 1200,   "debt_to_equity": 1.42, "sector": "Basic Materials",  "revenue_growth": -8.3,  "industry": "Chemicals", "pe_ratio": 22, "roe": 10, "dividend_yield": 5.2},
+
+    # --- Telecom ---
+    "T":     {"market_cap": 150,  "fcf": 16000,  "debt_to_equity": 1.23, "sector": "Communication Services","revenue_growth": 0.8, "industry": "Telecom Services", "pe_ratio": 10, "roe": 12, "dividend_yield": 5.1, "beta": 0.65},
+    "VZ":    {"market_cap": 175,  "fcf": 18000,  "debt_to_equity": 1.58, "sector": "Communication Services","revenue_growth": 1.5, "industry": "Telecom Services", "pe_ratio": 9, "roe": 22, "dividend_yield": 6.3, "beta": 0.40},
+    "TMUS":  {"market_cap": 260,  "fcf": 17000,  "debt_to_equity": 1.35, "sector": "Communication Services","revenue_growth": 3.2, "industry": "Telecom Services", "pe_ratio": 25, "roe": 15, "beta": 0.55},
+
+    # --- Aerospace / Defense ---
+    "LMT":   {"market_cap": 120,  "fcf": 6200,   "debt_to_equity": 2.85, "sector": "Industrials",      "revenue_growth": 5.8,   "industry": "Aerospace & Defense", "pe_ratio": 18, "roe": 85, "dividend_yield": 2.5},
+    "NOC":   {"market_cap": 75,   "fcf": 2500,   "debt_to_equity": 1.60, "sector": "Industrials",      "revenue_growth": 4.2,   "industry": "Aerospace & Defense", "pe_ratio": 20, "roe": 30, "dividend_yield": 1.5},
+    "GD":    {"market_cap": 72,   "fcf": 3200,   "debt_to_equity": 0.75, "sector": "Industrials",      "revenue_growth": 10.5,  "industry": "Aerospace & Defense", "pe_ratio": 19, "roe": 18, "dividend_yield": 2.0},
+    "LHX":   {"market_cap": 42,   "fcf": 2100,   "debt_to_equity": 0.68, "sector": "Industrials",      "revenue_growth": 7.2,   "industry": "Aerospace & Defense", "pe_ratio": 16, "roe": 12},
+    "HII":   {"market_cap": 9.5,  "fcf": 450,    "debt_to_equity": 1.80, "sector": "Industrials",      "revenue_growth": 8.1,   "industry": "Aerospace & Defense", "pe_ratio": 14, "roe": 22},
+
+    # --- Transportation / Logistics ---
+    "UPS":   {"market_cap": 105,  "fcf": 5200,   "debt_to_equity": 2.10, "sector": "Industrials",      "revenue_growth": -9.3,  "industry": "Integrated Freight & Logistics", "pe_ratio": 16, "roe": 35, "dividend_yield": 4.5},
+    "FDX":   {"market_cap": 65,   "fcf": 3800,   "debt_to_equity": 0.82, "sector": "Industrials",      "revenue_growth": -2.8,  "industry": "Integrated Freight & Logistics", "pe_ratio": 14, "roe": 16},
+    "DAL":   {"market_cap": 32,   "fcf": 3200,   "debt_to_equity": 2.80, "sector": "Industrials",      "revenue_growth": 5.4,   "industry": "Airlines", "pe_ratio": 7, "roe": 45},
+    "UAL":   {"market_cap": 24,   "fcf": 3500,   "debt_to_equity": 3.10, "sector": "Industrials",      "revenue_growth": 7.1,   "industry": "Airlines", "pe_ratio": 6, "roe": 50},
+    "ODFL":  {"market_cap": 38,   "fcf": 1000,   "debt_to_equity": 0.04, "sector": "Industrials",      "revenue_growth": 3.2,   "industry": "Trucking", "pe_ratio": 32, "roe": 28},
+
+    # --- Energy (More coverage) ---
+    "COP":   {"market_cap": 130,  "fcf": 10000,  "debt_to_equity": 0.38, "sector": "Energy",           "revenue_growth": -8.5,  "industry": "Oil & Gas E&P", "pe_ratio": 11, "roe": 20, "dividend_yield": 3.0},
+    "SLB":   {"market_cap": 60,   "fcf": 3800,   "debt_to_equity": 0.58, "sector": "Energy",           "revenue_growth": 12.8,  "industry": "Oil & Gas Equipment", "pe_ratio": 14, "roe": 22},
+    "EOG":   {"market_cap": 65,   "fcf": 5200,   "debt_to_equity": 0.17, "sector": "Energy",           "revenue_growth": -5.1,  "industry": "Oil & Gas E&P", "pe_ratio": 9, "roe": 25, "dividend_yield": 2.8},
+    "OKE":   {"market_cap": 55,   "fcf": 2800,   "debt_to_equity": 1.65, "sector": "Energy",           "revenue_growth": 15.3,  "industry": "Oil & Gas Midstream", "pe_ratio": 17, "roe": 30, "dividend_yield": 4.2},
+    "FANG":  {"market_cap": 45,   "fcf": 3800,   "debt_to_equity": 0.35, "sector": "Energy",           "revenue_growth": 22.5,  "industry": "Oil & Gas E&P", "pe_ratio": 8, "roe": 28, "dividend_yield": 2.0},
+
+    # --- Consumer / Retail (More coverage) ---
+    "TGT":   {"market_cap": 62,   "fcf": 4200,   "debt_to_equity": 1.35, "sector": "Consumer Defensive","revenue_growth": -4.2,  "industry": "Discount Stores", "pe_ratio": 13, "roe": 30, "dividend_yield": 3.5},
+    "ROST":  {"market_cap": 48,   "fcf": 2500,   "debt_to_equity": 2.10, "sector": "Consumer Cyclical", "revenue_growth": 7.2,   "industry": "Apparel Retail", "pe_ratio": 22, "roe": 45},
+    "TJX":   {"market_cap": 120,  "fcf": 4800,   "debt_to_equity": 4.50, "sector": "Consumer Cyclical", "revenue_growth": 8.5,   "industry": "Apparel Retail", "pe_ratio": 26, "roe": 65},
+    "LULU":  {"market_cap": 42,   "fcf": 1800,   "debt_to_equity": 0.45, "sector": "Consumer Cyclical", "revenue_growth": 18.2,  "industry": "Apparel Retail", "pe_ratio": 28, "roe": 42},
+    "DG":    {"market_cap": 18,   "fcf": 500,    "debt_to_equity": 3.20, "sector": "Consumer Defensive","revenue_growth": 2.1,   "industry": "Discount Stores", "pe_ratio": 12, "roe": 22},
+    "YUM":   {"market_cap": 38,   "fcf": 1600,   "debt_to_equity": -8.0, "sector": "Consumer Cyclical", "revenue_growth": 6.8,   "industry": "Restaurants", "pe_ratio": 25, "roe": -120, "dividend_yield": 1.9},
+    "CMG":   {"market_cap": 78,   "fcf": 1200,   "debt_to_equity": 3.50, "sector": "Consumer Cyclical", "revenue_growth": 14.3,  "industry": "Restaurants", "pe_ratio": 55, "roe": -150},
+    "DECK":  {"market_cap": 22,   "fcf": 800,    "debt_to_equity": 0.05, "sector": "Consumer Cyclical", "revenue_growth": 18.2,  "industry": "Footwear & Accessories", "pe_ratio": 25, "roe": 35},
+
+    # --- Insurance ---
+    "BRK.B": {"market_cap": 850,  "fcf": 32000,  "debt_to_equity": 0.25, "sector": "Financial Services","revenue_growth": 8.2,   "industry": "Insurance - Diversified", "pe_ratio": 10, "roe": 15},
+    "PGR":   {"market_cap": 120,  "fcf": 8500,   "debt_to_equity": 0.85, "sector": "Financial Services","revenue_growth": 25.3,  "industry": "Insurance - Property & Casualty", "pe_ratio": 18, "roe": 30},
+    "CB":    {"market_cap": 105,  "fcf": 6200,   "debt_to_equity": 0.28, "sector": "Financial Services","revenue_growth": 12.1,  "industry": "Insurance - Property & Casualty", "pe_ratio": 12, "roe": 16},
+    "MET":   {"market_cap": 52,   "fcf": 4500,   "debt_to_equity": 0.50, "sector": "Financial Services","revenue_growth": 5.8,   "industry": "Insurance - Life", "pe_ratio": 8, "roe": 12, "dividend_yield": 2.8},
+
+    # --- Pharmaceuticals / Biotech (More) ---
+    "GILD":  {"market_cap": 105,  "fcf": 8000,   "debt_to_equity": 1.35, "sector": "Healthcare",       "revenue_growth": 5.5,   "industry": "Biotechnology", "pe_ratio": 12, "roe": 30, "dividend_yield": 3.2},
+    "AMGN":  {"market_cap": 160,  "fcf": 9500,   "debt_to_equity": 8.50, "sector": "Healthcare",       "revenue_growth": 20.8,  "industry": "Biotechnology", "pe_ratio": 22, "roe": -150, "dividend_yield": 3.0},
+    "REGN":  {"market_cap": 85,   "fcf": 4500,   "debt_to_equity": 0.08, "sector": "Healthcare",       "revenue_growth": 6.3,   "industry": "Biotechnology", "pe_ratio": 18, "roe": 20},
+    "VRTX":  {"market_cap": 110,  "fcf": 4200,   "debt_to_equity": 0.05, "sector": "Healthcare",       "revenue_growth": 14.2,  "industry": "Biotechnology", "pe_ratio": 28, "roe": 25},
+    "BMY":   {"market_cap": 95,   "fcf": 12000,  "debt_to_equity": 3.15, "sector": "Healthcare",       "revenue_growth": -2.8,  "industry": "Drug Manufacturers", "pe_ratio": 8, "roe": 45, "dividend_yield": 4.5},
+
+    # --- Small-Cap Industrials (more manufacturing) ---
+    "TRS":   {"market_cap": 0.7,  "fcf": 30,     "debt_to_equity": 0.3,  "sector": "Industrials",      "revenue_growth": 8.5,   "industry": "Specialty Industrial Machinery", "pe_ratio": 12, "roe": 15},
+    "WIRE":  {"market_cap": 1.5,  "fcf": 120,    "debt_to_equity": 0.0,  "sector": "Industrials",      "revenue_growth": -12.5, "industry": "Electrical Equipment", "pe_ratio": 10, "roe": 22},
+    "POWL":  {"market_cap": 1.8,  "fcf": 90,     "debt_to_equity": 0.0,  "sector": "Industrials",      "revenue_growth": 45.2,  "industry": "Electrical Equipment", "pe_ratio": 15, "roe": 30},
+    "PRIM":  {"market_cap": 1.6,  "fcf": 70,     "debt_to_equity": 0.5,  "sector": "Industrials",      "revenue_growth": 22.3,  "industry": "Engineering & Construction", "pe_ratio": 14, "roe": 18},
+    "GBX":   {"market_cap": 1.3,  "fcf": 60,     "debt_to_equity": 0.7,  "sector": "Industrials",      "revenue_growth": 15.1,  "industry": "Railroads", "pe_ratio": 11, "roe": 16},
+    "NN":    {"market_cap": 0.5,  "fcf": 20,     "debt_to_equity": 1.2,  "sector": "Industrials",      "revenue_growth": 5.8,   "industry": "Specialty Industrial Machinery", "pe_ratio": 18, "roe": 8},
+    "ROCK":  {"market_cap": 0.8,  "fcf": 35,     "debt_to_equity": 0.2,  "sector": "Industrials",      "revenue_growth": 10.2,  "industry": "Specialty Industrial Machinery", "pe_ratio": 13, "roe": 14},
+
+    # --- Small-Cap Consumer ---
+    "DNUT":  {"market_cap": 1.2,  "fcf": 30,     "debt_to_equity": 1.8,  "sector": "Consumer Defensive","revenue_growth": 12.5,  "industry": "Packaged Foods", "pe_ratio": 35, "roe": 8},
+    "ARKO":  {"market_cap": 0.5,  "fcf": 45,     "debt_to_equity": 2.1,  "sector": "Consumer Defensive","revenue_growth": -5.2,  "industry": "Food Distribution", "pe_ratio": 8, "roe": 6},
+    "ONEW":  {"market_cap": 0.6,  "fcf": 55,     "debt_to_equity": 0.8,  "sector": "Consumer Cyclical", "revenue_growth": -8.3,  "industry": "Leisure", "pe_ratio": 4, "roe": 12},
+    "CURV":  {"market_cap": 0.4,  "fcf": 15,     "debt_to_equity": 1.5,  "sector": "Consumer Cyclical", "revenue_growth": 8.1,   "industry": "Apparel Retail", "pe_ratio": 20, "roe": 10},
+
+    # --- Small-Cap Tech ---
+    "INTA":  {"market_cap": 1.2,  "fcf": 40,     "debt_to_equity": 0.3,  "sector": "Technology",       "revenue_growth": 28.5,  "industry": "Software", "pe_ratio": 32, "roe": 18},
+    "ALKT":  {"market_cap": 0.9,  "fcf": 25,     "debt_to_equity": 0.4,  "sector": "Technology",       "revenue_growth": 15.3,  "industry": "Software", "pe_ratio": 28, "roe": 14},
+    "SMAR":  {"market_cap": 1.4,  "fcf": 55,     "debt_to_equity": 0.2,  "sector": "Technology",       "revenue_growth": 18.7,  "industry": "Software", "pe_ratio": 50, "roe": 8},
+    "RAMP":  {"market_cap": 0.6,  "fcf": 20,     "debt_to_equity": 0.1,  "sector": "Technology",       "revenue_growth": 22.1,  "industry": "Software", "pe_ratio": 25, "roe": 12},
+
+    # --- Small-Cap Energy ---
+    "VTLE":  {"market_cap": 1.0,  "fcf": 250,    "debt_to_equity": 0.4,  "sector": "Energy",           "revenue_growth": -15.2, "industry": "Oil & Gas E&P", "pe_ratio": 4, "roe": 18},
+    "CHRD":  {"market_cap": 6.5,  "fcf": 1800,   "debt_to_equity": 0.3,  "sector": "Energy",           "revenue_growth": 35.2,  "industry": "Oil & Gas E&P", "pe_ratio": 5, "roe": 22, "dividend_yield": 8.5},
+    "SM":    {"market_cap": 4.2,  "fcf": 700,    "debt_to_equity": 0.4,  "sector": "Energy",           "revenue_growth": 12.8,  "industry": "Oil & Gas E&P", "pe_ratio": 6, "roe": 20},
 }
 
 # Common ticker -> company name map for Wikipedia scraping
@@ -215,6 +348,80 @@ _COMPANY_NAMES: dict[str, str] = {
     "RIVN": "Rivian", "LCID": "Lucid Motors", "F": "Ford Motor Company",
     "GM": "General Motors", "NEE": "NextEra Energy", "DUK": "Duke Energy",
     "SO": "Southern Company", "PLD": "Prologis", "AMT": "American Tower",
+    # Manufacturing / Industrials
+    "RBC": "Roper Technologies", "GGG": "Graco Inc.", "AOS": "A. O. Smith",
+    "GNRC": "Generac", "MIDD": "Middleby Corporation", "WTS": "Watts Water Technologies",
+    "MLI": "Mueller Industries", "ASTE": "Astec Industries", "NPO": "EnPro Industries",
+    "EPAC": "Enerpac Tool Group", "SWK": "Stanley Black & Decker",
+    "EMR": "Emerson Electric", "ROK": "Rockwell Automation",
+    "DOV": "Dover Corporation", "ITW": "Illinois Tool Works",
+    # Healthcare small-mid
+    "GMED": "Globus Medical", "IART": "Integra LifeSciences", "NVCR": "NovoCure",
+    "HALO": "Halozyme Therapeutics",
+    # Tech small-mid
+    "FOUR": "Shift4 Payments", "PCTY": "Paylocity", "CWAN": "Clearwater Analytics",
+    "BRZE": "Braze (company)", "JAMF": "Jamf",
+    # Consumer small-mid
+    "SHAK": "Shake Shack", "WING": "Wingstop", "CAVA": "Cava Group",
+    "BOOT": "Boot Barn",
+    # Financials small-mid
+    "STEP": "StepStone Group",
+    # NIO
+    "NIO": "NIO",
+    # Large-cap additions
+    "V": "Visa Inc.", "MA": "Mastercard", "PG": "Procter & Gamble",
+    "MRK": "Merck & Co.", "ABBV": "AbbVie", "KO": "The Coca-Cola Company",
+    "PEP": "PepsiCo", "LLY": "Eli Lilly and Company", "TMO": "Thermo Fisher Scientific",
+    "ABT": "Abbott Laboratories", "DHR": "Danaher Corporation", "LIN": "Linde plc",
+    "ACN": "Accenture", "CSCO": "Cisco", "GS": "Goldman Sachs",
+    "MS": "Morgan Stanley", "CAT": "Caterpillar Inc.", "GE": "GE Aerospace",
+    "HON": "Honeywell", "BA": "Boeing", "IBM": "IBM",
+    "LOW": "Lowe's", "SBUX": "Starbucks", "DE": "John Deere",
+    "RTX": "RTX Corporation", "MMM": "3M", "F": "Ford Motor Company",
+    "GM": "General Motors",
+    # Utilities
+    "NEE": "NextEra Energy", "DUK": "Duke Energy", "SO": "Southern Company",
+    "AEP": "American Electric Power", "D": "Dominion Energy", "SRE": "Sempra Energy",
+    # Real Estate
+    "PLD": "Prologis", "AMT": "American Tower", "EQIX": "Equinix",
+    "O": "Realty Income", "SPG": "Simon Property Group",
+    # Materials
+    "APD": "Air Products and Chemicals", "ECL": "Ecolab", "SHW": "Sherwin-Williams",
+    "NUE": "Nucor Corporation", "FCX": "Freeport-McMoRan", "NEM": "Newmont Corporation",
+    "DOW": "Dow Inc.",
+    # Telecom
+    "T": "AT&T", "VZ": "Verizon Communications", "TMUS": "T-Mobile US",
+    # Aerospace/Defense
+    "LMT": "Lockheed Martin", "NOC": "Northrop Grumman", "GD": "General Dynamics",
+    "LHX": "L3Harris Technologies", "HII": "Huntington Ingalls Industries",
+    # Transport
+    "UPS": "United Parcel Service", "FDX": "FedEx", "DAL": "Delta Air Lines",
+    "UAL": "United Airlines", "ODFL": "Old Dominion Freight Line",
+    # Energy
+    "COP": "ConocoPhillips", "SLB": "Schlumberger", "EOG": "EOG Resources",
+    "OKE": "ONEOK", "FANG": "Diamondback Energy",
+    # Consumer/Retail
+    "TGT": "Target Corporation", "ROST": "Ross Stores", "TJX": "TJX Companies",
+    "LULU": "Lululemon Athletica", "DG": "Dollar General", "YUM": "Yum! Brands",
+    "CMG": "Chipotle Mexican Grill", "DECK": "Deckers Outdoor",
+    # Insurance
+    "BRK.B": "Berkshire Hathaway", "PGR": "Progressive Corporation",
+    "CB": "Chubb Limited", "MET": "MetLife",
+    # Pharma/Biotech
+    "GILD": "Gilead Sciences", "AMGN": "Amgen", "REGN": "Regeneron Pharmaceuticals",
+    "VRTX": "Vertex Pharmaceuticals", "BMY": "Bristol-Myers Squibb",
+    # Small-cap industrials
+    "TRS": "TriMas Corporation", "WIRE": "Encore Wire", "POWL": "Powell Industries",
+    "PRIM": "Primoris Services", "GBX": "Greenbrier Companies", "NN": "NextGen Healthcare",
+    "ROCK": "Gibraltar Industries",
+    # Small-cap consumer
+    "DNUT": "Krispy Kreme", "ARKO": "Arko Corp", "ONEW": "OneWater Marine",
+    "CURV": "Torrid Holdings",
+    # Small-cap tech
+    "INTA": "Intapp", "ALKT": "Alkami Technology", "SMAR": "Smartsheet",
+    "RAMP": "LiveRamp",
+    # Small-cap energy
+    "VTLE": "Vital Energy", "CHRD": "Chord Energy", "SM": "SM Energy",
 }
 
 # ---------------------------------------------------------------------------
@@ -232,7 +439,7 @@ class ScreenResponse(BaseModel):
     tickers: list[str]
     rules: dict[str, Any]
     count: int
-    universe_size: int = 103
+    universe_size: int = 9920
     unresolved: list[str] = []
     notes: str = ""
 
@@ -281,7 +488,8 @@ combination of these optional fields:
   profitable_only      — true if company must have positive earnings/net income (boolean)
   unresolved           — list of criteria from the user's request that CANNOT
                          be mapped to any of the above fields (list of strings).
-                         Examples: "non-MBA CEO", "high ARR", "female leadership",
+                         Examples: "non-MBA CEO", "CEO under 40 years old",
+                         "CEO going through divorce", "high ARR", "female leadership",
                          "ethical supply chain", "AI-first company".
                          ALWAYS include criteria you cannot quantify here.
 
@@ -302,6 +510,7 @@ Examples:
   "high FCF yield with EPS growth" -> {"min_fcf_yield": 5, "min_eps_growth": 10}
   "companies with non MBA CEOs in tech" -> {"sectors": ["Technology"], "unresolved": ["non-MBA CEO"]}
   "high ARR to expenses ratio" -> {"unresolved": ["high ARR to expenses ratio"]}
+  "small cap ceo under 40 in manufacturing" -> {"min_market_cap": 0.3, "max_market_cap": 2, "industry": "Manufacturing", "unresolved": ["CEO under 40 years old"]}
   "steel companies with PE under 15" -> {"industry": "Steel", "max_pe_ratio": 15}
   "low-beta utilities" -> {"sectors": ["Utilities"], "max_beta": 0.8}
 
@@ -309,74 +518,12 @@ Omit any field the user did not mention.  Always respond with valid JSON only.\
 """
 
 
-async def intent_parser(prompt: str) -> dict[str, Any]:
-    """Call the local Ollama model to extract structured screening rules.
-
-    Sends the user's free-text prompt to Ollama's chat endpoint and parses
-    the returned JSON into a dict of screening rules.
-
-    Args:
-        prompt: Natural-language screening request from the user.
-
-    Returns:
-        A dict that may contain keys such as ``min_market_cap``,
-        ``max_market_cap``, ``min_fcf``, ``max_debt_to_equity``,
-        ``sectors``, and ``min_revenue_growth``.
-
-    Raises:
-        HTTPException: If Ollama is unreachable, times out, or returns
-            unparseable JSON.
-    """
-    payload = {
-        "model": OLLAMA_MODEL,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
-        ],
-        "stream": False,
-        "options": {"temperature": 0.0},
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(OLLAMA_URL, json=payload)
-            resp.raise_for_status()
-    except httpx.TimeoutException:
-        logger.error("Ollama request timed out")
-        raise HTTPException(
-            status_code=504,
-            detail="LLM request timed out — is Ollama running?",
-        )
-    except httpx.HTTPError as exc:
-        logger.error("Ollama HTTP error: %s", exc)
-        raise HTTPException(
-            status_code=502,
-            detail=f"Could not reach Ollama: {exc}",
-        )
-
-    # Extract the assistant's reply text
-    try:
-        raw_text: str = resp.json()["message"]["content"]
-    except (KeyError, TypeError) as exc:
-        logger.error("Unexpected Ollama response shape: %s", exc)
-        raise HTTPException(
-            status_code=502,
-            detail="Ollama returned an unexpected response format.",
-        )
-
-    # Strip markdown fences and leading/trailing whitespace
+def _parse_llm_json(raw_text: str) -> dict | None:
+    """Extract first valid JSON object from LLM response text."""
     cleaned = raw_text.strip()
+    cleaned = re.sub(r"```(?:json)?", "", cleaned).strip()
 
-    # Remove ALL markdown code fences (local models often emit multiple blocks)
-    cleaned = re.sub(r"```(?:json)?", "", cleaned)
-    cleaned = cleaned.strip()
-
-    # If the LLM returned multiple JSON blocks separated by text like "or",
-    # extract the first valid JSON object.
-    rules = None
     json_candidates: list[str] = []
-
-    # Try to find JSON objects by matching balanced braces
     brace_depth = 0
     start_idx = None
     for i, ch in enumerate(cleaned):
@@ -390,24 +537,196 @@ async def intent_parser(prompt: str) -> dict[str, Any]:
                 json_candidates.append(cleaned[start_idx : i + 1])
                 start_idx = None
 
-    # If no brace-matched candidates, try the whole string as-is
     if not json_candidates:
         json_candidates = [cleaned]
 
     for candidate in json_candidates:
-        # Handle trailing commas (common with local models)
         candidate = re.sub(r",\s*([}\]])", r"\1", candidate)
         try:
-            rules = json.loads(candidate)
-            break  # Use the first successfully parsed JSON object
+            return json.loads(candidate)
         except json.JSONDecodeError:
             continue
+    return None
 
+
+async def _call_ollama(prompt: str) -> str | None:
+    """Try Ollama local LLM. Returns raw text or None on failure."""
+    payload = {
+        "model": OLLAMA_MODEL,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        "stream": False,
+        "options": {"temperature": 0.0},
+    }
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(OLLAMA_URL, json=payload)
+            resp.raise_for_status()
+        return resp.json()["message"]["content"]
+    except Exception as exc:
+        logger.warning("Ollama failed: %s", exc)
+        return None
+
+
+async def _call_groq(prompt: str) -> str | None:
+    """Try Groq cloud LLM. Returns raw text or None on failure."""
+    api_key = os.environ.get("GROQ_API_KEY", "")
+    if not api_key:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": "llama-3.3-70b-versatile",
+                    "messages": [
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": 0.0,
+                },
+            )
+            resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
+    except Exception as exc:
+        logger.warning("Groq failed: %s", exc)
+        return None
+
+
+async def _call_gemini(prompt: str) -> str | None:
+    """Try Gemini cloud LLM. Returns raw text or None on failure."""
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    if not api_key:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
+                json={
+                    "contents": [{"parts": [{"text": f"{SYSTEM_PROMPT}\n\nUser query: {prompt}"}]}],
+                    "generationConfig": {"temperature": 0.0},
+                },
+            )
+            resp.raise_for_status()
+        return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+    except Exception as exc:
+        logger.warning("Gemini failed: %s", exc)
+        return None
+
+
+def _regex_intent_parser(prompt: str) -> dict[str, Any] | None:
+    """Fallback: extract screening rules from prompt using regex patterns.
+
+    Handles common queries without needing any LLM provider.
+    Returns None if the prompt is too complex to parse with regex.
+    """
+    lower = prompt.lower()
+    rules: dict[str, Any] = {}
+
+    # Sector detection
+    sector_map = {
+        "tech": "technology", "technology": "technology",
+        "health": "health care", "healthcare": "health care", "pharma": "health care",
+        "biotech": "health care",
+        "financ": "financials", "bank": "financials",
+        "energy": "energy", "oil": "energy", "gas": "energy",
+        "consumer": "consumer discretionary", "retail": "consumer discretionary",
+        "industrial": "industrials", "manufactur": "industrials",
+        "real estate": "real estate", "reit": "real estate",
+        "utilit": "utilities",
+        "material": "materials", "mining": "materials",
+        "communicat": "communication services", "media": "communication services",
+        "telecom": "communication services",
+    }
+    for keyword, sector in sector_map.items():
+        if keyword in lower:
+            rules["sectors"] = [sector]
+            break
+
+    # Market cap
+    if "large cap" in lower or "large-cap" in lower or "mega cap" in lower:
+        rules["min_market_cap"] = 10
+    elif "mid cap" in lower or "mid-cap" in lower or "midcap" in lower:
+        rules["min_market_cap"] = 2
+        rules["max_market_cap"] = 10
+    elif "small cap" in lower or "small-cap" in lower or "smallcap" in lower:
+        rules["max_market_cap"] = 2
+    elif "micro cap" in lower or "penny" in lower:
+        rules["max_market_cap"] = 0.3
+
+    # Revenue/earnings growth
+    if "high growth" in lower or "high revenue growth" in lower or "fast growing" in lower:
+        rules["min_revenue_growth"] = 15
+    elif "growth" in lower and "revenue" in lower:
+        rules["min_revenue_growth"] = 10
+
+    # Value metrics
+    if "undervalued" in lower or "value stock" in lower or "cheap" in lower:
+        rules["max_pe_ratio"] = 15
+    if "low pe" in lower or "low p/e" in lower:
+        rules["max_pe_ratio"] = 12
+
+    # Dividend
+    if "dividend" in lower or "income" in lower or "yield" in lower:
+        rules["min_dividend_yield"] = 2.0
+
+    # Debt
+    if "low debt" in lower or "no debt" in lower or "debt free" in lower:
+        rules["max_debt_to_equity"] = 0.5
+
+    # Profitability
+    if "profitable" in lower or "high margin" in lower:
+        rules["min_profit_margin"] = 10
+
+    # FCF
+    if "free cash flow" in lower or "fcf" in lower or "cash flow" in lower:
+        rules["min_fcf"] = 100
+
+    # Beta / volatility
+    if "volatile" in lower or "high beta" in lower:
+        rules["min_beta"] = 1.5
+    elif "stable" in lower or "low beta" in lower or "defensive" in lower:
+        rules["max_beta"] = 0.8
+
+    if rules:
+        logger.info("Screener intent parsed via regex fallback: %s", rules)
+        return rules
+    return None
+
+
+async def intent_parser(prompt: str) -> dict[str, Any]:
+    """Extract structured screening rules from a natural-language prompt.
+
+    Tries providers in order: Ollama (local) -> Groq -> Gemini -> regex fallback.
+    """
+    raw_text = None
+
+    # Try each LLM provider in order
+    for name, caller in [("ollama", _call_ollama), ("groq", _call_groq), ("gemini", _call_gemini)]:
+        raw_text = await caller(prompt)
+        if raw_text:
+            logger.info("Screener intent parsed via %s", name)
+            break
+
+    if not raw_text:
+        # Regex fallback — no LLM needed
+        regex_rules = _regex_intent_parser(prompt)
+        if regex_rules:
+            return regex_rules
+        raise HTTPException(
+            status_code=502,
+            detail="No LLM provider available and query too complex for regex fallback",
+        )
+
+    rules = _parse_llm_json(raw_text)
     if rules is None:
-        logger.error("Could not parse LLM output as JSON: %s", cleaned)
+        logger.error("Could not parse LLM output as JSON: %s", raw_text[:300])
         raise HTTPException(
             status_code=422,
-            detail=f"LLM returned invalid JSON: {cleaned[:300]}",
+            detail=f"LLM returned invalid JSON: {raw_text[:300]}",
         )
 
     # Remove null values — treat them as "not specified" (same as omitted)
@@ -732,6 +1051,160 @@ def _fetch_fmp_fundamentals(symbols: list[str]) -> dict[str, dict]:
     return universe
 
 
+# ---------------------------------------------------------------------------
+# Full universe cache — progressive fundamentals fetching for 9,920+ tickers
+# ---------------------------------------------------------------------------
+import os
+import time
+import threading
+from pathlib import Path
+
+_UNIVERSE_CACHE_DIR = Path(__file__).parent / "data" / "universe_cache"
+_UNIVERSE_CACHE_FILE = _UNIVERSE_CACHE_DIR / "fundamentals.json"
+_UNIVERSE_CACHE_MAX_AGE = 7 * 86400  # 7 days
+_universe_fetch_lock = threading.Lock()
+_universe_fetch_running = False
+
+
+def _load_full_universe_cache() -> dict[str, dict] | None:
+    """Load cached fundamentals for full universe. Returns None if cache is empty/stale."""
+    if not _UNIVERSE_CACHE_FILE.exists():
+        # Trigger background fetch on first call
+        _trigger_universe_fetch()
+        return None
+    try:
+        raw = json.loads(_UNIVERSE_CACHE_FILE.read_text())
+        if time.time() - raw.get("fetched_at", 0) > _UNIVERSE_CACHE_MAX_AGE:
+            _trigger_universe_fetch()  # refresh in background
+            # Still use stale data for this request
+        stocks = raw.get("stocks", {})
+        if len(stocks) < 100:
+            _trigger_universe_fetch()
+            return None
+        return stocks
+    except (json.JSONDecodeError, OSError, KeyError):
+        return None
+
+
+def _trigger_universe_fetch():
+    """Kick off background thread to fetch fundamentals for full universe."""
+    global _universe_fetch_running
+    with _universe_fetch_lock:
+        if _universe_fetch_running:
+            return
+        _universe_fetch_running = True
+    t = threading.Thread(target=_fetch_universe_fundamentals_bg, daemon=True)
+    t.start()
+
+
+def _fetch_universe_fundamentals_bg():
+    """Background: fetch fundamentals for all US tickers from SEC EDGAR universe.
+
+    Uses strategy_engine's get_sp500_fundamentals() which already handles
+    yfinance -> Yahoo v8 API fallbacks with rate limit backoff.
+    Fetches in batches, saves progressively.
+    """
+    global _universe_fetch_running
+    try:
+        from research.stock_universe import get_universe
+        from strategy_engine import get_sp500_fundamentals
+
+        # Get all US ticker symbols
+        all_stocks = get_universe(exchange=None, include_hkex=False)
+        all_tickers = [s["ticker"] if isinstance(s, dict) else s for s in all_stocks]
+        logger.info("Universe fetch: %d tickers to process", len(all_tickers))
+
+        # Load existing cache to do incremental updates
+        existing = {}
+        if _UNIVERSE_CACHE_FILE.exists():
+            try:
+                raw = json.loads(_UNIVERSE_CACHE_FILE.read_text())
+                existing = raw.get("stocks", {})
+            except Exception:
+                pass
+
+        # Only fetch tickers we don't already have (or that are stale)
+        need_fetch = [t for t in all_tickers if t not in existing]
+        if not need_fetch:
+            logger.info("Universe cache is complete (%d tickers), skipping fetch", len(existing))
+            return
+
+        # Fetch in chunks of 500 (get_sp500_fundamentals does its own batching of 20 internally)
+        CHUNK = 500
+        for i in range(0, len(need_fetch), CHUNK):
+            chunk = need_fetch[i:i + CHUNK]
+            logger.info("Universe fetch: chunk %d-%d of %d", i, i + len(chunk), len(need_fetch))
+            try:
+                chunk_data = get_sp500_fundamentals(symbols=chunk)
+                existing.update(chunk_data)
+                # Save after each chunk (progressive)
+                _save_universe_cache(existing)
+                logger.info("Universe cache: %d total stocks cached", len(existing))
+            except Exception as e:
+                logger.warning("Universe fetch chunk failed: %s", e)
+                # Save what we have and stop
+                if existing:
+                    _save_universe_cache(existing)
+                break
+    except Exception as e:
+        logger.error("Universe fundamentals fetch failed: %s", e)
+    finally:
+        with _universe_fetch_lock:
+            _universe_fetch_running = False
+
+
+def _save_universe_cache(stocks: dict):
+    """Save universe fundamentals cache to disk."""
+    _UNIVERSE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    import tempfile
+    cache = {"fetched_at": time.time(), "count": len(stocks), "stocks": stocks}
+    tmp = str(_UNIVERSE_CACHE_FILE) + ".tmp"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(cache, f)
+        os.replace(tmp, str(_UNIVERSE_CACHE_FILE))
+    except Exception:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+@router.get(
+    "/api/generate-asset/universe-status",
+    summary="Check universe fundamentals cache status",
+    tags=["Swarm Engine"],
+)
+async def get_universe_status():
+    """Returns status of the full universe fundamentals cache."""
+    if not _UNIVERSE_CACHE_FILE.exists():
+        return {"cached": 0, "status": "not_started", "stale": True}
+    try:
+        raw = json.loads(_UNIVERSE_CACHE_FILE.read_text())
+        count = raw.get("count", 0)
+        fetched_at = raw.get("fetched_at", 0)
+        age_hours = (time.time() - fetched_at) / 3600
+        return {
+            "cached": count,
+            "status": "fetching" if _universe_fetch_running else "ready",
+            "age_hours": round(age_hours, 1),
+            "stale": age_hours > 168,  # 7 days
+        }
+    except Exception:
+        return {"cached": 0, "status": "error", "stale": True}
+
+
+@router.post(
+    "/api/generate-asset/universe-refresh",
+    summary="Trigger background refresh of universe fundamentals",
+    tags=["Swarm Engine"],
+)
+async def trigger_universe_refresh():
+    """Trigger a background fetch of fundamentals for all US tickers."""
+    if _universe_fetch_running:
+        return {"status": "already_running"}
+    _trigger_universe_fetch()
+    return {"status": "started"}
+
+
 @router.post(
     "/api/generate-asset/screen",
     response_model=ScreenResponse,
@@ -806,7 +1279,25 @@ async def screen_stocks(body: ScreenRequest) -> ScreenResponse:
         except Exception as e:
             logger.debug("SP500 cache fallback failed: %s", e)
 
-    # Path 3: Mock universe fallback
+    # Path 3: Full universe fundamentals cache (9,920+ tickers from SEC EDGAR)
+    if not tickers:
+        try:
+            full_universe = _load_full_universe_cache()
+            if full_universe:
+                full_rules = dict(rules)
+                if "min_market_cap" in full_rules:
+                    full_rules["min_market_cap"] = full_rules["min_market_cap"] * 1e9
+                if "max_market_cap" in full_rules:
+                    full_rules["max_market_cap"] = full_rules["max_market_cap"] * 1e9
+                if "min_fcf" in full_rules:
+                    full_rules["min_fcf"] = full_rules["min_fcf"] * 1e6
+                tickers = swarm_evaluator(full_rules, full_universe)
+                universe_size = len(full_universe)
+                logger.info("Full universe screener: %d matches from %d stocks", len(tickers), universe_size)
+        except Exception as e:
+            logger.debug("Full universe cache fallback failed: %s", e)
+
+    # Path 4: Mock universe fallback
     if not tickers:
         tickers = swarm_evaluator(rules, MOCK_UNIVERSE)
         universe_size = len(MOCK_UNIVERSE)
@@ -823,9 +1314,19 @@ async def screen_stocks(body: ScreenRequest) -> ScreenResponse:
         try:
             from strategy_engine import research_filter
             # Build sp500_list-like structure with company names for Wikipedia
+            # Pull names from stock_universe.py for tickers not in _COMPANY_NAMES
+            _universe_names = {}
+            try:
+                from research.stock_universe import get_universe
+                for s in get_universe(include_hkex=False):
+                    if isinstance(s, dict) and s.get("ticker") and s.get("company_name"):
+                        _universe_names[s["ticker"]] = s["company_name"]
+            except Exception:
+                pass
+
             ticker_list = []
             for t in tickers:
-                name = _COMPANY_NAMES.get(t, t)
+                name = _COMPANY_NAMES.get(t) or _universe_names.get(t, t)
                 ticker_list.append({"symbol": t, "name": name})
 
             # Try FMP for names we don't have in the map

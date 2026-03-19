@@ -9,7 +9,11 @@ This FastAPI router provides a backtesting endpoint that:
 import asyncio
 import math
 import logging
+import os
+import time
+from datetime import datetime, timedelta
 
+import httpx
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -78,31 +82,20 @@ class BacktestResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def fetch_historical_data(tickers: list[str], period: str = "1y") -> pd.DataFrame:
-    """Download adjusted close prices for *tickers* plus the SPY benchmark.
+def _period_to_days(period: str) -> int:
+    """Convert a yfinance-style period string to approximate calendar days."""
+    p = period.lower().strip()
+    if p.endswith("mo"):
+        return int(p[:-2]) * 30
+    if p.endswith("y"):
+        return int(p[:-1]) * 365
+    if p.endswith("d"):
+        return int(p[:-1])
+    return 365  # default 1y
 
-    Args:
-        tickers: Equity ticker symbols (e.g. ``["AAPL", "MSFT"]``).
-        period: Lookback window understood by ``yfinance.download``
-                (e.g. ``"6mo"``, ``"1y"``, ``"2y"``, ``"5y"``).
 
-    Returns:
-        A ``pd.DataFrame`` indexed by date with one column per valid ticker
-        and a ``SPY`` column.  Tickers that fail to download are silently
-        dropped.  If *no* data can be retrieved the returned DataFrame is
-        empty.
-
-    Raises:
-        No exceptions are raised; errors are logged and the function degrades
-        gracefully.
-    """
-    # Normalise and deduplicate, always include SPY
-    clean_tickers: list[str] = list(
-        dict.fromkeys(t.strip().upper() for t in tickers if t.strip())
-    )
-    if BENCHMARK_TICKER not in clean_tickers:
-        clean_tickers.append(BENCHMARK_TICKER)
-
+def _yf_download(clean_tickers: list[str], period: str) -> pd.DataFrame:
+    """Primary source: yfinance library."""
     try:
         df: pd.DataFrame = yf.download(
             tickers=clean_tickers,
@@ -112,39 +105,281 @@ def fetch_historical_data(tickers: list[str], period: str = "1y") -> pd.DataFram
             threads=True,
         )
     except Exception as exc:
-        logger.error("yfinance download failed: %s", exc)
+        logger.warning("yfinance download failed: %s", exc)
         return pd.DataFrame()
 
     if df.empty:
-        logger.warning("yfinance returned empty DataFrame for tickers=%s", clean_tickers)
         return df
 
-    # yf.download returns a MultiIndex (Price, Ticker) when len(tickers) > 1.
-    # We want only the Close column for each ticker.
     if isinstance(df.columns, pd.MultiIndex):
-        # Pick 'Close' level (auto_adjust=True already adjusts prices).
         if "Close" in df.columns.get_level_values(0):
             df = df["Close"]
         else:
-            # Fallback: take the first price level available.
             first_level = df.columns.get_level_values(0)[0]
             df = df[first_level]
     else:
-        # Single ticker — column names are price fields.  Keep Close only.
         if "Close" in df.columns:
             symbol = clean_tickers[0]
             df = df[["Close"]].rename(columns={"Close": symbol})
         else:
             return pd.DataFrame()
 
-    # Drop any columns that are entirely NaN (invalid tickers).
-    df = df.dropna(axis=1, how="all")
-
-    # Forward-fill then back-fill small gaps (holidays that differ across
-    # exchanges, etc.).
-    df = df.ffill().bfill()
-
     return df
+
+
+def _yahoo_chart_api(tickers: list[str], period: str) -> pd.DataFrame:
+    """Fallback 1: Yahoo Finance v8 chart API via direct HTTP.
+
+    Bypasses yfinance library's rate-limit detection which is more
+    aggressive than the raw API endpoint.
+    """
+    days = _period_to_days(period)
+    end_ts = int(time.time())
+    start_ts = end_ts - days * 86400
+    interval = "1d"
+
+    frames: dict[str, pd.Series] = {}
+    with httpx.Client(timeout=15, follow_redirects=True) as client:
+        for ticker in tickers:
+            try:
+                url = (
+                    f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+                    f"?period1={start_ts}&period2={end_ts}&interval={interval}"
+                )
+                resp = client.get(url, headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                })
+                if resp.status_code != 200:
+                    logger.debug("Yahoo chart API %d for %s", resp.status_code, ticker)
+                    continue
+                data = resp.json()
+                result = data.get("chart", {}).get("result", [])
+                if not result:
+                    continue
+                timestamps = result[0].get("timestamp", [])
+                closes = (
+                    result[0]
+                    .get("indicators", {})
+                    .get("quote", [{}])[0]
+                    .get("close", [])
+                )
+                if not timestamps or not closes or len(timestamps) != len(closes):
+                    continue
+                dates = pd.to_datetime(timestamps, unit="s").normalize()
+                series = pd.Series(closes, index=dates, name=ticker, dtype=float)
+                series = series.dropna()
+                if len(series) > 5:
+                    frames[ticker] = series
+            except Exception as exc:
+                logger.debug("Yahoo chart API error for %s: %s", ticker, exc)
+                continue
+
+    if not frames:
+        return pd.DataFrame()
+    df = pd.DataFrame(frames)
+    return df
+
+
+def _finnhub_candles(tickers: list[str], period: str) -> pd.DataFrame:
+    """Fallback 2: Finnhub stock candles API (requires FINNHUB_API_KEY)."""
+    api_key = os.environ.get("FINNHUB_API_KEY", "")
+    if not api_key:
+        return pd.DataFrame()
+
+    days = _period_to_days(period)
+    end_ts = int(time.time())
+    start_ts = end_ts - days * 86400
+
+    frames: dict[str, pd.Series] = {}
+    with httpx.Client(timeout=15) as client:
+        for ticker in tickers:
+            try:
+                url = (
+                    f"https://finnhub.io/api/v1/stock/candle"
+                    f"?symbol={ticker}&resolution=D"
+                    f"&from={start_ts}&to={end_ts}"
+                )
+                resp = client.get(url, headers={"X-Finnhub-Token": api_key})
+                if resp.status_code != 200:
+                    continue
+                data = resp.json()
+                if data.get("s") != "ok" or not data.get("t"):
+                    continue
+                dates = pd.to_datetime(data["t"], unit="s").normalize()
+                closes = data.get("c", [])
+                if len(dates) != len(closes):
+                    continue
+                series = pd.Series(closes, index=dates, name=ticker, dtype=float)
+                series = series.dropna()
+                if len(series) > 5:
+                    frames[ticker] = series
+                # Respect Finnhub free tier rate limit (30 calls/sec)
+                time.sleep(0.05)
+            except Exception as exc:
+                logger.debug("Finnhub candle error for %s: %s", ticker, exc)
+                continue
+
+    if not frames:
+        return pd.DataFrame()
+    return pd.DataFrame(frames)
+
+
+def _alpha_vantage_daily(tickers: list[str], period: str) -> pd.DataFrame:
+    """Fallback 3: Alpha Vantage TIME_SERIES_DAILY (requires ALPHA_VANTAGE_API_KEY).
+
+    Free tier: 25 requests/day.  Used only as last resort.
+    """
+    api_key = os.environ.get("ALPHA_VANTAGE_API_KEY", "")
+    if not api_key:
+        return pd.DataFrame()
+
+    days = _period_to_days(period)
+    outputsize = "full" if days > 100 else "compact"
+
+    frames: dict[str, pd.Series] = {}
+    with httpx.Client(timeout=20) as client:
+        for ticker in tickers:
+            try:
+                url = (
+                    f"https://www.alphavantage.co/query"
+                    f"?function=TIME_SERIES_DAILY_ADJUSTED&symbol={ticker}"
+                    f"&outputsize={outputsize}&apikey={api_key}"
+                )
+                resp = client.get(url)
+                if resp.status_code != 200:
+                    continue
+                data = resp.json()
+                ts = data.get("Time Series (Daily)", {})
+                if not ts:
+                    continue
+                dates = []
+                closes = []
+                cutoff = datetime.now() - timedelta(days=days)
+                for date_str, vals in sorted(ts.items()):
+                    dt = datetime.strptime(date_str, "%Y-%m-%d")
+                    if dt >= cutoff:
+                        dates.append(dt)
+                        closes.append(float(vals.get("5. adjusted close", vals.get("4. close", 0))))
+                if len(dates) > 5:
+                    series = pd.Series(closes, index=pd.DatetimeIndex(dates), name=ticker, dtype=float)
+                    frames[ticker] = series
+                # Alpha Vantage: 5 calls/min on free tier
+                time.sleep(0.5)
+            except Exception as exc:
+                logger.debug("Alpha Vantage error for %s: %s", ticker, exc)
+                continue
+
+    if not frames:
+        return pd.DataFrame()
+    return pd.DataFrame(frames)
+
+
+def _scrapling_yahoo_history(tickers: list[str], period: str) -> pd.DataFrame:
+    """Fallback 4: Scrape Yahoo Finance historical data pages using Scrapling.
+
+    Uses the download page URL which returns CSV data directly.
+    """
+    try:
+        from scrapling import Fetcher
+    except ImportError:
+        logger.debug("Scrapling not available for history fallback")
+        return pd.DataFrame()
+
+    days = _period_to_days(period)
+    end_ts = int(time.time())
+    start_ts = end_ts - days * 86400
+
+    frames: dict[str, pd.Series] = {}
+    fetcher = Fetcher(auto_match=False)
+    for ticker in tickers:
+        try:
+            # Yahoo Finance download endpoint returns CSV
+            url = (
+                f"https://query1.finance.yahoo.com/v7/finance/download/{ticker}"
+                f"?period1={start_ts}&period2={end_ts}&interval=1d&events=history"
+            )
+            resp = fetcher.get(url)
+            if not resp or resp.status != 200:
+                continue
+            # Parse CSV text
+            import io
+            csv_text = resp.text
+            if not csv_text or "Date" not in csv_text[:50]:
+                continue
+            csv_df = pd.read_csv(io.StringIO(csv_text), parse_dates=["Date"])
+            if csv_df.empty or "Close" not in csv_df.columns:
+                continue
+            csv_df = csv_df.set_index("Date").sort_index()
+            series = csv_df["Close"].dropna().rename(ticker)
+            if len(series) > 5:
+                frames[ticker] = series
+        except Exception as exc:
+            logger.debug("Scrapling Yahoo history error for %s: %s", ticker, exc)
+            continue
+
+    if not frames:
+        return pd.DataFrame()
+    return pd.DataFrame(frames)
+
+
+def fetch_historical_data(tickers: list[str], period: str = "1y") -> pd.DataFrame:
+    """Download adjusted close prices for *tickers* plus the SPY benchmark.
+
+    Tries multiple data sources in order:
+      1. yfinance library (primary)
+      2. Yahoo Finance v8 chart API (direct HTTP, bypasses yfinance rate limiter)
+      3. Finnhub candles API (if FINNHUB_API_KEY set)
+      4. Alpha Vantage daily (if ALPHA_VANTAGE_API_KEY set, 25 req/day limit)
+      5. Scrapling Yahoo Finance scrape (last resort web scraper)
+
+    Returns:
+        A ``pd.DataFrame`` indexed by date with one column per valid ticker
+        and a ``SPY`` column.
+    """
+    clean_tickers: list[str] = list(
+        dict.fromkeys(t.strip().upper() for t in tickers if t.strip())
+    )
+    if BENCHMARK_TICKER not in clean_tickers:
+        clean_tickers.append(BENCHMARK_TICKER)
+
+    sources = [
+        ("yfinance", _yf_download),
+        ("yahoo_chart_api", _yahoo_chart_api),
+        ("finnhub", _finnhub_candles),
+        ("alpha_vantage", _alpha_vantage_daily),
+        ("scrapling_yahoo", _scrapling_yahoo_history),
+    ]
+
+    for source_name, fetch_fn in sources:
+        try:
+            df = fetch_fn(clean_tickers, period)
+        except Exception as exc:
+            logger.warning("%s fetch failed: %s", source_name, exc)
+            continue
+
+        if df.empty:
+            logger.info("%s returned no data, trying next source...", source_name)
+            continue
+
+        # Drop columns that are entirely NaN
+        df = df.dropna(axis=1, how="all")
+
+        if df.empty or BENCHMARK_TICKER not in df.columns:
+            logger.info("%s missing benchmark, trying next source...", source_name)
+            continue
+
+        # Forward-fill then back-fill small gaps
+        df = df.ffill().bfill()
+
+        found_tickers = [c for c in df.columns if c != BENCHMARK_TICKER]
+        logger.info(
+            "Backtest data from %s: %d tickers, %d days",
+            source_name, len(found_tickers), len(df),
+        )
+        return df
+
+    logger.warning("All data sources exhausted for tickers=%s", clean_tickers)
+    return pd.DataFrame()
 
 
 def calculate_metrics(portfolio_prices: pd.DataFrame, benchmark_prices: pd.Series) -> dict:

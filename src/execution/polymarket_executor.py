@@ -96,6 +96,42 @@ class PolymarketExecutor(BaseExecutor):
         idx = 0 if side.upper() == "YES" else 1
         return tokens[idx]
 
+    async def _resolve_token_id_http(self, condition_id: str, side: str) -> str | None:
+        """Resolve conditionId + side to token_id via public CLOB REST API (no auth needed).
+
+        Fallback for get_current_price() when the CLOB SDK client is not configured.
+        Uses GET /markets/{condition_id} which returns token metadata.
+        """
+        if condition_id in self._token_id_cache:
+            tokens = self._token_id_cache[condition_id]
+        else:
+            http = await self._get_http()
+            try:
+                r = await http.get(f"{CLOB_HOST}/markets/{condition_id}")
+                if r.status_code != 200:
+                    logger.warning("CLOB market lookup failed for %s: HTTP %d", condition_id[:16], r.status_code)
+                    return None
+                market = r.json()
+                # CLOB REST returns {"tokens": [{"token_id": "...", "outcome": "Yes"}, ...]}
+                tokens_list = market.get("tokens", [])
+                if len(tokens_list) >= 2:
+                    tokens = [tokens_list[0]["token_id"], tokens_list[1]["token_id"]]
+                else:
+                    # Fallback: try clobTokenIds field (some responses use this)
+                    tokens = market.get("clobTokenIds", [])
+                if not tokens or len(tokens) < 2:
+                    logger.warning("Cannot resolve tokens for %s: got %s", condition_id[:16], tokens_list or tokens)
+                    return None
+                self._token_id_cache[condition_id] = tokens
+                logger.info("Resolved condition %s to tokens YES=%s NO=%s (via REST)",
+                            condition_id[:12], tokens[0][:12], tokens[1][:12])
+            except Exception as e:
+                logger.warning("CLOB REST token resolution failed for %s: %s", condition_id[:16], e)
+                return None
+
+        idx = 0 if side.upper() in ("YES", "BUY") else 1
+        return tokens[idx]
+
     def _parse_asset_id(self, asset_id: str) -> tuple[str, str]:
         """Parse 'conditionId:YES' -> (conditionId, 'YES')."""
         if ":" in asset_id:
@@ -270,41 +306,67 @@ class PolymarketExecutor(BaseExecutor):
             return []
 
     async def get_current_price(self, asset_id: str) -> float:
-        """Fetch current price from Polymarket Gamma API.
+        """Fetch current price from Polymarket CLOB (public, no auth needed).
 
         asset_id: 'conditionId:YES' or 'conditionId:NO' or just 'conditionId'.
         Returns the price for the specified side.
+
+        Strategy:
+        1. Resolve condition_id to CLOB token_id (cached after first lookup)
+        2. Get midpoint price from CLOB REST API (/midpoint?token_id=X)
+        3. Fallback: Gamma API with clob_token_ids param (not condition_id, which is broken)
         """
         try:
             import json as _json
             condition_id, side = self._parse_asset_id(asset_id)
-
             http = await self._get_http()
-            # Use condition_id query param — /markets/{id} returns 422 for conditionIds
-            r = await http.get(f"{GAMMA_API}/markets", params={"condition_id": condition_id})
-            if r.status_code == 200:
-                data = r.json()
-                markets = data if isinstance(data, list) else [data]
-                if markets:
-                    market = markets[0]
-                    raw_prices = market.get("outcomePrices", "[]")
-                    # outcomePrices is a JSON string like '["0.475", "0.525"]'
-                    if isinstance(raw_prices, str):
-                        try:
-                            parsed = _json.loads(raw_prices)
-                        except Exception:
-                            parsed = []
-                    else:
-                        parsed = raw_prices
-                    if parsed and len(parsed) >= 2:
-                        if side == "NO":
-                            return float(parsed[1])
-                        return float(parsed[0])
-                    elif parsed and len(parsed) >= 1:
-                        yes_price = float(parsed[0])
-                        if side == "NO":
-                            return 1.0 - yes_price
-                        return yes_price
+
+            # Step 1: Resolve to token_id (public CLOB REST, no auth)
+            token_id = await self._resolve_token_id_http(condition_id, side)
+            if not token_id:
+                logger.warning("Price lookup failed for %s: cannot resolve token_id", asset_id)
+                return 0.0
+
+            # Step 2: Get midpoint from CLOB (most reliable, real-time)
+            try:
+                r = await http.get(f"{CLOB_HOST}/midpoint", params={"token_id": token_id})
+                if r.status_code == 200:
+                    data = r.json()
+                    mid = float(data.get("mid", 0))
+                    if mid > 0:
+                        return mid
+            except Exception as e:
+                logger.debug("CLOB midpoint failed for %s: %s — trying Gamma fallback", asset_id, e)
+
+            # Step 3: Fallback — Gamma API with clob_token_ids (NOT condition_id which is broken)
+            try:
+                r = await http.get(f"{GAMMA_API}/markets", params={"clob_token_ids": token_id})
+                if r.status_code == 200:
+                    data = r.json()
+                    markets = data if isinstance(data, list) else [data]
+                    if markets:
+                        market = markets[0]
+                        raw_prices = market.get("outcomePrices", "[]")
+                        if isinstance(raw_prices, str):
+                            try:
+                                parsed = _json.loads(raw_prices)
+                            except Exception:
+                                parsed = []
+                        else:
+                            parsed = raw_prices
+                        if parsed and len(parsed) >= 2:
+                            if side in ("NO", "SELL"):
+                                return float(parsed[1])
+                            return float(parsed[0])
+                        elif parsed and len(parsed) >= 1:
+                            yes_price = float(parsed[0])
+                            if side in ("NO", "SELL"):
+                                return 1.0 - yes_price
+                            return yes_price
+            except Exception as e:
+                logger.debug("Gamma fallback failed for %s: %s", asset_id, e)
+
+            logger.warning("All price methods failed for %s (token_id=%s)", asset_id, token_id[:16])
         except Exception as e:
             logger.warning("Polymarket price failed for %s: %s", asset_id, e)
         return 0.0

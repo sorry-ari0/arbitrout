@@ -1,4 +1,10 @@
-"""Arbitrage engine — finds cross-platform spread opportunities."""
+"""Arbitrage engine — finds cross-platform spread opportunities.
+
+Supports two types of opportunities:
+1. Pure arbitrage: same event on different platforms, profit = 1 - (yes + no)
+2. Synthetic derivatives: related events with different price targets (e.g., BTC >$71K
+   and BTC >$74K). Combines positions to profit from a specific price range landing.
+"""
 import json
 import logging
 import time
@@ -8,7 +14,7 @@ import threading
 
 from adapters.models import NormalizedEvent, MatchedEvent, ArbitrageOpportunity
 from adapters.registry import AdapterRegistry
-from event_matcher import match_events
+from event_matcher import match_events, _extract_crypto
 
 logger = logging.getLogger("arbitrage_engine")
 
@@ -18,16 +24,129 @@ DATA_DIR = Path(__file__).parent / "data" / "arbitrage"
 # ============================================================
 # ARBITRAGE CALCULATOR
 # ============================================================
+def _markets_have_same_target(markets: list[NormalizedEvent]) -> bool:
+    """Check if all markets in a group target the same crypto price and type.
+
+    Returns False (= synthetic) when:
+    - Price targets differ by >2%
+    - Market types differ (e.g., "between $74K-$76K" vs "above $74K")
+    """
+    cryptos = []
+    for m in markets:
+        crypto = _extract_crypto(m.title)
+        if crypto["price"]:
+            cryptos.append(crypto)
+    if len(cryptos) < 2:
+        return True  # Can't tell, assume same
+
+    # Check if any markets are range ("between") vs directional ("above"/"below")
+    directions = set(c.get("direction") for c in cryptos if c.get("direction"))
+    if "between" in directions and directions - {"between"}:
+        return False  # Mix of range and directional = synthetic
+
+    # All prices within 2% of each other = same target
+    prices = [c["price"] for c in cryptos]
+    lo, hi = min(prices), max(prices)
+    if hi == 0:
+        return True
+    return (lo / hi) >= 0.98
+
+
+def _build_synthetic_info(yes_market: NormalizedEvent,
+                          no_market: NormalizedEvent) -> dict:
+    """Build synthetic derivative details from two markets with different targets.
+
+    Example: BTC >$74K (YES=13c) on Polymarket + BTC >$71K (NO=1.6c) on Limitless.
+    These are NOT the same event — combining them creates a synthetic range bet.
+
+    Scenarios for "buy YES on higher strike, buy NO on lower strike":
+      - Price > high_strike: YES wins ($1), NO loses ($0) → net = $1 - cost
+      - low_strike < Price < high_strike: YES loses ($0), NO wins ($1) → net = $1 - cost
+      - Price < low_strike: both lose → net = -(yes_cost + no_cost)
+
+    The "sweet spot" is the middle scenario — profitable if price lands in the range.
+    """
+    yes_crypto = _extract_crypto(yes_market.title)
+    no_crypto = _extract_crypto(no_market.title)
+
+    yes_target = yes_crypto.get("price") or 0
+    no_target = no_crypto.get("price") or 0
+    yes_dir = yes_crypto.get("direction", "")
+    no_dir = no_crypto.get("direction", "")
+
+    # Determine which is the higher vs lower strike
+    if yes_target >= no_target:
+        high_strike = yes_target
+        low_strike = no_target
+    else:
+        high_strike = no_target
+        low_strike = yes_target
+
+    # Detect market type mix (range vs directional)
+    market_types = set(filter(None, [yes_dir, no_dir]))
+    is_range_mix = "between" in market_types and market_types - {"between"}
+
+    yes_cost = yes_market.yes_price
+    no_cost = no_market.no_price
+    total_cost = yes_cost + no_cost
+
+    # Scenario payoffs (per $1 invested in each leg equally)
+    scenarios = {}
+    if high_strike > 0 and low_strike > 0:
+        scenarios = {
+            "above_both": {
+                "condition": f"Price > ${high_strike:,.0f}",
+                "yes_pays": 1.0, "no_pays": 0.0,
+                "net": round(1.0 - total_cost, 4),
+                "return_pct": round((1.0 - total_cost) / total_cost * 100, 1) if total_cost > 0 else 0,
+            },
+            "between": {
+                "condition": f"${low_strike:,.0f} < Price < ${high_strike:,.0f}",
+                "yes_pays": 0.0, "no_pays": 1.0,
+                "net": round(1.0 - total_cost, 4),
+                "return_pct": round((1.0 - total_cost) / total_cost * 100, 1) if total_cost > 0 else 0,
+            },
+            "below_both": {
+                "condition": f"Price < ${low_strike:,.0f}",
+                "yes_pays": 0.0, "no_pays": 0.0,
+                "net": round(-total_cost, 4),
+                "return_pct": -100.0,
+            },
+        }
+
+    synth_type = "range_vs_directional" if is_range_mix else "range_synthetic"
+
+    # For range-vs-directional mixes, annotate the specific market types
+    yes_type = "range" if yes_dir == "between" else ("directional" if yes_dir else "unknown")
+    no_type = "range" if no_dir == "between" else ("directional" if no_dir else "unknown")
+
+    return {
+        "type": synth_type,
+        "high_strike": high_strike,
+        "low_strike": low_strike,
+        "yes_target": yes_target,
+        "no_target": no_target,
+        "yes_direction": yes_dir,
+        "no_direction": no_dir,
+        "yes_market_type": yes_type,
+        "no_market_type": no_type,
+        "total_cost": round(total_cost, 4),
+        "scenarios": scenarios,
+        "win_conditions": 2,   # wins in 2 of 3 scenarios
+        "loss_conditions": 1,  # loses only if price drops below both
+        "yes_price_range": [yes_crypto.get("price_low"), yes_crypto.get("price_high")],
+        "no_price_range": [no_crypto.get("price_low"), no_crypto.get("price_high")],
+    }
+
+
 def find_arbitrage(matched: list[MatchedEvent],
                    min_spread: float = 0.0,
                    min_volume: int = 0) -> list[ArbitrageOpportunity]:
     """Find arbitrage opportunities across matched events.
 
-    For each MatchedEvent with markets on >=2 platforms:
-      best_yes = min(yes_price) across platforms
-      best_no  = min(no_price) across platforms
-      spread   = 1.0 - (best_yes + best_no)
-      If spread > 0 => arbitrage exists.
+    Two modes:
+    1. Pure arb (same target): profit = 1.0 - (yes + no), guaranteed if > 0
+    2. Synthetic derivative (different targets): wins in 2/3 scenarios, loses in 1
     """
     opportunities: list[ArbitrageOpportunity] = []
 
@@ -36,13 +155,18 @@ def find_arbitrage(matched: list[MatchedEvent],
             continue
 
         markets = match.markets
+        is_synthetic = not _markets_have_same_target(markets)
+        combined_vol = sum(m.volume for m in markets)
+
+        if combined_vol < min_volume:
+            continue
+
         # Find cheapest YES and cheapest NO across different platforms
         best_yes_market = min(markets, key=lambda m: m.yes_price)
         best_no_market = min(markets, key=lambda m: m.no_price)
 
-        # Skip if both are on the same platform (no arbitrage)
+        # Skip if both are on the same platform (no cross-platform play)
         if best_yes_market.platform == best_no_market.platform:
-            # Try second-best on other platform
             other_yes = [m for m in markets if m.platform != best_no_market.platform]
             other_no = [m for m in markets if m.platform != best_yes_market.platform]
             if other_yes:
@@ -52,27 +176,57 @@ def find_arbitrage(matched: list[MatchedEvent],
             else:
                 continue
 
-        spread = 1.0 - (best_yes_market.yes_price + best_no_market.no_price)
-        profit_pct = spread * 100.0
-        combined_vol = sum(m.volume for m in markets)
+        total_cost = best_yes_market.yes_price + best_no_market.no_price
 
-        if spread < min_spread:
-            continue
-        if combined_vol < min_volume:
-            continue
+        if is_synthetic:
+            # Synthetic: wins in 2/3 scenarios, each paying $1
+            # Expected value = (2/3 * ($1 - cost)) + (1/3 * (-cost))
+            # = 2/3 - cost
+            # Profit if total_cost < $1 (same math, but NOT "guaranteed")
+            synthetic_info = _build_synthetic_info(best_yes_market, best_no_market)
+            spread = 1.0 - total_cost
+            # Discount synthetic profit to reflect that it's not guaranteed
+            # Only 2/3 scenarios win vs 3/3 for pure arb
+            effective_profit_pct = spread * 100.0 * 0.667  # discount by win probability
+            if effective_profit_pct < min_spread * 100:
+                continue
 
-        opportunities.append(ArbitrageOpportunity(
-            matched_event=match,
-            buy_yes_platform=best_yes_market.platform,
-            buy_yes_price=best_yes_market.yes_price,
-            buy_no_platform=best_no_market.platform,
-            buy_no_price=best_no_market.no_price,
-            spread=spread,
-            profit_pct=profit_pct,
-            combined_volume=combined_vol,
-        ))
+            opportunities.append(ArbitrageOpportunity(
+                matched_event=match,
+                buy_yes_platform=best_yes_market.platform,
+                buy_yes_price=best_yes_market.yes_price,
+                buy_yes_event_id=best_yes_market.event_id,
+                buy_no_platform=best_no_market.platform,
+                buy_no_price=best_no_market.no_price,
+                buy_no_event_id=best_no_market.event_id,
+                spread=spread,
+                profit_pct=round(effective_profit_pct, 2),
+                combined_volume=combined_vol,
+                is_synthetic=True,
+                synthetic_info=synthetic_info,
+            ))
+        else:
+            # Pure arb: guaranteed profit if spread > 0
+            spread = 1.0 - total_cost
+            profit_pct = spread * 100.0
 
-    # Sort by profit descending
+            if spread < min_spread:
+                continue
+
+            opportunities.append(ArbitrageOpportunity(
+                matched_event=match,
+                buy_yes_platform=best_yes_market.platform,
+                buy_yes_price=best_yes_market.yes_price,
+                buy_yes_event_id=best_yes_market.event_id,
+                buy_no_platform=best_no_market.platform,
+                buy_no_price=best_no_market.no_price,
+                buy_no_event_id=best_no_market.event_id,
+                spread=spread,
+                profit_pct=profit_pct,
+                combined_volume=combined_vol,
+                is_synthetic=False,
+            ))
+
     opportunities.sort(key=lambda o: o.profit_pct, reverse=True)
     return opportunities
 
