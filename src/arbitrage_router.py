@@ -153,6 +153,7 @@ async def ws_arbitrage(websocket: WebSocket):
         await websocket.send_json({
             "type": "init",
             "opportunities": scanner.get_opportunities(),
+            "feed": scanner.get_feed(),
             "events_count": len(scanner.get_events()),
             "platforms": _registry.get_all_status() if _registry else [],
         })

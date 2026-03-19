@@ -334,17 +334,75 @@
 
 47. TODO - Build crypto spot + prediction market synthetic derivative package
    - Create `src/execution/crypto_hedger.py` that implements hedged crypto positions
-   - Strategy: Buy crypto on exchange (via CoinGecko price feed) + simultaneously buy NO on prediction market "crypto > $X" contract
-   - If price drops: crypto loses value but NO contract pays out → net profit from NO payout minus crypto loss
-   - If price rises: crypto gains value, NO contract expires worthless → net profit from crypto appreciation minus NO cost
+   - Strategy: Buy crypto on exchange (via CCXT) + simultaneously buy NO on prediction market "crypto > $X" contract
+   - If price drops: crypto loses value but NO contract pays out
+   - If price rises: crypto gains value, NO contract expires worthless
    - Profit when: spread between crypto spot and prediction market implied probability exceeds total fees
    - Auto-detect optimal strike price by scanning all crypto prediction market contracts and finding the best hedge ratio
    - Calculate break-even points, max profit, max loss for each package
    - Add `/api/arbitrage/hedge-packages` endpoint returning available hedged positions with P&L scenarios
-   - Add UI section in arbitrout.js showing hedge packages with visual payoff diagrams
    - File: src/execution/crypto_hedger.py (new), src/arbitrage_router.py, src/static/js/arbitrout.js
 
+## Multi-Platform Trading (2026-03-18)
 
+48. TODO - Auto trader performance tuning
+   - Current stats: 10.5% win rate, -$36.71 total P&L, 1.9% fee drag, 15-trade loss streak
+   - AI time_decay exits all lose (-$21.07 across 5 trades), manual exits are the only winners (18% WR)
+   - Investigate: (1) Is time_decay trigger too aggressive? (2) Should trailing_stop bounds be wider? (3) Should entry filters be tighter (currently 3% min spread)?
+   - Tune parameters and monitor results
+   - File: src/positions/auto_trader.py, src/positions/exit_engine.py
+
+49. TODO - Fix cross-platform arb execution quality
+   - Cross-platform arb has 0% win rate (-$4.62 across 2 trades)
+   - Investigate: are arb spreads real or disappearing by execution time?
+   - Check if matcher is correctly identifying same-event pairs across limitless/polymarket
+   - Verify price differences are genuine arbitrage, not different market definitions
+   - File: src/positions/auto_trader.py, src/event_matcher.py
+
+50. TODO - Update Arbitrout FILE_MAP.md for new files
+   - FILE_MAP.md is stale — maps Bloomberg files but Arbitrout server.py now has 925+ lines
+   - Add new files: execution/crypto_spot_executor.py, execution/kraken_cli.py, execution/limitless_executor.py, execution/opinion_labs_executor.py, execution/robinhood_executor.py, positions/news_scanner.py, positions/news_ai.py, positions/decision_log.py
+   - Run tools/update-file-map.py or manually update section maps
+   - File: FILE_MAP.md
+
+51. TODO - Add Kalshi API key and enable trading
+   - Kalshi adapter returns 401 (needs API key)
+   - Get API key from Kalshi dashboard, add KALSHI_API_KEY + KALSHI_RSA_PRIVATE_KEY to src/.env
+   - Kalshi has the most liquid prediction markets after Polymarket
+   - File: src/.env (not committed)
+
+52. TODO - Add Opinion Labs API key and enable trading
+   - Opinion Labs adapter returns 401 (needs API key)
+   - Get OPINION_LABS_API_KEY, add to src/.env
+   - File: src/.env (not committed)
+
+53. TODO - Fix Robinhood scraper returning 0 events
+   - Robinhood adapter connects OK but scrapes 0 events from prediction markets page
+   - Likely a Scrapling selector issue — page structure may have changed
+   - Investigate with Scrapling debug, update selectors
+   - File: src/adapters/robinhood.py
+
+54. TODO - Fix Coinbase scraper returning 0 events
+   - Coinbase adapter connects OK but scrapes 0 events
+   - Same Scrapling selector issue as Robinhood
+   - File: src/adapters/coinbase.py
+
+55. TODO - Add Kraken API keys for real crypto trading
+   - Kraken CLI executor works for price lookups (public API)
+   - Real trading requires API keys configured via `wsl -d Ubuntu -- bash -c 'kraken auth'`
+   - Also configure KRAKEN_API_KEY + KRAKEN_API_SECRET in src/.env for CCXT executor
+   - File: src/.env (not committed), WSL kraken CLI config
+
+56. TODO - Add news scanner to Arbitrout dashboard UI
+   - News scanner is running (150s interval, 14 RSS feeds) but has no UI representation
+   - Add a news panel showing: recent headlines scanned, matched markets, trade decisions (from decision_log.jsonl)
+   - Show breaking news alerts that triggered immediate trades
+   - File: src/static/js/arbitrout.js, src/static/css/arbitrout.css
+
+57. TODO - Add multi-platform executor status to dashboard
+   - Dashboard should show which executors are active, their paper balances, and trade counts per platform
+   - Currently only shows aggregate stats — need per-platform breakdown
+   - File: src/static/js/arbitrout.js, src/positions/position_router.py
 
 
 

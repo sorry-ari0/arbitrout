@@ -46,6 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupCommandBar();
     setupPeriodButtons();
     setupWatchlistControls();
+    setupUniverseControls();
 
     // Auto-refresh market data every 15s
     setInterval(loadMarketData, 15000);
@@ -90,6 +91,8 @@ function createEl(tag, attrs = {}, children = []) {
 // MARKET DATA
 // ============================================================
 async function loadMarketData() {
+    // Don't override universe view with watchlist data
+    if (universeState && universeState.mode === 'universe') return;
     try {
         const resp = await fetch('/api/quotes');
         if (!resp.ok) { console.error('Quotes API error:', resp.status); return; }
@@ -152,6 +155,144 @@ function updateFooter() {
         el.textContent = `${sign}${q.change.toFixed(2)} (${sign}${q.changePercent.toFixed(2)}%)`;
         el.className = q.change >= 0 ? 'price-up' : 'price-down';
     }
+}
+
+// ============================================================
+// UNIVERSE BROWSER
+// ============================================================
+const universeState = {
+    mode: 'watchlist', // 'watchlist' or 'universe'
+    tickers: [],
+    quotes: [],
+    offset: 0,
+    pageSize: 50,
+    total: 0,
+    loading: false,
+    searchDebounce: null,
+};
+
+function setupUniverseControls() {
+    const watchlistBtn = document.getElementById('market-mode-watchlist');
+    const universeBtn = document.getElementById('market-mode-universe');
+    const loadMoreBtn = document.getElementById('universe-load-more');
+    const searchInput = document.getElementById('universe-search');
+    const exchangeSelect = document.getElementById('universe-exchange');
+    const hkexCheckbox = document.getElementById('universe-hkex');
+
+    if (watchlistBtn) {
+        watchlistBtn.addEventListener('click', () => switchMarketMode('watchlist'));
+    }
+    if (universeBtn) {
+        universeBtn.addEventListener('click', () => switchMarketMode('universe'));
+    }
+    if (loadMoreBtn) {
+        loadMoreBtn.addEventListener('click', () => loadUniversePage(false));
+    }
+    if (searchInput) {
+        searchInput.addEventListener('input', () => {
+            clearTimeout(universeState.searchDebounce);
+            universeState.searchDebounce = setTimeout(() => {
+                universeState.offset = 0;
+                universeState.quotes = [];
+                loadUniversePage(true);
+            }, 400);
+        });
+    }
+    if (exchangeSelect) {
+        exchangeSelect.addEventListener('change', () => {
+            universeState.offset = 0;
+            universeState.quotes = [];
+            loadUniversePage(true);
+        });
+    }
+    if (hkexCheckbox) {
+        hkexCheckbox.addEventListener('change', () => {
+            universeState.offset = 0;
+            universeState.quotes = [];
+            loadUniversePage(true);
+        });
+    }
+}
+
+function switchMarketMode(mode) {
+    universeState.mode = mode;
+    const watchlistBtn = document.getElementById('market-mode-watchlist');
+    const universeBtn = document.getElementById('market-mode-universe');
+    const controls = document.getElementById('universe-controls');
+
+    if (mode === 'universe') {
+        if (watchlistBtn) { watchlistBtn.classList.remove('active'); watchlistBtn.style.color = 'var(--text-secondary)'; }
+        if (universeBtn) { universeBtn.classList.add('active'); universeBtn.style.color = 'var(--accent)'; }
+        if (controls) controls.style.display = '';
+        universeState.offset = 0;
+        universeState.quotes = [];
+        loadUniversePage(true);
+    } else {
+        if (watchlistBtn) { watchlistBtn.classList.add('active'); watchlistBtn.style.color = 'var(--accent)'; }
+        if (universeBtn) { universeBtn.classList.remove('active'); universeBtn.style.color = 'var(--text-secondary)'; }
+        if (controls) controls.style.display = 'none';
+        loadMarketData();
+    }
+}
+
+async function loadUniversePage(reset) {
+    if (universeState.loading) return;
+    universeState.loading = true;
+
+    const search = (document.getElementById('universe-search') || {}).value || '';
+    const exchange = (document.getElementById('universe-exchange') || {}).value || '';
+    const hkex = (document.getElementById('universe-hkex') || {}).checked || false;
+
+    if (reset) {
+        universeState.offset = 0;
+        universeState.quotes = [];
+    }
+
+    const loadBtn = document.getElementById('universe-load-more');
+    if (loadBtn) loadBtn.textContent = 'LOADING...';
+
+    try {
+        // Step 1: Get ticker list from universe endpoint
+        let url = `/api/research/universe?offset=${universeState.offset}&limit=${universeState.pageSize}`;
+        if (exchange) url += `&exchange=${exchange}`;
+        if (hkex) url += `&include_hkex=true`;
+        if (search) url += `&search=${encodeURIComponent(search)}`;
+
+        const listResp = await fetch(url);
+        const listData = await listResp.json();
+        universeState.total = listData.total || 0;
+        const tickers = listData.tickers || [];
+
+        // Update total display
+        const totalEl = document.getElementById('universe-total');
+        if (totalEl) totalEl.textContent = universeState.total.toLocaleString() + ' tickers';
+
+        if (tickers.length === 0) {
+            if (reset) renderMarketTable([]);
+            universeState.loading = false;
+            if (loadBtn) loadBtn.textContent = 'NO MORE';
+            return;
+        }
+
+        // Step 2: Fetch quotes for this page of tickers
+        const quotesResp = await fetch(`/api/research/universe/quotes?tickers=${tickers.join(',')}`);
+        const quotesData = await quotesResp.json();
+        const newQuotes = quotesData.quotes || [];
+
+        universeState.quotes = universeState.quotes.concat(newQuotes);
+        universeState.offset += tickers.length;
+
+        // Render all loaded quotes
+        renderMarketTable(universeState.quotes);
+
+        if (loadBtn) {
+            loadBtn.textContent = universeState.offset >= universeState.total ? 'ALL LOADED' : 'LOAD MORE';
+        }
+    } catch (e) {
+        console.error('Universe load error:', e);
+        if (loadBtn) loadBtn.textContent = 'ERROR - RETRY';
+    }
+    universeState.loading = false;
 }
 
 // ============================================================

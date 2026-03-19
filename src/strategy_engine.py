@@ -906,11 +906,12 @@ def _query_wikidata(ticker: str, company_name: str = "") -> dict[str, str]:
         return {}
     # Escape quotes in company name
     safe_name = company_name.replace('"', '\\"')
-    query = f"""SELECT ?companyLabel ?ceoLabel ?founderLabel ?hqLabel ?industryLabel ?inception
+    query = f"""SELECT ?companyLabel ?ceoLabel ?founderLabel ?hqLabel ?industryLabel ?inception ?ceoBirthDate
     WHERE {{
       ?company rdfs:label "{safe_name}"@en .
       ?company wdt:P31/wdt:P279* wd:Q4830453 .
       OPTIONAL {{ ?company wdt:P169 ?ceo }}
+      OPTIONAL {{ ?company wdt:P169 ?ceo . ?ceo wdt:P569 ?ceoBirthDate }}
       OPTIONAL {{ ?company wdt:P112 ?founder }}
       OPTIONAL {{ ?company wdt:P159 ?hq }}
       OPTIONAL {{ ?company wdt:P452 ?industry }}
@@ -984,7 +985,7 @@ def _search_ddg(company_name: str, ticker: str, criteria: list[str]) -> str | No
         snippets = []
 
         # Query 1: CEO biography/education (most common qualitative ask)
-        ceo_query = f"{company_name} CEO biography education background"
+        ceo_query = f"{company_name} CEO biography education background age"
         results = ddgs.text(ceo_query, max_results=3)
         for r in results or []:
             snippets.append(f"{r.get('title', '')}: {r.get('body', '')}")
@@ -995,6 +996,14 @@ def _search_ddg(company_name: str, ticker: str, criteria: list[str]) -> str | No
         results = ddgs.text(criteria_query, max_results=3)
         for r in results or []:
             snippets.append(f"{r.get('title', '')}: {r.get('body', '')}")
+
+        # Query 3: CEO personal life / divorce / legal issues (if criteria mention it)
+        criteria_lower = " ".join(criteria).lower()
+        if any(kw in criteria_lower for kw in ["divorce", "personal", "legal", "scandal", "lawsuit"]):
+            personal_query = f"{company_name} CEO divorce personal life legal issues"
+            results = ddgs.text(personal_query, max_results=3)
+            for r in results or []:
+                snippets.append(f"{r.get('title', '')}: {r.get('body', '')}")
 
         if not snippets:
             return None
@@ -1053,6 +1062,7 @@ async def _research_one(
     fact_lines = []
     field_labels = {
         "ceoLabel": "CEO",
+        "ceoBirthDate": "CEO Birth Date",
         "founderLabel": "Founder(s)",
         "hqLabel": "Headquarters",
         "industryLabel": "Industry",
@@ -1135,6 +1145,78 @@ async def _research_one(
                 pre_check_reasons.append(f"MBA evidence found in text for CEO '{ceo}'")
             else:
                 remaining_rules.append(rule)  # Let LLM try
+        # Pattern: "CEO divorce" / "CEO going through divorce" / "personal crisis"
+        elif any(kw in rule_lower for kw in ["divorce", "divorc", "personal crisis", "personal life"]):
+            all_text = (page_text or "").lower()
+            divorce_indicators = ["divorce", "divorced", "divorcing", "separation", "separated",
+                                  "custody battle", "marital", "split from", "filed for divorce"]
+            found_divorce = any(ind in all_text for ind in divorce_indicators)
+            if found_divorce:
+                pre_check_reasons.append(f"Divorce/personal crisis evidence found for CEO '{ceo}'")
+            else:
+                remaining_rules.append(rule)  # Let LLM try with web context
+        # Pattern: "CEO under/over X years old" / "CEO age under X" / "young CEO"
+        elif ("age" in rule_lower or "years old" in rule_lower or "under 4" in rule_lower
+              or "under 5" in rule_lower or "over 5" in rule_lower or "over 6" in rule_lower
+              or "young ceo" in rule_lower):
+            ceo_birth = wikidata_facts.get("ceoBirthDate", "")
+            if ceo_birth:
+                try:
+                    birth_year = int(ceo_birth[:4])
+                    ceo_age = datetime.now().year - birth_year
+                    # Extract target age from rule
+                    age_match = re.search(r'(?:under|below|younger than|less than)\s+(\d+)', rule_lower)
+                    over_match = re.search(r'(?:over|above|older than|more than)\s+(\d+)', rule_lower)
+                    if age_match:
+                        target = int(age_match.group(1))
+                        if ceo_age < target:
+                            pre_check_reasons.append(f"CEO '{ceo}' age {ceo_age} < {target}")
+                        else:
+                            pre_check_fail = True
+                            pre_check_reasons.append(f"CEO '{ceo}' age {ceo_age} >= {target} (wanted under {target})")
+                    elif over_match:
+                        target = int(over_match.group(1))
+                        if ceo_age > target:
+                            pre_check_reasons.append(f"CEO '{ceo}' age {ceo_age} > {target}")
+                        else:
+                            pre_check_fail = True
+                            pre_check_reasons.append(f"CEO '{ceo}' age {ceo_age} <= {target} (wanted over {target})")
+                    elif "young" in rule_lower:
+                        if ceo_age < 50:
+                            pre_check_reasons.append(f"CEO '{ceo}' age {ceo_age} — considered young")
+                        else:
+                            pre_check_fail = True
+                            pre_check_reasons.append(f"CEO '{ceo}' age {ceo_age} — not young")
+                    else:
+                        remaining_rules.append(rule)
+                except (ValueError, IndexError):
+                    remaining_rules.append(rule)
+            else:
+                # No birth date from Wikidata — try text search fallback
+                all_text = (page_text or "").lower()
+                # Look for birth year patterns like "born 1985" or "(born January 15, 1985)"
+                birth_pat = re.search(r'born[^)]*?(\d{4})', all_text)
+                if birth_pat:
+                    try:
+                        birth_year = int(birth_pat.group(1))
+                        if 1940 < birth_year < 2010:
+                            ceo_age = datetime.now().year - birth_year
+                            age_match = re.search(r'(?:under|below|younger than|less than)\s+(\d+)', rule_lower)
+                            if age_match:
+                                target = int(age_match.group(1))
+                                if ceo_age < target:
+                                    pre_check_reasons.append(f"CEO born ~{birth_year}, age ~{ceo_age} < {target} (from text)")
+                                else:
+                                    pre_check_fail = True
+                                    pre_check_reasons.append(f"CEO born ~{birth_year}, age ~{ceo_age} >= {target} (from text)")
+                            else:
+                                remaining_rules.append(rule)
+                        else:
+                            remaining_rules.append(rule)
+                    except ValueError:
+                        remaining_rules.append(rule)
+                else:
+                    remaining_rules.append(rule)
         else:
             remaining_rules.append(rule)
 

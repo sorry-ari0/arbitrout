@@ -26,12 +26,20 @@ PLATFORM_CREDENTIALS = {
     "kalshi": ["KALSHI_API_KEY", "KALSHI_RSA_PRIVATE_KEY"],
     "coinbase_spot": ["COINBASE_ADV_API_KEY", "COINBASE_ADV_API_SECRET"],
     "predictit": ["PREDICTIT_SESSION"],
+    "limitless": [],  # Public API, no credentials needed
+    "opinion_labs": ["OPINION_LABS_API_KEY"],
+    "robinhood": [],  # Public scraping, no credentials needed
+    "crypto_spot": ["KRAKEN_API_KEY", "KRAKEN_API_SECRET"],  # First in CCXT priority chain
+    "kraken": [],  # CLI auth managed in WSL, not via env vars
 }
 
 # Sensitive keys that must never be logged or exposed via API
 _SENSITIVE_KEYS = {
     "POLYMARKET_PRIVATE_KEY", "KALSHI_RSA_PRIVATE_KEY",
     "COINBASE_ADV_API_SECRET", "PREDICTIT_SESSION", "ANTHROPIC_API_KEY",
+    "OPINION_LABS_API_KEY", "KRAKEN_API_SECRET",
+    "BINANCE_API_SECRET", "BYBIT_API_SECRET", "OKX_API_SECRET",
+    "KUCOIN_API_SECRET", "BITGET_API_SECRET",
 }
 
 
@@ -71,6 +79,12 @@ def get_configured_platforms() -> dict[str, bool]:
 def has_anthropic_key() -> bool:
     return bool(os.environ.get("ANTHROPIC_API_KEY", ""))
 
+def has_any_ai_provider() -> bool:
+    """Check if any AI provider has an API key configured."""
+    return any(os.environ.get(k, "") for k in [
+        "ANTHROPIC_API_KEY", "GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY",
+    ])
+
 def validate_live_config() -> dict:
     """Validate configuration for live trading. Returns issues dict."""
     issues = {}
@@ -109,6 +123,6 @@ def get_safe_config() -> dict:
         "paper_mode": is_paper_mode(),
         "paper_balance": get_paper_balance() if is_paper_mode() else None,
         "platforms": platforms,
-        "ai_enabled": has_anthropic_key(),
+        "ai_enabled": has_any_ai_provider(),
         "live_issues": validate_live_config() if not is_paper_mode() else {},
     }

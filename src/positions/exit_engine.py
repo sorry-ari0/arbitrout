@@ -41,6 +41,10 @@ T_PLATFORM_ERROR = 16
 T_LIQUIDITY_GAP = 17
 T_FEE_SPIKE = 18
 
+# Category: Research-based (19-20)
+T_STALE_POSITION = 19        # Triple barrier time barrier: exit after N days with no movement
+T_LONGSHOT_DECAY = 20        # Favorite-longshot: longshots ($<0.30) decay faster than implied
+
 
 def evaluate_heuristics(pkg: dict) -> list[dict]:
     """Evaluate all 18 heuristic triggers against a package. Returns list of fired triggers."""
@@ -103,7 +107,7 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
             "action": "tighten_trail", "safety_override": False})
 
     # ── 6: Correlation Break ────────────────────────────────────────────────
-    if strategy == "cross_platform_arb" and len(legs) >= 2:
+    if strategy in ("cross_platform_arb", "synthetic_derivative") and len(legs) >= 2:
         yes_legs = [l for l in legs if "yes" in l.get("type", "").lower()]
         no_legs = [l for l in legs if "no" in l.get("type", "").lower()]
         if yes_legs and no_legs:
@@ -116,7 +120,7 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
                     "action": "review", "safety_override": False})
 
     # ── 7: Spread Inversion (SAFETY) ────────────────────────────────────────
-    if strategy == "cross_platform_arb" and len(legs) >= 2:
+    if strategy in ("cross_platform_arb", "synthetic_derivative") and len(legs) >= 2:
         yes_price = sum(l.get("current_price", 0) for l in legs if "yes" in l.get("type", "").lower())
         no_price = sum(l.get("current_price", 0) for l in legs if "no" in l.get("type", "").lower())
         combined = yes_price + no_price
@@ -126,7 +130,7 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
                 "action": "immediate_exit", "safety_override": True})
 
     # ── 8: Spread Compression ───────────────────────────────────────────────
-    if strategy == "cross_platform_arb" and len(legs) >= 2:
+    if strategy in ("cross_platform_arb", "synthetic_derivative") and len(legs) >= 2:
         yes_price = sum(l.get("current_price", 0) for l in legs if "yes" in l.get("type", "").lower())
         no_price = sum(l.get("current_price", 0) for l in legs if "no" in l.get("type", "").lower())
         spread = 1.0 - (yes_price + no_price)
@@ -192,11 +196,42 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
     # Placeholder — requires fee monitoring
     pass
 
+    # ── 19: Stale Position (Triple Barrier time barrier) ──────────────────
+    # Research: exit after 7 days if position hasn't moved significantly.
+    # Prevents capital from being tied up in dead markets.
+    created_at = pkg.get("created_at", 0)
+    if created_at:
+        days_open = (time.time() - created_at) / 86400
+        if days_open >= 7 and abs(pnl_pct) < 5:
+            triggers.append({"trigger_id": T_STALE_POSITION, "name": "stale_position",
+                "details": f"Position open {days_open:.1f} days with only {pnl_pct:+.1f}% P&L — capital not working",
+                "action": "review", "safety_override": False})
+
+    # ── 20: Longshot Decay ────────────────────────────────────────────────
+    # Research (favorite-longshot bias): contracts bought <$0.30 decay faster
+    # than implied. If a longshot hasn't improved after 3 days, exit early.
+    for leg in legs:
+        entry = leg.get("entry_price", 0)
+        current = leg.get("current_price", 0)
+        if entry > 0 and entry < 0.30 and current > 0:
+            if created_at and (time.time() - created_at) / 86400 >= 3:
+                if current <= entry * 1.1:  # Hasn't moved up more than 10%
+                    triggers.append({"trigger_id": T_LONGSHOT_DECAY, "name": "longshot_decay",
+                        "details": f"Longshot leg {leg['leg_id']} (entry ${entry:.2f}, now ${current:.2f}) — no improvement after 3+ days",
+                        "action": "review", "safety_override": False})
+
     return triggers
 
 
 def _check_expiry_triggers(legs: list[dict], triggers: list[dict]):
-    """Check time-based safety triggers (10, 11)."""
+    """Check time-based triggers (10, 11).
+
+    Changed from SAFETY OVERRIDE to soft review triggers. Previous behavior
+    force-exited positions <24h before expiry, resulting in 25 trades totaling
+    -$38.88 in losses. Prediction markets often move most in the final hours,
+    so early exits destroy value. Now these are just informational — positions
+    expire naturally and settle at $0 or $1.
+    """
     now = datetime.now()
     for leg in legs:
         if not leg.get("expiry"):
@@ -208,24 +243,41 @@ def _check_expiry_triggers(legs: list[dict], triggers: list[dict]):
             if hours_left <= 6:
                 triggers.append({"trigger_id": T_TIME_6H, "name": "time_6h",
                     "details": f"Leg {leg['leg_id']} expires in {hours_left:.1f}h",
-                    "action": "immediate_exit", "safety_override": True})
+                    "action": "review", "safety_override": False})
             elif hours_left <= 24:
                 triggers.append({"trigger_id": T_TIME_24H, "name": "time_24h",
                     "details": f"Leg {leg['leg_id']} expires in {hours_left:.1f}h",
-                    "action": "immediate_exit", "safety_override": True})
+                    "action": "review", "safety_override": False})
         except (ValueError, TypeError):
             pass
 
 
 class ExitEngine:
-    """30-second scan loop that evaluates open packages and routes triggers."""
+    """60-second scan loop that evaluates open packages and routes triggers."""
 
-    def __init__(self, position_manager, ai_advisor=None, interval: float = 30.0):
+    # Cooldown (seconds) per trigger type — prevents spamming the same trigger
+    # every tick. Safety overrides and mechanical exits have no cooldown.
+    TRIGGER_COOLDOWN = {
+        "time_decay": 3600,      # 1 hour — not actionable every 60s
+        "new_ath": 1800,         # 30 min — tighten trail is infrequent
+        "vol_spike": 3600,       # 1 hour — informational
+        "spread_compression": 1800,
+        "negative_drift": 900,   # 15 min — more urgent
+        "correlation_break": 600,
+        "stale_position": 86400, # 24 hours — daily check is enough
+        "longshot_decay": 43200, # 12 hours — check twice daily
+    }
+    # No cooldown: target_hit, stop_loss, trailing_stop, safety overrides
+
+    def __init__(self, position_manager, ai_advisor=None, interval: float = 60.0, decision_logger=None):
         self.pm = position_manager
         self.ai = ai_advisor
         self.interval = interval
+        self.dlog = decision_logger
         self._task: asyncio.Task | None = None
         self._running = False
+        # Cooldown tracker: {(pkg_id, trigger_name): last_fire_timestamp}
+        self._trigger_cooldowns: dict[tuple[str, str], float] = {}
 
     def start(self):
         """Start the exit engine scan loop."""
@@ -254,6 +306,7 @@ class ExitEngine:
     async def _tick(self):
         """Process one scan cycle — evaluate all open packages."""
         open_pkgs = self.pm.list_packages("open")
+        ai_reviews_this_tick = 0
         for pkg in open_pkgs:
             await self._update_prices(pkg)
             self.pm.update_pnl(pkg["id"])
@@ -272,7 +325,39 @@ class ExitEngine:
             if not triggers:
                 continue
 
-            await self._process_triggers(pkg, triggers)
+            # Filter out triggers that are on cooldown (prevents spam)
+            now = time.time()
+            pkg_id = pkg["id"]
+            filtered = []
+            for t in triggers:
+                tname = t.get("name", "")
+                cooldown = self.TRIGGER_COOLDOWN.get(tname, 0)
+                if cooldown > 0:
+                    key = (pkg_id, tname)
+                    last_fire = self._trigger_cooldowns.get(key, 0)
+                    if now - last_fire < cooldown:
+                        continue  # Still on cooldown, skip
+                    self._trigger_cooldowns[key] = now
+                filtered.append(t)
+
+            if not filtered:
+                continue
+
+            if self.dlog:
+                self.dlog.log_triggers_fired(pkg_id, pkg.get("name", "?"), filtered)
+
+            # Limit AI reviews to 3 per tick to avoid rate limiting
+            has_ai_triggers = any(not t.get("safety_override") for t in filtered)
+            if has_ai_triggers and ai_reviews_this_tick >= 3:
+                continue  # will catch up on next tick
+            if has_ai_triggers:
+                ai_reviews_this_tick += 1
+
+            await self._process_triggers(pkg, filtered)
+
+            # Brief delay between packages to space out API calls
+            if has_ai_triggers:
+                await asyncio.sleep(2)
 
     async def _update_prices(self, pkg: dict):
         """Fetch current prices for all open legs via their platform executors."""
@@ -281,13 +366,21 @@ class ExitEngine:
                 continue
             executor = self.pm.executors.get(leg["platform"])
             if not executor:
+                logger.debug("No executor for platform %s (leg %s)", leg.get("platform"), leg.get("leg_id"))
                 continue
             try:
                 price = await executor.get_current_price(leg["asset_id"])
                 if price > 0:
+                    old_price = leg.get("current_price", 0)
                     leg["current_price"] = price
                     leg["current_value"] = leg["quantity"] * price
                     pkg["_platform_errors"] = 0  # I5: Reset on success
+                    if old_price > 0 and abs(price - old_price) / old_price > 0.05:
+                        logger.info("Price moved >5%% for %s: %.4f -> %.4f", leg["asset_id"], old_price, price)
+                else:
+                    logger.warning("Price fetch returned 0 for %s — keeping stale price %.4f",
+                                   leg["asset_id"], leg.get("current_price", 0))
+                    pkg["_platform_errors"] = pkg.get("_platform_errors", 0) + 1
             except Exception as e:
                 logger.warning("Price fetch failed for %s: %s", leg["asset_id"], e)
                 pkg["_platform_errors"] = pkg.get("_platform_errors", 0) + 1
@@ -305,73 +398,136 @@ class ExitEngine:
             # Safety overrides — immediate exit, no AI
             for trigger in safety_triggers:
                 logger.warning("SAFETY OVERRIDE [%s] on %s: %s", trigger["name"], pkg["id"], trigger["details"])
+                if self.dlog:
+                    self.dlog.log_safety_override(pkg["id"], trigger["name"], trigger["details"])
                 for leg in pkg["legs"]:
                     if leg["status"] == "open":
                         await self.pm.exit_leg(pkg["id"], leg["leg_id"], trigger=trigger["name"])
 
-            # Non-safety triggers — batch to AI advisor
-            if ai_triggers and self.ai:
-                try:
-                    verdicts = await self.ai.review_proposals(pkg, ai_triggers)
-                    await self._apply_verdicts(pkg, ai_triggers, verdicts)
-                except Exception as e:
-                    logger.error("AI review failed for %s: %s", pkg["id"], e)
-                    # Escalate as alert
-                    self.pm.add_alert(pkg["id"], 0, "ai_review_failed",
-                        {"error": str(e), "triggers": [t["name"] for t in ai_triggers]})
-            elif ai_triggers:
-                # No AI advisor — auto-execute clear-cut triggers, escalate ambiguous ones
-                for trigger in ai_triggers:
-                    if trigger["name"] in ("target_hit", "stop_loss", "trailing_stop"):
-                        # These are mechanical rules — safe to auto-execute without AI review
-                        logger.info("Auto-executing %s on %s (no AI): %s",
-                                    trigger["name"], pkg["id"], trigger["details"])
-                        if trigger.get("action") == "full_exit":
+            # Non-safety triggers — try AI advisor first, fall back to auto-execute
+            if ai_triggers:
+                ai_handled = False
+                if self.ai and self.ai.is_available:
+                    try:
+                        t0 = time.time()
+                        verdicts = await self.ai.review_proposals(pkg, ai_triggers)
+                        elapsed_ms = int((time.time() - t0) * 1000)
+                        if verdicts:
+                            await self._apply_verdicts(pkg, ai_triggers, verdicts)
+                            ai_handled = True
+                            logger.info("AI reviewed %d triggers for %s", len(ai_triggers), pkg["id"])
+                            if self.dlog:
+                                self.dlog.log_ai_review(
+                                    pkg["id"],
+                                    provider=getattr(self.ai, '_last_provider', '?'),
+                                    triggers=[t["name"] for t in ai_triggers],
+                                    verdicts=verdicts,
+                                    elapsed_ms=elapsed_ms,
+                                )
+                    except Exception as e:
+                        logger.error("AI review failed for %s: %s — falling back to auto-execute", pkg["id"], e)
+                        if self.dlog:
+                            self.dlog.log_ai_failure(pkg["id"], str(e))
+
+                if not ai_handled:
+                    # No AI available or AI returned empty — auto-execute mechanical triggers
+                    for trigger in ai_triggers:
+                        if trigger["name"] in ("target_hit", "stop_loss", "trailing_stop"):
+                            logger.info("Auto-executing %s on %s: %s",
+                                        trigger["name"], pkg["id"], trigger["details"])
+                            if self.dlog:
+                                self.dlog.log_auto_execute(pkg["id"], trigger["name"],
+                                                           trigger.get("action", "full_exit"), trigger["details"])
+                            if trigger.get("action") == "full_exit":
+                                for leg in pkg["legs"]:
+                                    if leg["status"] == "open":
+                                        await self.pm.exit_leg(pkg["id"], leg["leg_id"],
+                                            trigger=f"auto:{trigger['name']}")
+                        elif trigger["name"] == "partial_profit":
+                            logger.info("Auto-executing partial_profit on %s: %s",
+                                        pkg["id"], trigger["details"])
+                            if self.dlog:
+                                self.dlog.log_auto_execute(pkg["id"], "partial_profit",
+                                                           "partial_exit", trigger["details"])
                             for leg in pkg["legs"]:
                                 if leg["status"] == "open":
                                     await self.pm.exit_leg(pkg["id"], leg["leg_id"],
                                         trigger=f"auto:{trigger['name']}")
-                    elif trigger["name"] == "partial_profit":
-                        # Partial profit — exit first open leg
-                        logger.info("Auto-executing partial_profit on %s (no AI): %s",
-                                    pkg["id"], trigger["details"])
-                        for leg in pkg["legs"]:
-                            if leg["status"] == "open":
-                                await self.pm.exit_leg(pkg["id"], leg["leg_id"],
-                                    trigger=f"auto:{trigger['name']}")
-                                break
-                    else:
-                        # Ambiguous triggers (correlation_break, vol_spike, etc.) — escalate
-                        self.pm.add_alert(pkg["id"], trigger["trigger_id"], trigger["name"],
-                            {"details": trigger["details"], "action": trigger["action"]})
+                                    break
+                        elif trigger["name"] in ("correlation_break", "time_decay", "negative_drift",
+                                                   "platform_error", "stale_position", "longshot_decay"):
+                            # Only escalate truly actionable ambiguous triggers
+                            self.pm.add_alert(pkg["id"], trigger["trigger_id"], trigger["name"],
+                                {"details": trigger["details"], "action": trigger["action"]})
+                        else:
+                            # Skip noisy triggers (vol_spike, new_ath, spread_compression) — not actionable without AI
+                            if self.dlog:
+                                self.dlog.log_trigger_suppressed(pkg["id"], trigger["name"], "noisy_without_ai")
         finally:
             pkg.pop("_exiting", None)
+
+    def _find_verdict(self, trigger: dict, verdicts: dict) -> dict:
+        """Find the verdict for a trigger, handling various AI response key formats.
+
+        The AI may respond with keys like:
+        - "time_decay" (exact match — ideal)
+        - "Trigger #12 (time_decay)" (wrapped with trigger ID)
+        - "new_ath" or "negative_drift" (just the name)
+        """
+        name = trigger.get("name", "")
+        rule_id = trigger.get("rule_id", name)
+
+        # Try exact match first
+        if rule_id in verdicts:
+            return verdicts[rule_id]
+        if name in verdicts:
+            return verdicts[name]
+
+        # Fuzzy match: look for the trigger name inside any verdict key
+        for key, val in verdicts.items():
+            if name and name in key:
+                return val
+
+        return {}
 
     async def _apply_verdicts(self, pkg: dict, triggers: list[dict], verdicts: dict):
         """Apply AI verdicts — APPROVE=execute, MODIFY=adjust, REJECT=skip."""
         for trigger in triggers:
-            rule_id = trigger.get("rule_id", trigger.get("name", ""))
-            verdict = verdicts.get(rule_id, {})
+            verdict = self._find_verdict(trigger, verdicts)
             action = verdict.get("action", "REJECT")
 
             if action == "APPROVE":
-                if trigger.get("action") == "full_exit":
+                trig_action = trigger.get("action", "review")
+                if trig_action in ("full_exit", "review"):
+                    # "review" triggers approved by AI → execute as full exit
                     for leg in pkg["legs"]:
                         if leg["status"] == "open":
                             await self.pm.exit_leg(pkg["id"], leg["leg_id"],
                                 trigger=f"ai_approved:{trigger['name']}")
-                elif trigger.get("action") == "partial_exit":
+                elif trig_action == "partial_exit":
                     # Exit first open leg as partial
                     for leg in pkg["legs"]:
                         if leg["status"] == "open":
                             await self.pm.exit_leg(pkg["id"], leg["leg_id"],
                                 trigger=f"ai_partial:{trigger['name']}")
                             break
+                elif trig_action == "tighten_trail":
+                    # new_ath: tighten trailing stop by 2% on approval
+                    for rule in pkg.get("exit_rules", []):
+                        if rule.get("type") == "trailing_stop" and rule.get("active"):
+                            current = rule["params"].get("current", 12)
+                            bmin = rule["params"].get("bound_min", 5)
+                            new_val = max(current - 2, bmin)
+                            if new_val != current:
+                                rule["params"]["current"] = new_val
+                                logger.info("AI approved tighten_trail: %s -> %s", current, new_val)
+                                self.pm.save()
 
             elif action == "MODIFY":
                 # Adjust rule parameters within bounds
                 new_value = verdict.get("value")
                 if new_value is not None:
+                    matched_rule = False
                     for rule in pkg.get("exit_rules", []):
                         if rule.get("type") == trigger.get("name"):
                             bounds = rule["params"]
@@ -380,14 +536,21 @@ class ExitEngine:
                             if bmin <= new_value <= bmax:
                                 rule["params"]["current"] = new_value
                                 logger.info("AI modified %s to %s", rule["type"], new_value)
+                                matched_rule = True
                             else:
-                                # Out of bounds — escalate
                                 self.pm.add_alert(pkg["id"], trigger["trigger_id"],
                                     f"modify_out_of_bounds:{trigger['name']}",
                                     {"requested": new_value, "bounds": [bmin, bmax]})
-                    self.pm.save()
+                                matched_rule = True
+                    if not matched_rule:
+                        logger.debug("MODIFY for %s has no matching exit rule — skipping", trigger.get("name"))
+                    else:
+                        self.pm.save()
 
             # REJECT = do nothing, just log
             elif action == "REJECT":
                 logger.info("AI rejected trigger %s for %s: %s",
                     trigger["name"], pkg["id"], verdict.get("reason", ""))
+                if self.dlog:
+                    self.dlog.log_trigger_suppressed(pkg["id"], trigger["name"],
+                                                     f"ai_rejected: {verdict.get('reason', '')}")

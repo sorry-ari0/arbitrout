@@ -74,9 +74,17 @@ _COUNTRIES = {
 
 
 def _extract_crypto(title: str) -> dict:
-    """Extract crypto entities: ticker, price target, direction."""
+    """Extract crypto entities: ticker, price target(s), direction.
+
+    Handles three market types:
+    - Directional: "BTC above $74K" → price=74000, direction="above"
+    - Range: "BTC between $74K and $76K" → price=75000 (midpoint),
+             price_low=74000, price_high=76000, direction="between"
+    - Plain: "BTC price on March 23" → price extracted, direction=None
+    """
     lower = title.lower()
-    result = {"ticker": None, "price": None, "direction": None}
+    result = {"ticker": None, "price": None, "direction": None,
+              "price_low": None, "price_high": None}
 
     for alias, ticker in _TICKER_ALIASES.items():
         if len(alias) <= 3:
@@ -95,6 +103,30 @@ def _extract_crypto(title: str) -> dict:
             if t in _KNOWN_TICKERS:
                 result["ticker"] = t
 
+    # Check for "between X and Y" range pattern FIRST
+    range_pat = r'between\s+\$?([\d,]+(?:\.\d+)?)\s*(?:k|K)?\s*(?:and|[-–])\s*\$?([\d,]+(?:\.\d+)?)\s*(?:k|K)?'
+    range_match = re.search(range_pat, title, re.IGNORECASE)
+    if range_match:
+        low_str = range_match.group(1).replace(",", "")
+        high_str = range_match.group(2).replace(",", "")
+        low_price = float(low_str)
+        high_price = float(high_str)
+        # Handle K suffix
+        range_text = title[range_match.start():range_match.end()]
+        if re.search(r'(?:' + re.escape(low_str) + r')\s*(?:k|K)', range_text):
+            low_price *= 1000
+        if re.search(r'(?:' + re.escape(high_str) + r')\s*(?:k|K)', range_text):
+            high_price *= 1000
+        # Ensure low < high
+        if low_price > high_price:
+            low_price, high_price = high_price, low_price
+        result["price_low"] = low_price
+        result["price_high"] = high_price
+        result["price"] = (low_price + high_price) / 2  # midpoint for matching
+        result["direction"] = "between"
+        return result
+
+    # Standard single-price extraction
     price_patterns = [
         r'\$?([\d,]+(?:\.\d+)?)\s*(?:k|K)',
         r'\$\s*([\d,]+(?:\.\d+)?)',
@@ -165,6 +197,8 @@ def extract_entities(title: str) -> dict:
         "crypto_ticker": crypto["ticker"],
         "crypto_price": crypto["price"],
         "crypto_direction": crypto["direction"],
+        "crypto_price_low": crypto.get("price_low"),
+        "crypto_price_high": crypto.get("price_high"),
         "names": _extract_names(title),
         "countries": _extract_countries(title),
         "quoted": _extract_quoted_terms(title),
@@ -243,10 +277,22 @@ def _passes_quick_filter(ent_a: dict, ent_b: dict, title_a: str, title_b: str) -
     # Same crypto ticker
     if (ent_a["crypto_ticker"] and ent_b["crypto_ticker"]
             and ent_a["crypto_ticker"] == ent_b["crypto_ticker"]):
+        dir_a = ent_a.get("crypto_direction")
+        dir_b = ent_b.get("crypto_direction")
         pa, pb = ent_a["crypto_price"], ent_b["crypto_price"]
+
+        # "between" (range) markets are structurally different from "above"/"below"
+        # They can still be grouped for synthetic derivatives, but must be
+        # explicitly recognized as different market types
         if pa and pb:
             ratio = min(pa, pb) / max(pa, pb)
-            if ratio < 0.90:
+            # Tight threshold for same-direction matches to prevent
+            # grouping e.g. "BTC > $2000" with "BTC > $2200"
+            # Range/between markets use 0.90 since they cover wider spans
+            if dir_a == dir_b and dir_a in ("above", "below"):
+                if ratio < 0.98:
+                    return False
+            elif ratio < 0.90:
                 return False
         elif pa or pb:
             return False
@@ -310,16 +356,33 @@ def _title_hash(title: str) -> str:
 # ============================================================
 # EXPIRY CHECK
 # ============================================================
+def _parse_expiry_date(s: str):
+    """Parse an expiry string into a datetime, supporting multiple formats."""
+    from datetime import datetime
+    s = s.strip()
+    # ISO format: "2026-03-19" or "2026-03-19T..."
+    try:
+        return datetime.strptime(s[:10], "%Y-%m-%d")
+    except (ValueError, TypeError):
+        pass
+    # Limitless format: "Mar 19, 2026" or "March 19, 2026"
+    for fmt in ("%b %d, %Y", "%B %d, %Y", "%b %d %Y", "%B %d %Y"):
+        try:
+            return datetime.strptime(s, fmt)
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
 def _expiry_compatible(a: str, b: str, max_days: int = 7) -> bool:
     if a == "ongoing" or b == "ongoing":
         return True
-    try:
-        from datetime import datetime
-        da = datetime.strptime(a[:10], "%Y-%m-%d")
-        db = datetime.strptime(b[:10], "%Y-%m-%d")
+    da = _parse_expiry_date(a)
+    db = _parse_expiry_date(b)
+    if da and db:
         return abs((da - db).days) <= max_days
-    except (ValueError, TypeError):
-        return True
+    # If we can't parse either date, allow the match (conservative)
+    return True
 
 
 # ============================================================
@@ -427,6 +490,50 @@ def match_events(events: list[NormalizedEvent]) -> list[MatchedEvent]:
     for i in range(len(unlinked)):
         root = find(i)
         clusters.setdefault(root, []).append(i)
+
+    # --- Phase 2.5: Split mega-clusters ---
+    # If a cluster has crypto markets with >5% price divergence, split them
+    # This prevents Union-Find transitivity from merging A↔B↔C where A and C
+    # are actually different price targets
+    split_clusters: dict[int, list[int]] = {}
+    next_id = max(clusters.keys()) + 1 if clusters else 0
+    for root, indices in clusters.items():
+        if len(indices) <= 2:
+            split_clusters[root] = indices
+            continue
+        # Check if this is a crypto cluster with price data
+        crypto_prices = []
+        for idx in indices:
+            p = entities[idx].get("crypto_price")
+            if p:
+                crypto_prices.append((idx, p))
+        if len(crypto_prices) < 2:
+            split_clusters[root] = indices
+            continue
+        # Group by price proximity: markets within 5% of each other
+        price_groups: list[list[int]] = []
+        for idx, price in crypto_prices:
+            placed = False
+            for group in price_groups:
+                ref_price = entities[group[0]].get("crypto_price", 0)
+                if ref_price > 0 and min(price, ref_price) / max(price, ref_price) >= 0.95:
+                    group.append(idx)
+                    placed = True
+                    break
+            if not placed:
+                price_groups.append([idx])
+        # Non-crypto markets in the cluster go into the largest group
+        non_crypto = [i for i in indices if entities[i].get("crypto_price") is None]
+        if price_groups:
+            largest = max(price_groups, key=len)
+            largest.extend(non_crypto)
+        if len(price_groups) <= 1:
+            split_clusters[root] = indices
+        else:
+            for group in price_groups:
+                split_clusters[next_id] = group
+                next_id += 1
+    clusters = split_clusters
 
     # --- Phase 3: Build MatchedEvent objects ---
     results: list[MatchedEvent] = []

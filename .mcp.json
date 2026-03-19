@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "kraken": {
+      "command": "wsl",
+      "args": ["-d", "Ubuntu", "--", "bash", "-c", "source $HOME/.cargo/env && kraken mcp -s market,paper"],
+      "description": "Kraken exchange — market data + paper trading via CLI MCP server"
+    }
+  }
+}
