@@ -296,6 +296,10 @@ class BtcSniper:
                      asset, window_ts, direction, confidence * 100, best_signal.window_delta_pct,
                      bet_size, maker_price)
 
+        # Capture open price NOW — window state will be overwritten after sleep
+        window_state = self.feed.get_current_window(asset)
+        open_price_at_trade = window_state.open_price if window_state else 0.0
+
         result = await self._place_sniper_order(window_ts, direction, bet_size, maker_price, asset)
 
         if result.get("success"):
@@ -311,7 +315,7 @@ class BtcSniper:
                 "components": best_signal.components,
             })
             asyncio.ensure_future(self._track_resolution(
-                window_ts, direction, bet_size, maker_price, asset))
+                window_ts, direction, bet_size, maker_price, asset, open_price_at_trade))
         else:
             self._log_decision(window_ts, "error", "order_failed",
                                {"asset": asset, "error": result.get("error", "unknown"),
@@ -384,42 +388,49 @@ class BtcSniper:
 
     async def _track_resolution(self, window_ts: int, direction: str,
                                 bet_size: float, entry_price: float,
-                                asset: str = "BTC"):
+                                asset: str = "BTC",
+                                open_price: float = 0.0):
         """Wait for window resolution and update stats.
 
         Resolution: compare price at window open vs close.
         If close >= open → UP wins, else DOWN wins.
+
+        open_price is captured at trade time (not from window state, which
+        gets overwritten by subsequent windows during the sleep).
         """
         close_time = window_ts + 300
 
-        wait_time = close_time - time.time() + 30
+        # Wait until just after window closes (5s buffer for final price)
+        wait_time = close_time - time.time() + 5
         if wait_time > 0:
             await asyncio.sleep(wait_time)
 
+        # Use the current spot price as the close price
         asset_state = self.feed.get_asset(asset)
-        if asset_state and asset_state.window and asset_state.window.window_ts == window_ts:
-            open_price = asset_state.window.open_price
-            close_price = asset_state.price
+        close_price = asset_state.price if asset_state else 0.0
 
-            actual_direction = "UP" if close_price >= open_price else "DOWN"
-            won = (direction == actual_direction)
+        if open_price <= 0 or close_price <= 0:
+            logger.warning("Sniper [%s]: cannot verify resolution for window %d (no price data)",
+                          asset, window_ts)
+            return
 
-            if won:
-                shares = bet_size / entry_price
-                payout = shares * 1.0
-                profit = payout - bet_size
-                self.stats.trades_won += 1
-                self.stats.total_pnl += profit
-                self.bankroll += bet_size + profit
-                logger.info("Sniper [%s] WIN: %s ($%.2f->$%.2f), profit=$%.2f",
-                            asset, direction, open_price, close_price, profit)
-            else:
-                self.stats.trades_lost += 1
-                self.stats.total_pnl -= bet_size
-                logger.info("Sniper [%s] LOSS: predicted %s but was %s, loss=$%.2f",
-                            asset, direction, actual_direction, bet_size)
+        actual_direction = "UP" if close_price >= open_price else "DOWN"
+        won = (direction == actual_direction)
+
+        if won:
+            shares = bet_size / entry_price
+            payout = shares * 1.0
+            profit = payout - bet_size
+            self.stats.trades_won += 1
+            self.stats.total_pnl += profit
+            self.bankroll += bet_size + profit
+            logger.info("Sniper [%s] WIN: %s ($%.2f->$%.2f), profit=$%.2f",
+                        asset, direction, open_price, close_price, profit)
         else:
-            logger.warning("Sniper [%s]: cannot verify resolution for window %d", asset, window_ts)
+            self.stats.trades_lost += 1
+            self.stats.total_pnl -= bet_size
+            logger.info("Sniper [%s] LOSS: predicted %s but was %s, loss=$%.2f",
+                        asset, direction, actual_direction, bet_size)
 
     def _calculate_bet_size(self) -> float:
         """Calculate bet size based on mode and bankroll."""

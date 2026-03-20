@@ -117,8 +117,8 @@ class MarketMaker:
         self._markets: dict[str, MarketState] = {}  # condition_id -> MarketState
         self._halted = False
         self._tick_callback_registered = False
-        # Pending cancel queue — populated by on_tick callback, drained by async loop
-        self._pending_cancels: list[tuple[str, str]] = []  # (condition_id, side)
+        # Async-safe cancel queue — populated by on_tick callback, drained by async loop
+        self._pending_cancels: asyncio.Queue = asyncio.Queue()
 
     def start(self):
         if self._running:
@@ -169,35 +169,41 @@ class MarketMaker:
             # YES order exposed (NO not filled) — adverse = price dropping
             if market.yes_order_id and not market.no_order_id:
                 if price_change_pct < -ADVERSE_MOVE_THRESHOLD:
-                    self._pending_cancels.append((condition_id, "YES"))
+                    # Capture order_id and clear immediately to prevent duplicate
+                    # cancel queueing on subsequent ticks
+                    oid = market.yes_order_id
+                    market.yes_order_id = None
+                    try:
+                        self._pending_cancels.put_nowait((condition_id, "YES", oid))
+                    except asyncio.QueueFull:
+                        pass
                     market.preemptive_cancels += 1
                     self.stats.preemptive_cancels += 1
 
             # NO order exposed (YES not filled) — adverse = price rising
             if market.no_order_id and not market.yes_order_id:
                 if price_change_pct > ADVERSE_MOVE_THRESHOLD:
-                    self._pending_cancels.append((condition_id, "NO"))
+                    oid = market.no_order_id
+                    market.no_order_id = None
+                    try:
+                        self._pending_cancels.put_nowait((condition_id, "NO", oid))
+                    except asyncio.QueueFull:
+                        pass
                     market.preemptive_cancels += 1
                     self.stats.preemptive_cancels += 1
 
     async def _drain_pending_cancels(self):
         """Execute any preemptive cancels queued by the tick callback."""
-        while self._pending_cancels:
-            condition_id, side = self._pending_cancels.pop(0)
-            market = self._markets.get(condition_id)
-            if not market:
-                continue
-
-            order_id = market.yes_order_id if side == "YES" else market.no_order_id
+        while not self._pending_cancels.empty():
+            try:
+                condition_id, side, order_id = self._pending_cancels.get_nowait()
+            except asyncio.QueueEmpty:
+                break
             if order_id:
                 await self._cancel_order(order_id)
-                if side == "YES":
-                    market.yes_order_id = None
-                else:
-                    market.no_order_id = None
                 logger.info("MM preemptive cancel: %s %s order on %s (adverse move)",
                             side, order_id[:12] if not order_id.startswith("paper_") else "paper",
-                            market.title[:30])
+                            self._markets.get(condition_id, MarketState("", "", "", "")).title[:30])
 
     def get_stats(self) -> dict:
         return {
@@ -645,7 +651,8 @@ class MarketMaker:
             self.stats.total_merged_profit += merge_profit
             self.stats.total_pnl += merge_profit
             self.stats.merges_completed += 1
-            self.total_capital += merge_profit  # Capital freed back
+            # Return full $1.00/share (original cost + profit) — matches live mode
+            self.total_capital += matched_shares
             logger.info("MM merge (paper): %s, %.2f shares, profit=$%.4f",
                         market.title[:30], matched_shares, merge_profit)
             return
