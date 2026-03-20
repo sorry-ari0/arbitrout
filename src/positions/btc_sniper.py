@@ -31,6 +31,7 @@ MAKER_PRICE_HIGH = 0.95         # Maker limit price for strong signals
 MAKER_PRICE_LOW = 0.90          # Maker limit price for weaker signals
 POLL_INTERVAL = 2.0             # Signal evaluation every 2 seconds
 SPIKE_THRESHOLD = 1.5           # Score jump threshold for immediate entry
+TAKER_FEE_PCT = 0.0156          # 1.56% max taker fee on 5-min crypto markets
 
 # Position sizing
 DEFAULT_BANKROLL = 500.0
@@ -87,8 +88,10 @@ class BtcSniper:
         self._asset_state: dict[str, AssetSniperState] = {
             a: AssetSniperState(asset=a) for a in self.assets
         }
-        # Event-driven: tick event signals new data available
-        self._tick_event = asyncio.Event()
+        # Event-driven: per-asset tick events to avoid false wakes
+        self._tick_events: dict[str, asyncio.Event] = {
+            a: asyncio.Event() for a in self.assets
+        }
         self._tick_callback_registered = False
         # Decision log for analysis
         self._decision_log: list[dict] = []
@@ -118,11 +121,12 @@ class BtcSniper:
     def _on_price_tick(self, asset: str, price: float, timestamp: float):
         """Callback from price feed — fires on every trade tick.
 
-        Sets an asyncio event to wake the sniper loop immediately
-        instead of waiting for the 2-second poll interval.
+        Sets a per-asset asyncio event to wake only the relevant asset's
+        evaluation loop, avoiding false wakes from other assets' ticks.
         """
-        if asset in self.assets:
-            self._tick_event.set()
+        ev = self._tick_events.get(asset)
+        if ev is not None:
+            ev.set()
 
     def get_stats(self) -> dict:
         return {
@@ -240,10 +244,11 @@ class BtcSniper:
 
             signal = self.feed.compute_sniper_signal(asset)
             if not signal:
-                # Wait for next tick or timeout after 2s
-                self._tick_event.clear()
+                # Wait for next tick for THIS asset or timeout after 2s
+                tick_ev = self._tick_events[asset]
+                tick_ev.clear()
                 try:
-                    await asyncio.wait_for(self._tick_event.wait(), timeout=POLL_INTERVAL)
+                    await asyncio.wait_for(tick_ev.wait(), timeout=POLL_INTERVAL)
                 except asyncio.TimeoutError:
                     pass
                 continue
@@ -266,10 +271,11 @@ class BtcSniper:
             if remaining <= FALLBACK_WINDOW_SECONDS and astate.best_signal.confidence >= MIN_CONFIDENCE:
                 break
 
-            # Wait for next tick (event-driven) with 2s fallback
-            self._tick_event.clear()
+            # Wait for next tick for THIS asset (event-driven) with 2s fallback
+            tick_ev = self._tick_events[asset]
+            tick_ev.clear()
             try:
-                await asyncio.wait_for(self._tick_event.wait(), timeout=POLL_INTERVAL)
+                await asyncio.wait_for(tick_ev.wait(), timeout=POLL_INTERVAL)
             except asyncio.TimeoutError:
                 pass
 
@@ -417,20 +423,26 @@ class BtcSniper:
         actual_direction = "UP" if close_price >= open_price else "DOWN"
         won = (direction == actual_direction)
 
+        # Estimate fees: maker orders = 0%, FOK fallback = 1.56% taker fee
+        # Use conservative estimate: assume taker fee applies (worst case)
+        estimated_fee = bet_size * TAKER_FEE_PCT
+
         if won:
             shares = bet_size / entry_price
             payout = shares * 1.0
-            profit = payout - bet_size
+            profit = payout - bet_size - estimated_fee
             self.stats.trades_won += 1
             self.stats.total_pnl += profit
+            self.stats.total_fees += estimated_fee
             self.bankroll += bet_size + profit
-            logger.info("Sniper [%s] WIN: %s ($%.2f->$%.2f), profit=$%.2f",
-                        asset, direction, open_price, close_price, profit)
+            logger.info("Sniper [%s] WIN: %s ($%.2f->$%.2f), profit=$%.2f (fee=$%.2f)",
+                        asset, direction, open_price, close_price, profit, estimated_fee)
         else:
             self.stats.trades_lost += 1
-            self.stats.total_pnl -= bet_size
-            logger.info("Sniper [%s] LOSS: predicted %s but was %s, loss=$%.2f",
-                        asset, direction, actual_direction, bet_size)
+            self.stats.total_pnl -= (bet_size + estimated_fee)
+            self.stats.total_fees += estimated_fee
+            logger.info("Sniper [%s] LOSS: predicted %s but was %s, loss=$%.2f (fee=$%.2f)",
+                        asset, direction, actual_direction, bet_size, estimated_fee)
 
     def _calculate_bet_size(self) -> float:
         """Calculate bet size based on mode and bankroll."""

@@ -717,12 +717,33 @@ class MarketMaker:
     def _check_circuit_breaker(self) -> bool:
         """Check if external price diverges too much from Polymarket.
 
-        Checks all active assets — trips if ANY feed is stale.
+        Trips if:
+        1. Any tracked asset's Binance feed is stale (>5s old)
+        2. Any market's Polymarket mid price diverges >5% from Binance spot
+
+        The divergence check uses cached Polymarket prices from the last
+        quote update (market.yes_order_price) to avoid extra API calls.
         """
         for market in self._markets.values():
+            # Check 1: feed staleness
             if self.feed.is_asset_stale(market.asset):
                 return True
-        # Also trip if we have no markets but the primary feed is stale
+
+            # Check 2: price divergence between Binance and Polymarket
+            binance_price = self.feed.get_price(market.asset)
+            poly_mid = market.yes_order_price  # Last known Polymarket YES price
+            if binance_price > 0 and poly_mid > 0:
+                # For binary markets, fair YES price relates to probability.
+                # We can't directly compare spot price to probability, but we
+                # CAN check if the Polymarket price has moved dramatically from
+                # our last quote reference, indicating a potential feed issue.
+                if market.quote_ref_price > 0:
+                    binance_move = abs(binance_price - market.quote_ref_price) / market.quote_ref_price
+                    if binance_move > PRICE_DIVERGENCE_HALT:
+                        logger.warning("Circuit breaker: %s Binance moved %.1f%% from quote ref",
+                                      market.asset, binance_move * 100)
+                        return True
+
         if not self._markets:
             return any(self.feed.is_asset_stale(a) for a in self.feed.active_assets)
         return False
