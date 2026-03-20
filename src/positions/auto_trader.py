@@ -124,7 +124,7 @@ class AutoTrader:
                 if leg.get("status") == "open":
                     asset_id = leg.get("asset_id", "")
                     # asset_id format: "{conditionId}:YES" or "{conditionId}:NO"
-                    condition_id = asset_id.split(":")[0] if ":" in asset_id else asset_id
+                    condition_id = (asset_id.split(":")[0] if ":" in asset_id else asset_id).lower()
                     if condition_id:
                         ids.add(condition_id)
         return ids
@@ -293,9 +293,9 @@ class AutoTrader:
                     self.dlog.log_opportunity_skip(opp_title, "low_spread", spread_pct=spread_pct)
                 continue
 
-            # Skip markets we already have positions on (check BOTH sides)
-            yes_mid = opp.get("buy_yes_market_id", "")
-            no_mid = opp.get("buy_no_market_id", "")
+            # Skip markets we already have positions on (check BOTH sides, case-insensitive)
+            yes_mid = opp.get("buy_yes_market_id", "").lower()
+            no_mid = opp.get("buy_no_market_id", "").lower()
             if (yes_mid and yes_mid in open_market_ids) or (no_mid and no_mid in open_market_ids):
                 self._trades_skipped += 1
                 if self.dlog:
