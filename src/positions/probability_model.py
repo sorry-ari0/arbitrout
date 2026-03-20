@@ -51,7 +51,10 @@ class ProbabilityModel:
             }
 
     def get_consensus(self, title: str) -> dict | None:
-        return self._cache.get(title)
+        data = self._cache.get(title)
+        if data and time.time() - data.get("updated_at", 0) > 86400:
+            return None  # Stale (>24h), discard
+        return data
 
     def has_deviation(self, title: str, threshold: float = 0.10) -> bool:
         data = self._cache.get(title)

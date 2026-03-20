@@ -130,11 +130,20 @@ class AutoTrader:
         return ids
 
     def _check_daily_limit(self) -> bool:
-        """Returns True if we can still open trades today."""
+        """Returns True if we can still open trades today.
+
+        Counts from actual packages (survives server restarts) and merges
+        with in-memory counter to catch trades opened this session.
+        """
         today = date.today().isoformat()
         if self._daily_trade_date != today:
+            # Reset in-memory counter and recount from persisted packages
             self._daily_trade_count = 0
             self._daily_trade_date = today
+            today_start = datetime.combine(date.today(), datetime.min.time()).timestamp()
+            for p in self.pm.list_packages():
+                if p.get("created_at", 0) >= today_start and p.get("name", "").startswith("Auto:"):
+                    self._daily_trade_count += 1
         return self._daily_trade_count < MAX_NEW_TRADES_PER_DAY
 
     async def _scan_and_trade(self):

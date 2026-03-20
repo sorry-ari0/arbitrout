@@ -230,8 +230,8 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
     # Research: exit after 7 days if position hasn't moved significantly.
     # Prevents capital from being tied up in dead markets.
     # Skip for hold-to-resolution: these are MEANT to be held until the event resolves.
+    created_at = pkg.get("created_at", 0)
     if not pkg.get("_hold_to_resolution"):
-        created_at = pkg.get("created_at", 0)
         if created_at:
             days_open = (time.time() - created_at) / 86400
             if days_open >= 7 and abs(pnl_pct) < 5:
