@@ -996,6 +996,10 @@ python -m uvicorn server:app --host 127.0.0.1 --port 8500 --log-level info
   - **Calibration loop:** New `CalibrationEngine` reads eval_logger + trade_journal. Generates reports with entry calibration (correct_skip_rate per reason), exit calibration (win_rate per trigger), hold duration analysis (5 time buckets), fee analysis (limit fill rate, fee drag). 24h background task saves to `data/calibration/`. API: `GET /api/derivatives/calibration`.
   - **Trade journal:** Records `exit_order_type` ("limit_filled", "fok_direct", etc.) per trade. New `get_performance_by_hold_duration()` method.
   - **Test coverage:** 284 total tests (was 271).
+- **Bugfixes (2026-03-20) — Duplicate entries, dedup, P&L:**
+  - **Duplicate position entries fixed:** Auto trader now checks BOTH `buy_yes_market_id` AND `buy_no_market_id` against open positions (was only checking YES side). Also refreshes `open_market_ids` after each successful trade within a scan cycle so later iterations see positions opened earlier in the same cycle. Root cause of NCAA 5x entry ($68 loss) and Crude Oil 3x entry ($46 loss).
+  - **Arb engine dedup fix:** Changed dedup key from directional `(A, B)` tuple to order-independent `frozenset([A, B])` + `match_id` dedup. Eliminates duplicate opportunities shown on dashboard.
+  - **update_pnl() zeroing fix:** Added early return for closed packages and changed cost summation to include all legs (not just open ones). Previously, closed packages had `total_cost` reset to $0, corrupting dashboard stats.
   - Spec: `docs/superpowers/specs/2026-03-19-exit-optimization-design.md`
   - Plan: `docs/superpowers/plans/2026-03-19-exit-optimization.md`
 - **Previous changes (2026-03-19) — Trading Performance Overhaul (branch: feature/trading-perf-overhaul):**
