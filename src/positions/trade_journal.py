@@ -73,6 +73,7 @@ class TradeJournal:
                 "leg_pnl": round(leg_pnl, 4),
                 "leg_pnl_pct": round(leg_pnl / cost * 100, 2) if cost > 0 else 0,
                 "status": leg.get("status"),
+                "exit_order_type": leg.get("exit_order_type", "fok_direct"),
             })
 
         total_cost = pkg.get("total_cost", 0)
@@ -98,6 +99,7 @@ class TradeJournal:
             "pnl_pct": round(pnl / total_cost * 100, 2) if total_cost > 0 else 0,
             "outcome": "win" if pnl > 0 else ("loss" if pnl < 0 else "flat"),
             "exit_trigger": exit_trigger,
+            "exit_order_type": pkg.get("legs", [{}])[0].get("exit_order_type", "fok_direct"),
             "legs": legs_detail,
             "exit_rules": pkg.get("exit_rules", []),
             "execution_log": pkg.get("execution_log", []),
@@ -213,3 +215,37 @@ class TradeJournal:
     def get_recent(self, limit: int = 20) -> list[dict]:
         """Get most recent journal entries."""
         return sorted(self.entries, key=lambda e: e.get("closed_at", 0), reverse=True)[:limit]
+
+    def get_performance_by_hold_duration(self, mode: str | None = None) -> dict:
+        """Bucket trades by hold duration and compute per-bucket metrics."""
+        filtered = self.entries if not mode else [e for e in self.entries if e.get("mode") == mode]
+        buckets = {
+            "0-6h": {"max_hours": 6},
+            "6-24h": {"max_hours": 24},
+            "24h-3d": {"max_hours": 72},
+            "3d-7d": {"max_hours": 168},
+            "7d+": {"max_hours": float("inf")},
+        }
+        result = {}
+        for name, cfg in buckets.items():
+            result[name] = {"trades": 0, "wins": 0, "pnl": 0.0, "avg_pnl": 0.0, "win_rate": 0.0}
+
+        for e in filtered:
+            hours = e.get("hold_duration_hours", 0)
+            for name, cfg in buckets.items():
+                prev_max = {"0-6h": 0, "6-24h": 6, "24h-3d": 24, "3d-7d": 72, "7d+": 168}.get(name, 0)
+                if prev_max <= hours < cfg["max_hours"]:
+                    result[name]["trades"] += 1
+                    result[name]["pnl"] += e.get("pnl", 0)
+                    if e.get("outcome") == "win":
+                        result[name]["wins"] += 1
+                    break
+
+        for name in result:
+            b = result[name]
+            if b["trades"] > 0:
+                b["win_rate"] = round(b["wins"] / b["trades"], 2)
+                b["avg_pnl"] = round(b["pnl"] / b["trades"], 2)
+            b["pnl"] = round(b["pnl"], 2)
+
+        return result
