@@ -263,6 +263,17 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
                     "action": "immediate_exit", "safety_override": True})
                 break
 
+    # ── Minimum hold period enforcement ────────────────────────────────────
+    # Suppress non-safety, non-mechanical triggers during the hold period.
+    # Safety overrides and mechanical exits (target_hit, stop_loss) still fire —
+    # we don't suppress profitable exits or risk management.
+    min_hold_until = pkg.get("_min_hold_until", 0)
+    if min_hold_until and time.time() < min_hold_until:
+        triggers = [t for t in triggers if (
+            t.get("safety_override") or
+            t["name"] in ("target_hit", "stop_loss", "political_event_resolved")
+        )]
+
     return triggers
 
 
