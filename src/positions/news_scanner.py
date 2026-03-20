@@ -96,6 +96,7 @@ class NewsScanner:
         # Headline dedup state
         self._seen_hashes: dict[str, float] = {}       # hash → timestamp
         self._recent_headlines: list[dict] = []         # [{words: set, ts: float}]
+        self._matched_headlines: dict[str, list[dict]] = {}  # condition_id → [{headline, source, ...}]
 
         # Trade safeguards
         self.daily_trades: dict[str, int] = {}          # date_str → count
@@ -170,6 +171,15 @@ class NewsScanner:
 
         # Prune expired state
         self._prune_state()
+
+        # Prune stale headline matches (>48h)
+        cutoff_48h = time.time() - 172800
+        for cid in list(self._matched_headlines.keys()):
+            self._matched_headlines[cid] = [
+                h for h in self._matched_headlines[cid] if h.get("timestamp", 0) > cutoff_48h
+            ]
+            if not self._matched_headlines[cid]:
+                del self._matched_headlines[cid]
 
         # Refresh market cache if stale
         await self._refresh_market_cache()
@@ -288,6 +298,40 @@ class NewsScanner:
 
             title = headline.get("title", "?")
             market_id = market.get("condition_id", "")
+
+            # Cache headline match for exit engine news validation (BEFORE gating)
+            side = result.get("side", "")
+            if side.upper() == "NO":
+                sentiment = "negative"
+            elif side.upper() == "YES":
+                sentiment = "positive"
+            else:
+                sentiment = "neutral"
+            if market_id:
+                if market_id not in self._matched_headlines:
+                    self._matched_headlines[market_id] = []
+                self._matched_headlines[market_id].append({
+                    "headline": title,
+                    "source": headline.get("source", "unknown"),
+                    "timestamp": time.time(),
+                    "confidence": confidence,
+                    "sentiment": sentiment,
+                    "market_title": market.get("question", market.get("title", "")),
+                })
+                # Cap at 500 total entries to bound memory
+                total = sum(len(v) for v in self._matched_headlines.values())
+                if total > 500:
+                    oldest_cid, oldest_idx = None, None
+                    oldest_ts = float("inf")
+                    for cid, entries in self._matched_headlines.items():
+                        for i, e in enumerate(entries):
+                            if e.get("timestamp", 0) < oldest_ts:
+                                oldest_ts = e["timestamp"]
+                                oldest_cid, oldest_idx = cid, i
+                    if oldest_cid is not None:
+                        self._matched_headlines[oldest_cid].pop(oldest_idx)
+                        if not self._matched_headlines[oldest_cid]:
+                            del self._matched_headlines[oldest_cid]
 
             # Gate: confidence >= 7 or breaking news
             if confidence < 7 and urgency != "breaking":
@@ -737,6 +781,12 @@ class NewsScanner:
         return False
 
     # ── Persistence ──────────────────────────────────────────────────────────
+
+    def get_recent_headlines(self, condition_id: str, hours: int = 24) -> list[dict]:
+        """Return cached headlines matching this market from the last N hours."""
+        cutoff = time.time() - (hours * 3600)
+        entries = self._matched_headlines.get(condition_id, [])
+        return [e for e in entries if e.get("timestamp", 0) > cutoff]
 
     def _load_cache(self):
         """Load persisted state from news_cache.json."""
