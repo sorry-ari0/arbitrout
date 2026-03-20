@@ -13,7 +13,7 @@ STATUS_OPEN = "open"
 STATUS_CLOSED = "closed"
 STATUS_PARTIAL = "partial_exit"
 
-STRATEGY_TYPES = ("spot_plus_hedge", "cross_platform_arb", "synthetic_derivative", "pure_prediction", "news_driven", "political_synthetic")
+STRATEGY_TYPES = ("spot_plus_hedge", "cross_platform_arb", "synthetic_derivative", "pure_prediction", "news_driven", "political_synthetic", "btc_sniper", "multi_outcome_arb", "market_making")
 
 
 def create_package(name: str, strategy_type: str) -> dict:
