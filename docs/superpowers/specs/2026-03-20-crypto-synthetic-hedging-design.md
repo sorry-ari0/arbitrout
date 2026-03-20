@@ -134,15 +134,22 @@ Strategy guidance for crypto contracts:
 
 **No second LLM call.** Same prompt template, same provider chain (Groq → Gemini → OpenRouter).
 
+**Handle None race/state for crypto clusters:** `build_cluster_prompt()` currently embeds `cluster.race` and `cluster.state` into the prompt string. For crypto clusters these are None. Guard with: if cluster_id starts with `"crypto-"`, replace the race/state header with the crypto asset name (e.g., "Asset: BTC" instead of "Race: TX Senate").
+
 ### 5. Analyzer Filter Extension (`analyzer.py`)
 
 **Current:** `analyze_clusters()` filters events to `category == "politics"`.
 
-**Extension:** Also include events where the title matches crypto keywords. The filter becomes:
+**Extension:** Include events that are politically tagged with crypto content AND events from the crypto adapter. The filter becomes:
 ```python
-if event.category == "politics" or _is_crypto_relevant(event.title):
+if event.category == "politics" or event.category == "crypto" or _is_crypto_relevant(event.title):
     contracts.append(classify_contract(event))
 ```
+
+Three paths into the classifier:
+1. `category == "politics"` — existing political contracts (unchanged)
+2. `category == "crypto"` — contracts from CryptoSpotAdapter (already tagged as crypto)
+3. `_is_crypto_relevant(title)` — catches crypto contracts mis-categorized under other categories (e.g., "politics" tagged "Will Congress ban Bitcoin?")
 
 `_is_crypto_relevant(title)` checks for the same crypto asset names used by the classifier. This is a fast string check, not an LLM call.
 
@@ -162,12 +169,15 @@ These are None for political contracts, populated for crypto_event contracts.
 
 ### 7. Auto-Trader Recognition (`auto_trader.py`)
 
-Add `"crypto_synthetic"` as a recognized strategy type (12th type). In the exit rules section:
-- Same exit rules as political_synthetic: target_profit, stop_loss, trailing_stop
+Add `"crypto_synthetic"` as a recognized strategy type (12th type). Implementation mirrors the `political_synthetic` handler — a standalone `if opportunity_type == "crypto_synthetic"` block (NOT in the general strategy branching section). This block:
+- Sets same exit rules as political_synthetic: target_profit, stop_loss, trailing_stop (inline, same pattern as political_synthetic at lines 778-780)
 - Does NOT set `_hold_to_resolution` (unlike cross-platform arbs)
 - Sets `_use_brackets = True` (uses the bracket orders system for 0% maker exits)
+- Then `continue`s before the general strategy branching, same as political_synthetic
 
 Scoring formula unchanged: `net_EV × confidence_mult × platform_mult`. The EV already reflects hedge quality from the LLM strategy.
+
+**`PoliticalOpportunity.to_dict()` fix:** The `to_dict()` method currently hardcodes `"opportunity_type": "political_synthetic"`. It must become type-aware: emit `"crypto_synthetic"` when the cluster_id starts with `"crypto-"`. Otherwise the auto-trader's type check will never match.
 
 ## Error Handling
 
