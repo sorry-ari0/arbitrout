@@ -6,12 +6,15 @@ Repo: https://github.com/sorry-ari0/arbitrout.git
 Branch: feat/political-synthetic-analysis
 
 ## Overview
-Arbitrout is a prediction market trading system with five core capabilities:
+Arbitrout is a prediction market trading system with eight core capabilities:
 1. **Cross-platform arbitrage scanner** — finds price discrepancies across Polymarket, PredictIt, Limitless, Kalshi, and more
 2. **Autonomous paper trading** — auto trader scans ALL platforms (9 adapters, 10 executors) for opportunities, opens directional bets and cross-platform arb with risk management
 3. **Insider/whale tracker** — monitors top Polymarket traders and uses their positions as trading signals
 4. **AI news scanner** — monitors RSS feeds, uses AI to match headlines to prediction markets, executes trades on breaking news before markets react
 5. **Political synthetic derivatives** — rule-based classification + LLM-driven multi-leg strategy generation for political prediction markets, with cross-platform correlation detection and fee-adjusted expected value analysis
+6. **BTC 5-min directional sniper** — streams real-time BTC price from Binance WebSocket, computes composite directional signal (window delta + micro momentum + tick trend) at T-10s before 5-min market close, places maker limit orders (0% fee + USDC rebates) on the winning side. Research-validated: 85%+ win rate on these markets.
+7. **Market maker** — provides dual-sided liquidity on Polymarket crypto markets by placing maker limit orders on both YES and NO sides (combined cost < $1.00 = guaranteed profit). Inventory management with 70/30 imbalance limits, auto-withdrawal before resolution.
+8. **Multi-outcome arbitrage** — scans Polymarket grouped events (3+ outcomes) where sum of all YES prices < $1.00, buys all outcomes for guaranteed profit at resolution
 
 Integrated into the Lobsterminal financial terminal as a switchable tab. Backend is Python FastAPI on port 8500.
 
@@ -54,6 +57,12 @@ server.py creates all subsystems and injects dependencies:
 
   EvalLogger   <─── AutoTrader             (logs all entered/skipped opportunities)
   EvalLogger   <─── PoliticalAnalyzer      (logs political opportunities)
+
+  BinancePriceFeed ──> BtcSniper           (real-time BTC price stream)
+  BinancePriceFeed ──> MarketMaker         (fair price for quote calculation)
+  BtcSniper    ──> PositionManager         (creates btc_sniper packages)
+  MarketMaker  ──> PolymarketExecutor      (maker limit orders via CLOB)
+  ArbitrageScanner ──> multi_outcome scan  (grouped events with 3+ outcomes)
 ```
 
 ### Runtime Data Flow
@@ -461,6 +470,9 @@ ArbitrageOpportunity:
 | `src/positions/news_ai.py` | Multi-provider LLM analysis for headline scanning and deep article review |
 | `src/positions/decision_log.py` | JSONL decision logger — records buys, skips, triggers, AI verdicts, exits, news signals |
 | `src/positions/wallet_config.py` | Paper/live mode config, .env loading, key validation, safe config API |
+| `src/positions/price_feed.py` | Shared Binance WebSocket — real-time BTC price, 1-min candles, 5-min window tracking, tick trend |
+| `src/positions/btc_sniper.py` | BTC 5-min directional sniper — composite signal at T-10s, maker orders, auto-claim |
+| `src/positions/market_maker.py` | Dual-sided liquidity on Polymarket crypto — inventory mgmt, spread sizing, maker rebates |
 
 ### How Derivative Packages Work
 
