@@ -83,3 +83,35 @@ def test_cancel_order_returns_true():
         pe.cancel_order("paper_abc123")
     )
     assert result is True
+
+
+def test_exit_leg_with_limit_returns_pending():
+    """exit_leg(use_limit=True) should place a limit order and return pending status."""
+    from positions.position_manager import PositionManager, create_package, create_leg
+    from execution.base_executor import ExecutionResult
+    import tempfile
+    from pathlib import Path
+
+    pm = PositionManager(data_dir=Path(tempfile.mkdtemp()), executors={})
+    # Create a mock executor that supports sell_limit
+    mock_exec = AsyncMock()
+    mock_exec.sell_limit = AsyncMock(return_value=ExecutionResult(
+        success=True, tx_id="order_123", filled_price=0.60,
+        filled_quantity=100.0, fees=0.0, error=None
+    ))
+    mock_exec.check_order_status = AsyncMock(return_value={"status": "open"})
+    pm.executors["polymarket"] = mock_exec
+
+    pkg = create_package("Test pkg", "pure_prediction")
+    leg = create_leg("polymarket", "prediction_yes", "cond:YES", "Cond YES", 0.50, 100.0, "2026-12-31")
+    leg["current_price"] = 0.60
+    pkg["legs"].append(leg)
+    pm.packages[pkg["id"]] = pkg
+
+    result = asyncio.run(
+        pm.exit_leg(pkg["id"], leg["leg_id"], trigger="ai_approved:target_hit", use_limit=True)
+    )
+    assert result.get("pending"), "Expected pending status for limit order"
+    assert result.get("order_id") == "order_123"
+    assert leg["status"] == "open", "Leg should stay open while order is pending"
+    assert "_pending_limit_orders" in pkg
