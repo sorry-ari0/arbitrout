@@ -65,10 +65,15 @@ class AutoTrader:
         self._news_lock = asyncio.Lock()
         self._news_opportunities: list[dict] = []
         self._political_analyzer = None
+        self._weather_scanner = None
 
     def set_political_analyzer(self, analyzer):
         """Set the political analyzer reference for opportunity consumption."""
         self._political_analyzer = analyzer
+
+    def set_weather_scanner(self, scanner):
+        """Set the weather scanner reference for opportunity consumption."""
+        self._weather_scanner = scanner
 
     async def add_news_opportunity(self, opp: dict):
         """Called by NewsScanner to queue a normal-urgency signal."""
@@ -246,6 +251,32 @@ class AutoTrader:
                     logger.info("Auto trader: merged %d multi-outcome arb opportunities", len(multi_opps))
             except Exception as e:
                 logger.warning("Auto trader: multi-outcome scan failed: %s", e)
+
+        # Merge portfolio NO opportunities
+        if self.scanner:
+            try:
+                pno_opps = await self.scanner.scan_portfolio_no()
+                for pno in pno_opps:
+                    # Portfolio NO is near-guaranteed profit — high priority
+                    pno["_score"] = pno.get("profit_pct", 0) * 4.0  # 4x premium
+                    opportunities.append(pno)
+                if pno_opps:
+                    logger.info("Auto trader: merged %d portfolio NO opportunities", len(pno_opps))
+            except Exception as e:
+                logger.warning("Auto trader: portfolio NO scan failed: %s", e)
+
+        # Merge weather forecast opportunities
+        if self._weather_scanner:
+            try:
+                weather_opps = await self._weather_scanner.scan()
+                for wo in weather_opps:
+                    # Weather edge from NWS forecast — good signal
+                    wo["_score"] = wo.get("edge", 0) * 100 * 3.0  # 3x edge premium
+                    opportunities.append(wo)
+                if weather_opps:
+                    logger.info("Auto trader: merged %d weather opportunities", len(weather_opps))
+            except Exception as e:
+                logger.warning("Auto trader: weather scan failed: %s", e)
 
         # Merge political synthetic opportunities
         if self._political_analyzer:
@@ -586,6 +617,133 @@ class AutoTrader:
                                 days_to_expiry=days_to_expiry, volume=opp.get("volume", 0))
                 except Exception as e:
                     logger.warning("Auto trader: multi-outcome trade failed: %s", e)
+                    if self.dlog:
+                        self.dlog.log_trade_failed(opp_title, str(e))
+                continue
+
+            # Portfolio NO: buy NO on all non-favorites in multi-outcome events
+            if opp.get("opportunity_type") == "portfolio_no":
+                try:
+                    pkg = create_package(f"Auto: {trade_title[:60]}", "portfolio_no")
+                except ValueError:
+                    continue
+
+                no_targets = opp.get("no_targets", [])
+                if not no_targets:
+                    continue
+
+                # Allocate proportionally to each NO price
+                total_no_cost = sum(o.get("no_price", 0) for o in no_targets)
+                if total_no_cost <= 0:
+                    continue
+
+                for target in no_targets:
+                    no_price = target.get("no_price", 0)
+                    if no_price <= 0:
+                        continue
+                    leg_cost = round(trade_size * (no_price / total_no_cost), 2)
+                    leg_cost = max(MIN_TRADE_SIZE, leg_cost)
+
+                    pkg["legs"].append(create_leg(
+                        platform="polymarket",
+                        leg_type="prediction_no",
+                        asset_id=f"{target['condition_id']}:NO",
+                        asset_label=f"NO: {target.get('title', '?')[:40]}",
+                        entry_price=no_price,
+                        cost=leg_cost,
+                        expiry=opp.get("expiry", "2026-12-31")[:10],
+                    ))
+
+                # Near-guaranteed profit — only exit on safety or if overround collapses
+                pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -10}))
+                pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 15}))
+
+                if not pkg["legs"]:
+                    self._trades_skipped += 1
+                    continue
+
+                pkg["_use_limit_orders"] = True
+                pkg_name = pkg.get("name", opp_title)
+                try:
+                    result = await self.pm.execute_package(pkg)
+                    if result.get("success"):
+                        trades_this_cycle += 1
+                        self._trades_opened += 1
+                        self._daily_trade_count += 1
+                        remaining_budget -= trade_size
+                        for leg in pkg.get("legs", []):
+                            cid = leg.get("asset_id", "").split(":")[0]
+                            if cid:
+                                open_market_ids.add(cid)
+                        logger.info("Auto trader OPENED portfolio NO: %s (%d NOs, profit=%.2f%%)",
+                                    pkg_name, len(no_targets), opp.get("profit_pct", 0))
+                        if self.dlog:
+                            self.dlog.log_trade_opened(
+                                pkg_id=pkg.get("id", ""), title=pkg_name,
+                                strategy="portfolio_no",
+                                side="ALL_NO", price=round(total_no_cost, 4),
+                                size=trade_size, score=score, spread_pct=spread_pct,
+                                conviction=0.95,  # Near-guaranteed
+                                days_to_expiry=days_to_expiry, volume=opp.get("volume", 0))
+                except Exception as e:
+                    logger.warning("Auto trader: portfolio NO trade failed: %s", e)
+                    if self.dlog:
+                        self.dlog.log_trade_failed(opp_title, str(e))
+                continue
+
+            # Weather forecast: single-leg directional bet based on NWS data
+            if opp.get("opportunity_type") == "weather_forecast":
+                side = opp.get("side", "YES")
+                entry_price = opp.get("buy_yes_price", 0.5) if side == "YES" else opp.get("buy_no_price", 0.5)
+                if entry_price <= 0:
+                    continue
+
+                try:
+                    pkg = create_package(f"Auto: {trade_title[:60]}", "weather_forecast")
+                except ValueError:
+                    continue
+
+                leg_type = "prediction_yes" if side == "YES" else "prediction_no"
+                market_id = opp.get("market_ticker", opp.get("buy_yes_market_id", ""))
+
+                pkg["legs"].append(create_leg(
+                    platform="kalshi",
+                    leg_type=leg_type,
+                    asset_id=f"{market_id}:{side}",
+                    asset_label=f"{side}: {opp.get('title', '?')[:40]}",
+                    entry_price=entry_price,
+                    cost=trade_size,
+                    expiry=opp.get("expiry", opp.get("target_date", ""))[:10],
+                ))
+
+                # Daily weather markets resolve quickly — tight exits
+                pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 30}))
+                pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -25}))
+
+                pkg["_use_limit_orders"] = True
+                pkg_name = pkg.get("name", opp_title)
+                try:
+                    result = await self.pm.execute_package(pkg)
+                    if result.get("success"):
+                        trades_this_cycle += 1
+                        self._trades_opened += 1
+                        self._daily_trade_count += 1
+                        remaining_budget -= trade_size
+                        cid = market_id.split(":")[0] if ":" in market_id else market_id
+                        if cid:
+                            open_market_ids.add(cid)
+                        logger.info("Auto trader OPENED weather: %s (edge=%.1f%%, side=%s)",
+                                    pkg_name, opp.get("edge", 0) * 100, side)
+                        if self.dlog:
+                            self.dlog.log_trade_opened(
+                                pkg_id=pkg.get("id", ""), title=pkg_name,
+                                strategy="weather_forecast",
+                                side=side, price=entry_price,
+                                size=trade_size, score=score, spread_pct=spread_pct,
+                                conviction=min(1.0, opp.get("edge", 0) * 5),
+                                days_to_expiry=days_to_expiry, volume=opp.get("volume", 0))
+                except Exception as e:
+                    logger.warning("Auto trader: weather trade failed: %s", e)
                     if self.dlog:
                         self.dlog.log_trade_failed(opp_title, str(e))
                 continue

@@ -1,20 +1,23 @@
 # Project: Arbitrout (Prediction Market Arbitrage + Auto Trading)
 Status: ACTIVE
 Phase: BUILD
-Last Updated: 2026-03-19
+Last Updated: 2026-03-20
 Repo: https://github.com/sorry-ari0/arbitrout.git
-Branch: main (feature/trading-perf-overhaul pending merge)
+Branch: main
 
 ## Overview
-Arbitrout is a prediction market trading system with eight core capabilities:
+Arbitrout is a prediction market trading system with eleven core capabilities:
 1. **Cross-platform arbitrage scanner** — finds price discrepancies across Polymarket, PredictIt, Limitless, Kalshi, and more
 2. **Autonomous paper trading** — auto trader scans ALL platforms (9 adapters, 10 executors) for opportunities, opens directional bets and cross-platform arb with risk management
-3. **Insider/whale tracker** — monitors top Polymarket traders and uses their positions as trading signals
+3. **Insider/whale tracker** — monitors top Polymarket traders, classifies wallets (conviction/market_maker/unknown), conviction-weighted signals with 5x/0x weighting
 4. **AI news scanner** — monitors RSS feeds, uses AI to match headlines to prediction markets, executes trades on breaking news before markets react
 5. **Political synthetic derivatives** — rule-based classification + LLM-driven multi-leg strategy generation for political prediction markets, with cross-platform correlation detection and fee-adjusted expected value analysis
 6. **BTC 5-min directional sniper** — streams real-time BTC price from Binance WebSocket, computes composite directional signal (window delta + micro momentum + tick trend) at T-10s before 5-min market close, places maker limit orders (0% fee + USDC rebates) on the winning side. Research-validated: 85%+ win rate on these markets.
 7. **Market maker** — provides dual-sided liquidity on Polymarket crypto markets by placing maker limit orders on both YES and NO sides (combined cost < $1.00 = guaranteed profit). Inventory management with 70/30 imbalance limits, auto-withdrawal before resolution.
 8. **Multi-outcome arbitrage** — scans Polymarket grouped events (3+ outcomes) where sum of all YES prices < $1.00, buys all outcomes for guaranteed profit at resolution
+9. **Portfolio NO strategy** — buys NO on all non-favorites in multi-outcome events (tournaments, elections). Exploits overround: when sum(YES) > 1.0, buying NO on non-favorites guarantees profit since exactly one outcome wins. Excludes top favorites optimally to maximize guaranteed minimum return.
+10. **Weather market scanner** — fetches NWS (National Weather Service) forecasts for 10 major US cities, compares to Kalshi daily temperature/precipitation market brackets. Generates opportunities when forecast probability diverges >10% from market price.
+11. **Real-time Polymarket WebSocket** — persistent connection to Polymarket CLOB WebSocket for live price updates on open positions. Auto-subscribes to condition IDs, exponential backoff reconnect, stale price detection.
 
 Integrated into the Lobsterminal financial terminal as a switchable tab. Backend is Python FastAPI on port 8500.
 
@@ -68,6 +71,9 @@ server.py creates all subsystems and injects dependencies:
   BtcSniper    ──> PositionManager         (creates btc_sniper packages)
   MarketMaker  ──> PolymarketExecutor      (maker limit orders via CLOB)
   ArbitrageScanner ──> multi_outcome scan  (grouped events with 3+ outcomes)
+  ArbitrageScanner ──> portfolio_no scan   (NO on non-favorites in tournaments)
+  WeatherScanner ──> AutoTrader            (NWS forecast edge on Kalshi weather)
+  PolymarketPriceFeed ──> ExitEngine       (real-time prices for open positions)
 ```
 
 ### Runtime Data Flow
@@ -357,6 +363,20 @@ signal_strength = 0.2 * normalized_insider_count
   suspicious_count:  insiders with win rate > 80%
   accuracy_score:    weighted average of per-wallet accuracy
                      (only wallets with 3+ resolved markets count)
+
+Wallet Classification:
+  conviction:     ROI > 20%, volume < $50M → 5x signal weight
+  market_maker:   ROI < 5%, volume > $100M → 0x weight (excluded from directional signals)
+  watchlist:      HIGH_CONVICTION_WATCHLIST (8 wallets: Theo4, Fredi9999, etc.) → 5x weight
+  unknown:        Default → 1x weight
+
+Auto Trader Conviction Boost:
+  if conviction_count > 0:
+    score *= (1.0 + strength * 3.0)     # Up to 4x base boost
+    if conviction_count >= 2:
+      score *= 1.5                       # Multiple conviction traders agree
+  else:
+    score *= (1.0 + strength * 1.5)     # Non-conviction boost capped at 2.5x
 ```
 
 ## Architecture
@@ -365,7 +385,7 @@ signal_strength = 0.2 * normalized_insider_count
 - **Framework:** Python FastAPI + uvicorn
 - **Server:** `src/server.py` — main app, lifespan init, all subsystem wiring
 - **Port:** 8500 (local only)
-- **Auto-scan:** Background tasks: arbitrage (60s), exit engine (60s), auto trader (5m), insider tracker (15m), news scanner (150s), political analyzer (15m), eval backfill (1h)
+- **Auto-scan:** Background tasks: arbitrage (10s), exit engine (60s), auto trader (5m safety/event-driven), insider tracker (15m), news scanner (150s), political analyzer (15m), weather scanner (10m cache), eval backfill (1h), calibration (24h)
 - **GPU:** Intel Arc 140V (~7GB VRAM) — one 8B model at a time for Ollama
 
 ---
@@ -487,7 +507,7 @@ ArbitrageOpportunity:
 | `src/positions/probability_model.py` | Consensus probability aggregator — volume-weighted prices across platforms, deviation detection |
 | `src/positions/trade_journal.py` | Records completed trades with P&L, fees, exit triggers, exit_order_type, performance analytics, hold duration analysis |
 | `src/positions/calibration.py` | CalibrationEngine — 24h reports on entry/exit thresholds, hold duration, fee analysis, limit fill rates |
-| `src/positions/insider_tracker.py` | Whale/insider monitor — leaderboard, positions, accuracy tracking, movement alerts |
+| `src/positions/insider_tracker.py` | Whale/insider monitor — leaderboard, wallet classification (conviction 5x/market_maker 0x/watchlist 3x), conviction-weighted signals, per-wallet accuracy |
 | `src/positions/ai_advisor.py` | Multi-provider AI advisor for exit decisions (Groq/Gemini/OpenRouter/Anthropic) |
 | `src/positions/news_scanner.py` | AI news scanner — RSS feed monitor, two-pass AI pipeline, trade execution, headline cache for exit engine |
 | `src/positions/news_ai.py` | Multi-provider LLM analysis for headline scanning and deep article review |
@@ -496,12 +516,14 @@ ArbitrageOpportunity:
 | `src/positions/price_feed.py` | Multi-asset Binance WebSocket (BTC/ETH/SOL/XRP) — real-time prices, per-asset candles, window tracking, event-driven on_tick callbacks |
 | `src/positions/btc_sniper.py` | Multi-asset 5-min directional sniper — event-driven evaluation, composite signal at T-10s, maker orders |
 | `src/positions/market_maker.py` | Dual-sided liquidity — preemptive cancel on adverse ticks, on-chain token merging, multi-asset discovery |
+| `src/positions/weather_scanner.py` | NWS forecast-based edge scanner for Kalshi daily temperature/precipitation markets (10 US cities) |
+| `src/positions/polymarket_ws.py` | Polymarket CLOB WebSocket — real-time price feed, auto-subscribe, reconnect with exponential backoff |
 
 ### How Derivative Packages Work
 
 **Package structure:**
 - A "package" is a grouped position with one or more "legs" (individual market bets) and "exit rules"
-- Strategy types: `spot_plus_hedge`, `cross_platform_arb`, `pure_prediction`, `news_driven`, `synthetic_derivative`, `political_synthetic`, `btc_sniper`, `multi_outcome_arb`, `market_making`
+- Strategy types: `spot_plus_hedge`, `cross_platform_arb`, `pure_prediction`, `news_driven`, `synthetic_derivative`, `political_synthetic`, `btc_sniper`, `multi_outcome_arb`, `market_making`, `portfolio_no`, `weather_forecast`
 - Each package tracks: status (open/closed/partial_exit/rollback), total_cost, current_value, peak_value, unrealized_pnl, itm_status (ITM/OTM/ATM), execution_log, ai_strategy
 
 **Leg structure:**
@@ -611,10 +633,13 @@ The exit engine runs a 60-second scan loop evaluating all open packages.
 ### How the Auto Trader Works
 
 1. Every 5 minutes, scans ALL platforms via ArbitrageScanner (not just Polymarket)
-2. **Four opportunity sources:**
+2. **Seven opportunity sources:**
    - Cross-platform arbitrage (highest priority, 3x score boost): from `scanner.get_opportunities()`
    - Single-platform directional bets: from ALL platform events via `scanner.get_events()`, filtered to tradeable platforms only (those with registered executors)
    - Queued news signals (2x score boost): from NewsScanner via `add_news_opportunity()`
+   - Multi-outcome arbitrage (5x arb premium): from `scanner.scan_multi_outcome()`
+   - Portfolio NO (4x premium): from `scanner.scan_portfolio_no()` — near-guaranteed profit on overround
+   - Weather forecast (3x edge premium): from `WeatherScanner.scan()` — NWS forecast edge on Kalshi
    - Political synthetic derivatives: from PoliticalAnalyzer, scored by `EV * confidence * cross_platform_boost(1.5x)`
 3. Fallback: direct Polymarket Gamma API scan if scanner fails entirely
 4. **ITM/OTM filter:** skips entries with side price > $0.85 (tiny upside) or < $0.15 (lottery tickets)
@@ -990,7 +1015,14 @@ python -m uvicorn server:app --host 127.0.0.1 --port 8500 --log-level info
 - **Universal eval logger:** JSONL logging of all opportunities (entered + skipped), hourly backfill loop, missed opportunity analysis, calibration tracking
 - Spec: `docs/specs/2026-03-19-political-synthetic-analysis-design.md`
 - Plan: `docs/plans/2026-03-19-political-synthetic-analysis.md`
-- **Recent changes (2026-03-20) — Exit Optimization (limit exits, news-validated exits, calibration loop):**
+- **Recent changes (2026-03-20) — Trading Upgrades (portfolio NO, weather scanner, WS feed, parallel execution):**
+  - **Quick wins (PR #88):** Scan interval 60s→10s with scan-in-progress guard. HIGH_CONVICTION_WATCHLIST (8 wallets at 5x) and KNOWN_MARKET_MAKERS (4 wallets at 0x) in insider_tracker. Wallet classification (conviction/market_maker/unknown). Conviction-weighted insider signal formula — market makers excluded from directional signals, conviction traders boosted 3-5x.
+  - **Portfolio NO strategy:** New `scan_portfolio_no()` in ArbitrageEngine. Scans Polymarket grouped events (4+ outcomes), identifies overround (sum YES > 1.02), excludes top favorites optimally, buys NO on remaining outcomes for near-guaranteed profit. Auto trader execution path with limit orders, 10% stop loss, 15% target. Strategy type: `portfolio_no`.
+  - **Weather market scanner:** New `weather_scanner.py` module. Fetches NWS forecasts for 10 US cities (NYC, Chicago, LA, Miami, Dallas, Denver, Seattle, Phoenix, Atlanta, Boston). Compares to Kalshi KXHIGHTEMP/KXRAINY market brackets. Sigmoid probability model with ±5°F std dev for temp estimation. Generates opportunities when forecast diverges >10% from market price. Strategy type: `weather_forecast`.
+  - **Polymarket WebSocket price feed:** New `polymarket_ws.py` — persistent WS connection to `wss://ws-subscriptions-clob.polymarket.com/ws/market`. Auto-subscribes to open position condition IDs, reconnect with exponential backoff (2-60s), stale price detection (120s), callback system. Wired into server.py at startup.
+  - **Parallel leg execution:** Cross-platform arb legs now execute via `asyncio.gather()` instead of sequential loop. Auto-detects multi-platform packages (strategy `cross_platform_arb`). Manual override via `_parallel_execution` flag. Automatic rollback on any leg failure.
+  - **Test coverage:** 324 total tests (was 284).
+- **Previous changes (2026-03-20) — Exit Optimization (limit exits, news-validated exits, calibration loop):**
   - **Limit order exits:** `sell_limit()` rewritten in PaperExecutor to use 0% maker fee (was delegating to `sell()` with 2% taker). Added `check_order_status()` and `cancel_order()` stubs. Position manager gains `use_limit=True` param on `exit_leg()`, async pending order pattern (place limit → release lock → resolve next tick → FOK fallback after 60s). Two-phase locking: status check outside lock, finalization inside lock. Safety overrides cancel pending orders. stop_loss always FOK.
   - **News-validated exits:** News scanner caches all matched headlines in `_matched_headlines` dict (before confidence gate, 500-entry cap, 48h prune). Exit engine collects headlines per package, injects into AI advisor prompt as `RECENT NEWS` section. No negative news → strong REJECT bias for trailing_stop, negative_drift, time_decay.
   - **Calibration loop:** New `CalibrationEngine` reads eval_logger + trade_journal. Generates reports with entry calibration (correct_skip_rate per reason), exit calibration (win_rate per trigger), hold duration analysis (5 time buckets), fee analysis (limit fill rate, fee drag). 24h background task saves to `data/calibration/`. API: `GET /api/derivatives/calibration`.

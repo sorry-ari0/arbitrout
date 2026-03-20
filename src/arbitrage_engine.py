@@ -983,6 +983,10 @@ class ArbitrageScanner:
         self._multi_outcome_cache: list[dict] = []
         self._multi_outcome_cache_time: float = 0
         self._multi_outcome_cache_ttl: float = 300.0
+        # Portfolio NO scan cache (TTL: 5 minutes)
+        self._portfolio_no_cache: list[dict] = []
+        self._portfolio_no_cache_time: float = 0
+        self._portfolio_no_cache_ttl: float = 300.0
 
     async def scan(self) -> dict:
         """Run a full scan cycle. Returns summary."""
@@ -1206,6 +1210,179 @@ class ArbitrageScanner:
         logger.info("Multi-outcome scan: %d opportunities from grouped events", len(opportunities))
         self._multi_outcome_cache = opportunities
         self._multi_outcome_cache_time = time.time()
+        return opportunities
+
+    async def scan_portfolio_no(self) -> list[dict]:
+        """Scan for Portfolio NO opportunities on Polymarket.
+
+        Portfolio NO: In multi-outcome events (tournaments, elections), buy NO
+        on all non-favorites. Since exactly one outcome wins, all other NOs
+        resolve to $1.00.
+
+        Guaranteed profit when sum(YES prices of included outcomes) > 1.0:
+          - Cost = count - sum(YES_i) = sum(NO_i)
+          - Min payout = count - 1 (if one included outcome wins)
+          - Profit = sum(YES_i) - 1.0  (guaranteed minimum)
+
+        Uses the same Gamma API data as scan_multi_outcome (shared cache).
+        """
+        if time.time() - self._portfolio_no_cache_time < self._portfolio_no_cache_ttl:
+            return self._portfolio_no_cache
+
+        try:
+            import httpx
+        except ImportError:
+            logger.warning("httpx not available for portfolio NO scan")
+            return []
+
+        opportunities = []
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                resp = await client.get(
+                    "https://gamma-api.polymarket.com/events",
+                    params={
+                        "closed": "false",
+                        "limit": 50,
+                        "order": "volume",
+                        "ascending": "false",
+                    }
+                )
+                if resp.status_code != 200:
+                    logger.warning("Portfolio NO scan: API returned %d", resp.status_code)
+                    return []
+
+                events = resp.json()
+                if not isinstance(events, list):
+                    events = events.get("data", events.get("events", []))
+
+                for event in events:
+                    event_title = event.get("title", "")
+                    markets = event.get("markets", [])
+
+                    # Need 4+ outcomes for portfolio NO to make sense
+                    if len(markets) < 4:
+                        continue
+
+                    # Parse all outcomes with prices
+                    all_outcomes = []
+                    for m in markets:
+                        yes_price = 0.0
+                        no_price = 0.0
+                        outcome_prices = m.get("outcomePrices", "")
+                        if isinstance(outcome_prices, str) and outcome_prices.startswith("["):
+                            try:
+                                prices = json.loads(outcome_prices)
+                                if len(prices) >= 1:
+                                    yes_price = float(prices[0])
+                                if len(prices) >= 2:
+                                    no_price = float(prices[1])
+                            except (json.JSONDecodeError, ValueError, IndexError):
+                                pass
+                        if yes_price <= 0:
+                            yes_price = float(m.get("bestBid", 0) or 0)
+                        if no_price <= 0 and yes_price > 0:
+                            no_price = round(1.0 - yes_price, 4)
+
+                        if yes_price > 0:
+                            all_outcomes.append({
+                                "title": m.get("question", m.get("title", "")),
+                                "condition_id": m.get("conditionId", m.get("condition_id", "")),
+                                "yes_price": round(yes_price, 4),
+                                "no_price": round(no_price, 4),
+                                "volume": int(float(m.get("volume", 0) or 0)),
+                            })
+
+                    if len(all_outcomes) < 4:
+                        continue
+
+                    # Sort by YES price descending (favorites first)
+                    all_outcomes.sort(key=lambda o: o["yes_price"], reverse=True)
+                    total_yes = sum(o["yes_price"] for o in all_outcomes)
+
+                    # Find optimal exclusion: remove favorites until remaining
+                    # sum still > 1.0 (+ fee buffer for guaranteed profit)
+                    fee_buffer = 0.02  # 2% buffer for execution/fees
+                    threshold = 1.0 + fee_buffer
+
+                    favorites = []
+                    remaining = list(all_outcomes)
+                    remaining_yes_sum = total_yes
+
+                    for outcome in all_outcomes:
+                        if remaining_yes_sum - outcome["yes_price"] >= threshold:
+                            favorites.append(outcome)
+                            remaining.remove(outcome)
+                            remaining_yes_sum -= outcome["yes_price"]
+                        else:
+                            break  # Can't exclude more without losing guarantee
+
+                    if remaining_yes_sum < threshold:
+                        continue  # Not enough overround for guaranteed profit
+
+                    if len(remaining) < 3:
+                        continue  # Need at least 3 NO legs
+
+                    # Calculate portfolio metrics
+                    no_count = len(remaining)
+                    total_no_cost = sum(o["no_price"] for o in remaining)
+                    guaranteed_profit = remaining_yes_sum - 1.0  # per share-set
+                    profit_pct = round(guaranteed_profit / total_no_cost * 100, 2) if total_no_cost > 0 else 0
+
+                    # Skip tiny opportunities
+                    if profit_pct < 1.0:
+                        continue
+
+                    opp = {
+                        "opportunity_type": "portfolio_no",
+                        "title": event_title,
+                        "canonical_title": event_title,
+                        "platform": "polymarket",
+                        "favorites_excluded": favorites,
+                        "no_targets": remaining,
+                        "outcome_count": len(all_outcomes),
+                        "no_count": no_count,
+                        "favorites_count": len(favorites),
+                        "total_yes_sum": round(total_yes, 4),
+                        "remaining_yes_sum": round(remaining_yes_sum, 4),
+                        "total_no_cost": round(total_no_cost, 4),
+                        "guaranteed_profit": round(guaranteed_profit, 4),
+                        "profit_pct": profit_pct,
+                        "buy_yes_platform": "polymarket",
+                        "buy_no_platform": "polymarket",
+                        "buy_yes_price": 0,
+                        "buy_no_price": round(total_no_cost / no_count, 4),
+                        "buy_yes_market_id": "",
+                        "buy_no_market_id": remaining[0]["condition_id"],
+                        "expiry": event.get("endDate", ""),
+                        "volume": sum(o["volume"] for o in remaining),
+                    }
+                    opportunities.append(opp)
+
+                    logger.info(
+                        "Portfolio NO: %s | %d NOs (excl %d favs) | sum=%.4f | profit=%.4f (%.2f%%)",
+                        event_title[:50], no_count, len(favorites),
+                        remaining_yes_sum, guaranteed_profit, profit_pct
+                    )
+
+                    if self._dlog:
+                        self._dlog.log_opportunity_detected(
+                            title=event_title,
+                            strategy_type="portfolio_no",
+                            spread_pct=profit_pct,
+                            platforms=["polymarket"],
+                            yes_price=round(remaining_yes_sum, 4),
+                            no_price=round(total_no_cost, 4),
+                            is_synthetic=False,
+                            volume=opp["volume"],
+                            event_ids=[o["condition_id"] for o in remaining[:5]],
+                        )
+
+        except Exception as e:
+            logger.warning("Portfolio NO scan error: %s", e)
+
+        logger.info("Portfolio NO scan: %d opportunities", len(opportunities))
+        self._portfolio_no_cache = opportunities
+        self._portfolio_no_cache_time = time.time()
         return opportunities
 
     def _save_cache(self, events: list[NormalizedEvent]):

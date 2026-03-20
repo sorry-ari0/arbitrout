@@ -393,6 +393,26 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.warning("Market maker init failed (non-critical): %s", e)
 
+            # Polymarket WebSocket price feed — real-time prices for open positions
+            try:
+                from positions.polymarket_ws import PolymarketPriceFeed
+                _poly_ws = PolymarketPriceFeed()
+                # Subscribe to condition IDs of open positions
+                open_cids = set()
+                for p in pm.list_packages(status="open"):
+                    for leg in p.get("legs", []):
+                        if leg.get("status") == "open" and leg.get("platform") == "polymarket":
+                            aid = leg.get("asset_id", "")
+                            cid = aid.split(":")[0] if ":" in aid else aid
+                            if cid:
+                                open_cids.add(cid)
+                if open_cids:
+                    _poly_ws.subscribe(list(open_cids))
+                _poly_ws.start()
+                logger.info("Polymarket WS feed started, tracking %d positions", len(open_cids))
+            except Exception as e:
+                logger.warning("Polymarket WS feed init failed (non-critical): %s", e)
+
         except Exception as e:
             logger.error("Position system init failed: %s", e)
 
@@ -413,6 +433,18 @@ async def lifespan(app: FastAPI):
             logger.info("Political analyzer started (15-min cycle)")
         except Exception as e:
             logger.warning("Political analyzer init failed: %s", e)
+
+    # Weather scanner — NWS forecast edge on Kalshi weather markets
+    try:
+        from positions.weather_scanner import WeatherScanner
+        _weather_scanner = WeatherScanner(
+            decision_logger=decision_log if _POSITIONS_AVAILABLE else None
+        )
+        if _POSITIONS_AVAILABLE and _auto_trader:
+            _auto_trader.set_weather_scanner(_weather_scanner)
+        logger.info("Weather scanner initialized")
+    except Exception as e:
+        logger.warning("Weather scanner init failed: %s", e)
 
     # Eval logger for hindsight analysis
     _eval_log = None
