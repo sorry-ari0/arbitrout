@@ -792,6 +792,7 @@ class AutoTrader:
                 # No trailing stop, no time decay — these resolve at $0 or $1
                 # Flag as hold-to-resolution so exit engine skips soft triggers
                 pkg["_hold_to_resolution"] = True
+                pkg["_min_hold_until"] = time.time() + 86400
             elif strategy == "synthetic_derivative":
                 # Synthetics: structural edge from different strike prices — HOLD TO RESOLUTION
                 # The payoff depends on where the underlying lands relative to strikes
@@ -800,6 +801,7 @@ class AutoTrader:
                 pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -50}))
                 # No trailing stop — synthetics need room to breathe
                 pkg["_hold_to_resolution"] = True
+                pkg["_min_hold_until"] = time.time() + 86400
             else:
                 # Pure prediction: directional bet
                 # Differentiate by entry price level:
@@ -818,11 +820,13 @@ class AutoTrader:
                     pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -60}))
                     # No trailing stop — these should resolve, not be scalped
                     pkg["_hold_to_resolution"] = True
+                    pkg["_min_hold_until"] = time.time() + 86400
                 else:
                     # Standard prediction — tuned from 31-trade analysis
                     pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 50}))
                     pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -40}))
                     pkg["exit_rules"].append(create_exit_rule("trailing_stop", {"current": 35, "bound_min": 15, "bound_max": 50}))
+                    pkg["_min_hold_until"] = time.time() + 86400
 
             # Use limit orders for 0% maker fees on entry
             pkg["_use_limit_orders"] = True
