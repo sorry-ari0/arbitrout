@@ -470,15 +470,15 @@ ArbitrageOpportunity:
 | `src/positions/news_ai.py` | Multi-provider LLM analysis for headline scanning and deep article review |
 | `src/positions/decision_log.py` | JSONL decision logger — records buys, skips, triggers, AI verdicts, exits, news signals |
 | `src/positions/wallet_config.py` | Paper/live mode config, .env loading, key validation, safe config API |
-| `src/positions/price_feed.py` | Shared Binance WebSocket — real-time BTC price, 1-min candles, 5-min window tracking, tick trend |
-| `src/positions/btc_sniper.py` | BTC 5-min directional sniper — composite signal at T-10s, maker orders, auto-claim |
-| `src/positions/market_maker.py` | Dual-sided liquidity on Polymarket crypto — inventory mgmt, spread sizing, maker rebates |
+| `src/positions/price_feed.py` | Multi-asset Binance WebSocket (BTC/ETH/SOL/XRP) — real-time prices, per-asset candles, window tracking, event-driven on_tick callbacks |
+| `src/positions/btc_sniper.py` | Multi-asset 5-min directional sniper — event-driven evaluation, composite signal at T-10s, maker orders |
+| `src/positions/market_maker.py` | Dual-sided liquidity — preemptive cancel on adverse ticks, on-chain token merging, multi-asset discovery |
 
 ### How Derivative Packages Work
 
 **Package structure:**
 - A "package" is a grouped position with one or more "legs" (individual market bets) and "exit rules"
-- Strategy types: `spot_plus_hedge`, `cross_platform_arb`, `pure_prediction`, `news_driven`, `synthetic_derivative`, `political_synthetic`
+- Strategy types: `spot_plus_hedge`, `cross_platform_arb`, `pure_prediction`, `news_driven`, `synthetic_derivative`, `political_synthetic`, `btc_sniper`, `multi_outcome_arb`, `market_making`
 - Each package tracks: status (open/closed/partial_exit/rollback), total_cost, current_value, peak_value, unrealized_pnl, itm_status (ITM/OTM/ATM), execution_log, ai_strategy
 
 **Leg structure:**

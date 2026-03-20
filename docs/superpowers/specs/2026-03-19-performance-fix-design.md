@@ -130,12 +130,82 @@ Market making is the best risk-adjusted strategy (70-80% win rate, 2-5% monthly)
 
 ---
 
+---
+
+## Phase 4: Arbigab-Inspired Improvements
+
+**Date:** 2026-03-19
+**Source:** Analysis of Arbigab trading bot (gabagool22.com/how-it-works)
+
+### 4a. Multi-Asset Price Feed
+
+**What:** Extend price feed from BTC-only to BTC, ETH, SOL, XRP via Binance combined WebSocket stream.
+
+**How:**
+- Single combined stream URL: `wss://stream.binance.com:9443/stream?streams=btcusdt@trade/ethusdt@trade/...`
+- Per-asset `AssetState` dataclass: separate price, candles, window, tick samples
+- Backward-compatible: `.price` still returns BTC price for existing code
+- Configurable via `SNIPER_ASSETS` env var (comma-separated)
+- Market maker auto-detects asset type from market title
+
+**Files:** EDIT `price_feed.py`, EDIT `btc_sniper.py`, EDIT `server.py`
+
+### 4b. Event-Driven Evaluation
+
+**What:** Replace 2-second polling interval with per-tick evaluation using WebSocket callbacks.
+
+**Why:** Arbigab evaluates on every Binance aggTrade tick. Fixed 2s intervals miss up to 2 seconds of price data and react late to spikes. Event-driven provides sub-100ms signal evaluation.
+
+**How:**
+- `on_tick(callback)` method on price feed: registers synchronous callbacks
+- Callbacks fire inline in WebSocket handler for minimum latency
+- Sniper uses `asyncio.Event` + `wait_for(timeout=2.0)`: wakes instantly on tick, falls back to 2s polling if no ticks arrive
+- Market maker's preemptive cancel uses same `on_tick` mechanism
+
+**Files:** EDIT `price_feed.py`, EDIT `btc_sniper.py`
+
+### 4c. Preemptive Cancel (Market Maker)
+
+**What:** Cancel exposed market maker orders BEFORE adverse Binance price moves cause toxic fills.
+
+**Why:** The 8-second quote refresh is too slow. If BTC drops 0.3% in 2 seconds, our YES bid is now mispriced. Arbigab monitors every tick and cancels instantly.
+
+**How:**
+- Market maker registers `_preemptive_cancel_check` as `on_tick` callback
+- On each tick: for each market, check if price moved >0.3% against exposed orders (YES without NO, or vice versa)
+- If threshold breached: queue `(condition_id, side)` for cancellation
+- Async loop drains cancel queue at start of each iteration
+- Tracks `preemptive_cancels` count in stats
+- `quote_ref_price` recorded on each quote update for delta calculation
+
+**Files:** EDIT `market_maker.py`
+
+### 4d. On-Chain Token Merging
+
+**What:** When both YES+NO sides fill, merge matched tokens back to $1.00 USDC via CTF contract instead of waiting for market resolution.
+
+**Why:** Arbigab's ProxyWallet Factory merges tokens on-chain for instant profit realization. Benefits:
+- Frees capital immediately for next trade cycle
+- Eliminates resolution timing risk
+- Realizes profit in USDC, not binary tokens
+
+**How:**
+- After detecting matched fills (YES shares > 0 AND NO shares > 0), calculate matched quantity
+- If matched >= 1.0 shares: call `clob.merge_positions(condition_id, amount_wei)` via CTF
+- Deduct merged shares from inventory, add profit to realized P&L
+- Return merged USDC to `total_capital` for reuse
+- Falls back gracefully: if merge fails, tokens remain as inventory until resolution
+
+**Files:** EDIT `market_maker.py`
+
+---
+
 ## Bankroll Allocation
 
 | Strategy | Allocation | Risk Profile |
 |----------|------------|--------------|
-| BTC 5-Min Sniper | $500 | High frequency, high win rate |
-| Market Making | $1,000 | Low risk, steady returns |
+| Crypto 5-Min Sniper (BTC/ETH/SOL/XRP) | $500 | High frequency, high win rate |
+| Market Making (preemptive cancel + merge) | $1,000 | Low risk, steady returns |
 | Cross-Platform Arb | $300 | Risk-free when executed |
 | Synthetics/Multi-Outcome | $200 | Low frequency, guaranteed |
 | Total | $2,000 | |
@@ -143,11 +213,12 @@ Market making is the best risk-adjusted strategy (70-80% win rate, 2-5% monthly)
 ## Shared Infrastructure
 
 ### Price Feed (`price_feed.py`)
-Single Binance WebSocket connection shared between sniper and market maker. Provides:
-- Real-time BTC spot price
-- 1-minute candle history (last 10 candles)
-- Window open price tracking for 5-min markets
-- Micro momentum and tick trend signals
+Single Binance combined WebSocket stream shared between sniper and market maker. Provides:
+- Real-time spot prices for BTC, ETH, SOL, XRP (configurable)
+- Per-asset 1-minute candle history (last 10 candles)
+- Per-asset window open price tracking for 5-min markets
+- Micro momentum and tick trend signals per asset
+- Event-driven `on_tick` callbacks for preemptive cancel and instant evaluation
 
 ### Integration with Existing Systems
 - All strategies use existing `PositionManager` for CRUD

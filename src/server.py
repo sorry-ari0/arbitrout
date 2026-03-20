@@ -325,40 +325,47 @@ async def lifespan(app: FastAPI):
             _exit_task = True
             logger.info("Position system initialized with %d executors", len(executors))
 
-            # BTC 5-min directional sniper (Phase 1)
+            # Multi-asset price feed (shared by sniper + market maker)
             _btc_sniper = None
             _price_feed = None
             try:
                 from positions.price_feed import BinancePriceFeed
                 from positions.btc_sniper import BtcSniper
 
-                _price_feed = BinancePriceFeed()
+                # Configure assets: BTC always, optionally ETH/SOL/XRP
+                sniper_assets_str = os.environ.get("SNIPER_ASSETS", "BTC")
+                sniper_assets = [a.strip().upper() for a in sniper_assets_str.split(",") if a.strip()]
+
+                _price_feed = BinancePriceFeed(assets=sniper_assets)
                 _price_feed.start()
 
                 sniper_bankroll = float(os.environ.get("SNIPER_BANKROLL", "500"))
                 sniper_mode = os.environ.get("SNIPER_MODE", "paper" if is_paper_mode() else "safe")
                 _btc_sniper = BtcSniper(_price_feed, position_manager=pm,
-                                         bankroll=sniper_bankroll, mode=sniper_mode)
+                                         bankroll=sniper_bankroll, mode=sniper_mode,
+                                         assets=sniper_assets)
                 _btc_sniper.start()
-                logger.info("BTC 5-min sniper started (bankroll=$%.0f, mode=%s)", sniper_bankroll, sniper_mode)
+                logger.info("Crypto sniper started (assets=%s, bankroll=$%.0f, mode=%s)",
+                            ",".join(sniper_assets), sniper_bankroll, sniper_mode)
             except Exception as e:
-                logger.warning("BTC sniper init failed (non-critical): %s", e)
+                logger.warning("Sniper init failed (non-critical): %s", e)
 
-            # Market maker (Phase 2)
+            # Market maker with preemptive cancel + token merging (Phase 2)
             _market_maker = None
             try:
                 from positions.market_maker import MarketMaker
 
                 if _price_feed is None:
                     from positions.price_feed import BinancePriceFeed
-                    _price_feed = BinancePriceFeed()
+                    _price_feed = BinancePriceFeed(assets=["BTC"])
                     _price_feed.start()
 
                 mm_capital = float(os.environ.get("MM_CAPITAL", "1000"))
                 _market_maker = MarketMaker(_price_feed, position_manager=pm,
                                             total_capital=mm_capital)
                 _market_maker.start()
-                logger.info("Market maker started (capital=$%.0f)", mm_capital)
+                logger.info("Market maker started (capital=$%.0f, preemptive cancel + token merge enabled)",
+                            mm_capital)
             except Exception as e:
                 logger.warning("Market maker init failed (non-critical): %s", e)
 
