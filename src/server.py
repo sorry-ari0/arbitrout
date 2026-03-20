@@ -424,6 +424,22 @@ async def lifespan(app: FastAPI):
         _backfill_task = asyncio.create_task(_backfill_loop())
         logger.info("Eval logger initialized with hourly backfill")
 
+    from positions.calibration import CalibrationEngine
+    _calibration_engine = CalibrationEngine(_eval_log, journal if _POSITIONS_AVAILABLE else None)
+
+    async def _calibration_loop():
+        """Run calibration report every 24 hours."""
+        while True:
+            await asyncio.sleep(86400)  # 24 hours
+            try:
+                path = _calibration_engine.save_report()
+                logger.info("Calibration report generated: %s", path)
+            except Exception as e:
+                logger.error("Calibration report failed: %s", e)
+
+    asyncio.create_task(_calibration_loop())
+    app.state.calibration_engine = _calibration_engine
+
     logger.info("Lobsterminal started on port 8500")
     yield
     # Shutdown
