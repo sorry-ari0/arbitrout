@@ -38,6 +38,7 @@ ROUND_TRIP_FEE_PCT = 2.0     # Estimated round-trip fees with limit order entry
 MAX_LOSSES_PER_MARKET = 2    # Block market after 2 losses (prevents BTC-top-performer pattern: 6 entries, $24 lost)
 MAX_NEW_TRADES_PER_DAY = 3          # Max new positions per calendar day
 MARKET_COOLDOWN_SECONDS = 172800    # 48h cooldown per market (was 86400)
+MIN_HOURS_TO_EXPIRY = 1.0  # Skip markets expiring within 1 hour (dynamic fees, bot dominance)
 
 
 class AutoTrader:
@@ -293,20 +294,35 @@ class AutoTrader:
             title = (opp.get("title") or opp.get("canonical_title") or "").lower()
             is_crypto = any(kw in title for kw in ["btc", "bitcoin", "eth", "ethereum", "crypto", "solana", "sol", "xrp"])
 
-            # Check expiry
+            # Check expiry — parse with time precision when available
             expiry = opp.get("expiry") or opp.get("end_date") or ""
             is_near_expiry = False
             days_to_expiry = 999
+            hours_to_expiry = float('inf')
             if expiry:
                 try:
-                    exp_date = datetime.strptime(expiry[:10], "%Y-%m-%d").date()
-                    days_to_expiry = (exp_date - date.today()).days
-                    is_near_expiry = 2 < days_to_expiry <= 30
+                    exp_dt = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
+                    hours_to_expiry = max(0, (exp_dt - datetime.now(exp_dt.tzinfo)).total_seconds() / 3600)
+                    days_to_expiry = hours_to_expiry / 24
                 except (ValueError, TypeError):
-                    pass
+                    try:
+                        exp_date = datetime.strptime(expiry[:10], "%Y-%m-%d").date()
+                        days_to_expiry = (exp_date - date.today()).days
+                        hours_to_expiry = days_to_expiry * 24
+                    except (ValueError, TypeError):
+                        pass
+                is_near_expiry = 2 < days_to_expiry <= 30
 
-            # Skip markets expiring within 2 days — exit engine's time_24h safety
-            # would immediately close them, resulting in $0 P&L
+            # Skip short-duration markets (15-min, 1-hour crypto)
+            # Research: dynamic fees up to 3.15%, 73% of arb captured by sub-100ms bots
+            if hours_to_expiry < MIN_HOURS_TO_EXPIRY:
+                self._trades_skipped += 1
+                if self.dlog:
+                    self.dlog.log_opportunity_skip(opp_title, "short_duration",
+                                                   hours=round(hours_to_expiry, 1))
+                continue
+
+            # Skip markets expiring within 2 days
             if days_to_expiry <= 2:
                 self._trades_skipped += 1
                 if self.dlog:
@@ -1023,6 +1039,10 @@ class AutoTrader:
                         except (ValueError, TypeError):
                             pass
 
+                hours_to_expiry = days_to_expiry * 24
+                if hours_to_expiry < MIN_HOURS_TO_EXPIRY:
+                    continue
+
                 # Profit potential
                 favored_price = min(yes_price, no_price) if no_price > 0 else yes_price
                 raw_profit_pct = ((1.0 - favored_price) / favored_price) * 100 if favored_price > 0 else 0
@@ -1158,6 +1178,10 @@ class AutoTrader:
                             days_to_expiry = (exp.date() - date.today()).days
                         except (ValueError, TypeError):
                             pass
+
+                    hours_to_expiry = days_to_expiry * 24
+                    if hours_to_expiry < MIN_HOURS_TO_EXPIRY:
+                        continue
 
                     # Score based on conviction (distance from 0.5)
                     conviction = abs(yes_price - 0.5)
