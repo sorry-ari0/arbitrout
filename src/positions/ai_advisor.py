@@ -362,7 +362,8 @@ Do NOT include trigger numbers, parentheses, reasoning lines, or any text other 
             return await self._call_anthropic(provider, prompt)
         raise ValueError(f"Unknown API style: {provider['style']}")
 
-    def _build_batched_prompt(self, work: list[tuple[dict, list[dict]]]) -> str:
+    def _build_batched_prompt(self, work: list[tuple[dict, list[dict]]],
+                              news_context: dict[str, list] | None = None) -> str:
         """Build a single prompt reviewing triggers for multiple packages.
 
         Each package section is marked with [PKG:id] so the response can be
@@ -377,7 +378,21 @@ Do NOT include trigger numbers, parentheses, reasoning lines, or any text other 
                 f"- {p.get('name', '?')}: {p.get('details', '')} → proposed action: {p.get('action', '?')}"
                 for p in proposals
             )
-            sections.append(f"[PKG:{pkg.get('id', '?')}]\n{context}\nTRIGGERS:\n{proposal_text}")
+            # Add news context if available
+            news_text = ""
+            pkg_id = pkg.get("id", "")
+            if news_context and pkg_id in news_context:
+                headlines = news_context[pkg_id]
+                if headlines:
+                    items = "\n".join(
+                        f"  - [{h.get('source', '?')}] \"{h.get('headline', '?')}\" "
+                        f"(confidence: {h.get('confidence', '?')}/10, {h.get('sentiment', 'neutral')})"
+                        for h in headlines[:5]  # Cap at 5 headlines
+                    )
+                    news_text = f"\nRECENT NEWS (last 24h):\n{items}\nIf no NEGATIVE news exists, default to REJECT for trailing_stop, negative_drift, time_decay."
+                else:
+                    news_text = "\nRECENT NEWS: (none found) — no fundamental reason for price movement. Default to REJECT."
+            sections.append(f"[PKG:{pkg_id}]\n{context}{news_text}\nTRIGGERS:\n{proposal_text}")
 
         combined = "\n\n---\n\n".join(sections)
 

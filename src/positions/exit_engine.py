@@ -468,8 +468,22 @@ class ExitEngine:
         """Send all packages' triggers in a single LLM call to avoid rate limiting."""
         try:
             t0 = time.time()
+            # Collect news context for all packages
+            news_context = {}
+            if self._news_scanner:
+                for pkg, _ in work:
+                    headlines = []
+                    for leg in pkg.get("legs", []):
+                        if leg.get("status") != "open":
+                            continue
+                        asset_id = leg.get("asset_id", "")
+                        # Extract condition_id from "conditionId:YES" format
+                        cond_id = asset_id.split(":")[0] if ":" in asset_id else asset_id
+                        if cond_id:
+                            headlines.extend(self._news_scanner.get_recent_headlines(cond_id, hours=24))
+                    news_context[pkg.get("id", "")] = headlines
             # Build a combined prompt
-            combined_prompt = self.ai._build_batched_prompt(work)
+            combined_prompt = self.ai._build_batched_prompt(work, news_context=news_context)
             providers = self.ai._get_available_providers()
             if not providers or not self.ai._rate_check():
                 for pkg, ai_triggers in work:
