@@ -336,19 +336,18 @@ class AutoTrader:
             if is_near_expiry:
                 score *= 1.5
 
-            # Favorite-longshot bias (research-validated edge):
-            # - Contracts >$0.80: favorites win MORE than implied → boost
-            # - Contracts $0.15-$0.30: longshots lose MORE than implied → penalize
-            # - On Kalshi, buyers of contracts <$0.10 lose >60% of their money
+            # Favorite-longshot bias (research-validated):
+            # Research: longshots lose ~40%, favorites lose ~5%
+            # Kalshi: contracts <$0.10 lose >60% of buyer's money
             favored = min(buy_yes_price, buy_no_price) if buy_no_price > 0 else buy_yes_price
             if favored >= 0.80:
-                score *= 1.8  # Strong favorite — historically wins more than price implies
+                score *= 2.5  # Strong favorite (was 1.8x)
             elif favored >= 0.70:
-                score *= 1.4  # Moderate favorite
+                score *= 1.8  # Moderate favorite (was 1.4x)
             elif favored <= 0.20:
-                score *= 0.4  # Longshot penalty — these lose far more than implied
+                score *= 0.2  # Severe longshot penalty (was 0.4x)
             elif favored <= 0.30:
-                score *= 0.7  # Mild longshot penalty
+                score *= 0.5  # Longshot penalty (was 0.7x)
 
             # Insider signal boost: if whales/insiders have positions, boost score
             insider_signal = None
@@ -773,7 +772,14 @@ class AutoTrader:
                 p_true = min(0.95, side_price + edge_bonus)
                 net_odds = (1.0 - side_price) / side_price if side_price > 0 else 1.0
                 kelly_full = (net_odds * p_true - (1.0 - p_true)) / net_odds if net_odds > 0 else 0
-                kelly_quarter = max(0.0, kelly_full * 0.25)
+                # Variable Kelly fraction: conservative on longshots, standard on favorites
+                if side_price <= 0.30:
+                    kelly_frac = 0.125  # 1/8 Kelly for longshots (high uncertainty)
+                elif side_price >= 0.70:
+                    kelly_frac = 0.25   # 1/4 Kelly for favorites (more confident)
+                else:
+                    kelly_frac = 0.20   # 1/5 Kelly for mid-range
+                kelly_quarter = max(0.0, kelly_full * kelly_frac)
 
                 # Apply Kelly fraction to remaining budget, capped at MAX_TRADE_SIZE
                 sized_trade = round(min(MAX_TRADE_SIZE, remaining_budget * kelly_quarter), 2)
@@ -1063,6 +1069,16 @@ class AutoTrader:
                 elif conviction > 0.2:
                     score *= 1.2
 
+                # Favorite-longshot bias (consistent with main scoring)
+                if favored_price >= 0.80:
+                    score *= 2.5
+                elif favored_price >= 0.70:
+                    score *= 1.8
+                elif favored_price <= 0.20:
+                    score *= 0.2
+                elif favored_price <= 0.30:
+                    score *= 0.5
+
                 opp = {
                     "title": title or market.get("title", ""),
                     "canonical_title": title or market.get("title", ""),
@@ -1241,6 +1257,17 @@ class AutoTrader:
                 score *= 1.5
             elif conv > 0.2:
                 score *= 1.2
+
+            # Favorite-longshot bias
+            favored_price = min(opp["buy_yes_price"], opp["buy_no_price"])
+            if favored_price >= 0.80:
+                score *= 2.5
+            elif favored_price >= 0.70:
+                score *= 1.8
+            elif favored_price <= 0.20:
+                score *= 0.2
+            elif favored_price <= 0.30:
+                score *= 0.5
 
             opp["_score"] = score
 
