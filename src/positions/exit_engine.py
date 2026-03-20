@@ -513,8 +513,8 @@ class ExitEngine:
             safety_triggers = [t for t in filtered if t.get("safety_override")]
             ai_triggers = [t for t in filtered if not t.get("safety_override")]
 
-            # Cancel bracket orders before safety override
-            if self._bracket_manager and pkg.get("_brackets"):
+            # Cancel bracket orders before safety override (only when safety triggers fire)
+            if safety_triggers and self._bracket_manager and pkg.get("_brackets"):
                 await self._bracket_manager.cancel_brackets(pkg)
                 logger.warning("Cancelled bracket orders for %s due to safety override", pkg["id"])
 
