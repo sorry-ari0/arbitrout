@@ -129,16 +129,17 @@ class TestPaperBuyLimit:
 
 
 class TestPaperSellLimit:
-    """PaperExecutor.sell_limit delegates to market sell (taker rate for exits)."""
+    """PaperExecutor.sell_limit uses maker fee rate (0% for Polymarket) and limit price."""
 
-    def test_sell_limit_delegates_to_sell(self):
+    def test_sell_limit_uses_maker_fee(self):
         paper = PaperExecutor(FakePolymarketExecutor(), starting_balance=1000.0)
         _run(paper.buy("tok:YES", 100.0))
         qty = paper.positions["tok:YES"]["quantity"]
         r = _run(paper.sell_limit("tok:YES", qty, 0.75))
         assert r.success
-        # Should have used taker fee rate (sell delegates to self.sell)
-        assert r.fees > 0  # taker fee for polymarket is 2%
+        # Should use maker fee rate (0% for Polymarket), not taker fee
+        assert r.fees == 0.0  # 0% maker fee for polymarket
+        assert r.filled_price == 0.75  # uses limit price, not market price
 
 
 class TestFeeRateComparison:

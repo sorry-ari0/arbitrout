@@ -153,8 +153,46 @@ class PaperExecutor:
         return ExecutionResult(True, tx_id, price, qty, fee, None)
 
     async def sell_limit(self, asset_id: str, quantity: float, price: float) -> ExecutionResult:
-        """Sell limit — delegates to market sell since exits use taker rate anyway."""
-        return await self.sell(asset_id, quantity)
+        """Simulate a limit sell using maker fee rate (0% for Polymarket).
+        Uses the provided limit price instead of market price.
+        Mirrors buy_limit() pattern — looks up maker fee via MAKER_FEE_RATES.
+        """
+        pos = self.positions.get(asset_id)
+        if not pos or pos["quantity"] < quantity * 0.999:
+            return ExecutionResult(False, None, 0, 0, 0, f"No position or insufficient quantity for {asset_id}")
+        if price <= 0:
+            return ExecutionResult(False, None, 0, 0, 0, f"Invalid limit price for {asset_id}")
+
+        # Look up maker fee rate for this platform (same pattern as buy_limit)
+        platform = getattr(self.real, '__class__', type(self.real)).__name__.lower()
+        maker_rate = DEFAULT_FEE_RATE
+        for name, rate in MAKER_FEE_RATES.items():
+            if name in platform:
+                maker_rate = rate
+                break
+
+        proceeds = quantity * price
+        fee = round(proceeds * maker_rate, 4)
+        net_proceeds = proceeds - fee
+        self.balance += net_proceeds
+        self.total_fees_paid += fee
+        pos["quantity"] -= quantity
+        if pos["quantity"] < 1e-10:
+            del self.positions[asset_id]
+        tx_id = f"paper_{uuid.uuid4().hex[:12]}"
+        self.trade_history.append({
+            "action": "sell_limit", "asset_id": asset_id, "price": price,
+            "quantity": quantity, "proceeds_usd": net_proceeds, "fee": fee, "tx_id": tx_id,
+        })
+        return ExecutionResult(True, tx_id, price, quantity, fee, None)
+
+    async def check_order_status(self, order_id: str) -> dict:
+        """Paper mode: limit orders fill immediately."""
+        return {"status": "filled", "price": 0, "size_matched": 0, "fee": 0.0}
+
+    async def cancel_order(self, order_id: str) -> bool:
+        """Paper mode: no-op cancel."""
+        return True
 
     async def get_balance(self) -> BalanceResult:
         pos_val = 0.0

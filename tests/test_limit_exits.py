@@ -1,0 +1,85 @@
+# tests/test_limit_exits.py
+import asyncio
+import pytest
+from unittest.mock import AsyncMock, MagicMock
+from execution.paper_executor import PaperExecutor
+from execution.base_executor import BaseExecutor, ExecutionResult
+
+
+class StubPolymarketExecutor(BaseExecutor):
+    """Minimal real executor stub for PaperExecutor wrapping."""
+    async def buy(self, asset_id, amount_usd, **kw):
+        return ExecutionResult(False, None, 0, 0, 0, "stub")
+    async def sell(self, asset_id, quantity, **kw):
+        return ExecutionResult(False, None, 0, 0, 0, "stub")
+    async def get_current_price(self, asset_id):
+        return 0.50
+    async def get_balance(self):
+        from execution.base_executor import BalanceResult
+        return BalanceResult(0, 0)
+    async def get_positions(self):
+        return []
+    def is_configured(self):
+        return True
+
+
+def make_paper_executor(balance=1000.0):
+    """Create a PaperExecutor wrapping a stub Polymarket executor."""
+    StubPolymarketExecutor.__name__ = "polymarketexecutor"
+    real = StubPolymarketExecutor()
+    pe = PaperExecutor(real, starting_balance=balance)
+    return pe
+
+
+def test_sell_limit_uses_maker_fee():
+    """sell_limit() should use 0% maker fee for Polymarket, not 2% taker."""
+    pe = make_paper_executor(balance=1000.0)
+    pe.positions["test:YES"] = {"quantity": 100.0, "avg_entry_price": 0.50}
+    result = asyncio.run(
+        pe.sell_limit("test:YES", 100.0, 0.60)
+    )
+    assert result.success
+    assert result.fees == 0.0, f"Expected 0% maker fee, got {result.fees}"
+    assert result.filled_price == 0.60, "Should fill at the limit price"
+    assert result.filled_quantity == 100.0
+
+
+def test_sell_limit_uses_limit_price_not_market():
+    """sell_limit() should use the provided price, not fetch market price."""
+    pe = make_paper_executor(balance=1000.0)
+    pe.positions["test:YES"] = {"quantity": 50.0, "avg_entry_price": 0.40}
+    result = asyncio.run(
+        pe.sell_limit("test:YES", 50.0, 0.75)
+    )
+    assert result.success
+    assert result.filled_price == 0.75
+    assert pe.balance == 1000.0 + (50.0 * 0.75)
+
+
+def test_sell_market_still_charges_taker_fee():
+    """Regular sell() should still charge 2% taker fee."""
+    pe = make_paper_executor(balance=1000.0)
+    pe.positions["test:YES"] = {"quantity": 100.0, "avg_entry_price": 0.50}
+    result = asyncio.run(
+        pe.sell("test:YES", 100.0)
+    )
+    assert result.success
+    assert result.fees > 0, "Market sell should charge taker fee"
+
+
+def test_check_order_status_returns_filled():
+    """Paper executor check_order_status() should return filled immediately."""
+    pe = make_paper_executor()
+    result = asyncio.run(
+        pe.check_order_status("paper_abc123")
+    )
+    assert result["status"] == "filled"
+
+
+def test_cancel_order_returns_true():
+    """Paper executor cancel_order() should return True (no-op)."""
+    pe = make_paper_executor()
+    result = asyncio.run(
+        pe.cancel_order("paper_abc123")
+    )
+    assert result is True
