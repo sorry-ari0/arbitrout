@@ -27,15 +27,17 @@ MAX_TOTAL_EXPOSURE = 1400.0  # Max $1400 for auto trader (reserve $600 for news)
 PORTFOLIO_EXPOSURE_CAP = 0.40  # Kelly portfolio rule: never exceed 40% of total bankroll
 TOTAL_BANKROLL = 2000.0      # Total bankroll (auto_trader $1400 + news $600)
 SCAN_INTERVAL = 300          # 5 minutes between self-initiated scans (safety net)
-MIN_SPREAD_PCT = 8.0         # Minimum 8% spread to ensure profit after fees
+MIN_SPREAD_PCT = 12.0        # Minimum 12% spread to ensure profit after fees
 # Polymarket: 0% maker fee on limit orders. Use limit orders (maker) to enter,
 # taker to exit in worst case = ~2% one-way exit fee.
 # Conservative estimate: 0% entry + 2% exit = 2% round-trip
-# With 8% min spread - 2% fees = 6% net margin minimum
-# Raised from 5%: $4 fee on $200 trade means 2% minimum loss even on flat trades.
-# Data shows 65% of losses were fee drag — need wider margin to overcome.
+# With 12% min spread - 2% fees = 10% net margin minimum
+# Raised from 8%: 21 trades in 12h was excessive churn. 12% min spread
+# provides 10% net margin after fees, reducing low-quality entries.
 ROUND_TRIP_FEE_PCT = 2.0     # Estimated round-trip fees with limit order entry
 MAX_LOSSES_PER_MARKET = 2    # Block market after 2 losses (prevents BTC-top-performer pattern: 6 entries, $24 lost)
+MAX_NEW_TRADES_PER_DAY = 3          # Max new positions per calendar day
+MARKET_COOLDOWN_SECONDS = 172800    # 48h cooldown per market (was 86400)
 
 
 class AutoTrader:
@@ -53,6 +55,8 @@ class AutoTrader:
         self._trades_opened = 0
         self._trades_skipped = 0
         self._last_trade_time = 0.0
+        self._daily_trade_count = 0
+        self._daily_trade_date = ""
         self._scan_event = asyncio.Event()  # Fired by arb scanner after each scan
         # News scanner integration — thread-safe queue
         self._news_lock = asyncio.Lock()
@@ -122,6 +126,14 @@ class AutoTrader:
                         ids.add(condition_id)
         return ids
 
+    def _check_daily_limit(self) -> bool:
+        """Returns True if we can still open trades today."""
+        today = date.today().isoformat()
+        if self._daily_trade_date != today:
+            self._daily_trade_count = 0
+            self._daily_trade_date = today
+        return self._daily_trade_count < MAX_NEW_TRADES_PER_DAY
+
     async def _scan_and_trade(self):
         """One scan cycle: find opportunities, filter, create packages."""
         open_pkgs = self.pm.list_packages("open")
@@ -148,6 +160,13 @@ class AutoTrader:
                         total_exposure, kelly_cap)
             if self.dlog:
                 self.dlog.log_scan_skip("kelly_portfolio_cap", exposure=round(total_exposure, 2))
+            return
+
+        if not self._check_daily_limit():
+            logger.info("Auto trader: daily trade limit (%d/%d), skipping",
+                        self._daily_trade_count, MAX_NEW_TRADES_PER_DAY)
+            if self.dlog:
+                self.dlog.log_scan_skip("daily_limit", trades_today=self._daily_trade_count)
             return
 
         remaining_budget = min(MAX_TOTAL_EXPOSURE - total_exposure, kelly_cap - total_exposure)
@@ -398,7 +417,7 @@ class AutoTrader:
                         if leg.get("current_price", 0) > 0:
                             market_exit_prices[ptitle] = leg["current_price"]
                 # 24-hour cooldown window (was 4 hours — too short, NCAA entered 5 times)
-                if time.time() - p.get("updated_at", 0) < 86400:  # 24 hours
+                if time.time() - p.get("updated_at", 0) < MARKET_COOLDOWN_SECONDS:  # 48 hours
                     for leg in p.get("legs", []):
                         cid = leg.get("asset_id", "").split(":")[0]
                         if cid:
@@ -502,6 +521,7 @@ class AutoTrader:
                     if result.get("success"):
                         trades_this_cycle += 1
                         self._trades_opened += 1
+                        self._daily_trade_count += 1
                         remaining_budget -= trade_size
                         logger.info("Auto trader OPENED multi-outcome arb: %s (%d outcomes, spread=%.2f%%)",
                                     pkg_name, len(outcomes), spread_pct)
@@ -567,6 +587,7 @@ class AutoTrader:
                     if result.get("success"):
                         trades_this_cycle += 1
                         self._trades_opened += 1
+                        self._daily_trade_count += 1
                         remaining_budget -= trade_size
                         logger.info("Auto trader OPENED political: %s (ev=%.1f%%, size=$%.2f)",
                                     pkg_name, spread_pct, trade_size)
@@ -816,6 +837,7 @@ class AutoTrader:
                 if result.get("success"):
                     trades_this_cycle += 1
                     self._trades_opened += 1
+                    self._daily_trade_count += 1
                     remaining_budget -= trade_size
                     if market_id:
                         open_market_ids.add(market_id)
@@ -1209,4 +1231,6 @@ class AutoTrader:
             "total_exposure": round(sum(p.get("total_cost", 0) for p in open_pkgs), 2),
             "max_exposure": MAX_TOTAL_EXPOSURE,
             "scan_interval_sec": self.interval,
+            "trades_today": self._daily_trade_count,
+            "max_trades_per_day": MAX_NEW_TRADES_PER_DAY,
         }
