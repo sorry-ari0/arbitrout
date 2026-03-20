@@ -5,7 +5,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import pytest
 import time
-from unittest.mock import AsyncMock, MagicMock
 from execution.base_executor import ExecutionResult
 
 
@@ -104,7 +103,7 @@ class TestBracketPlacement:
         pkg = _make_pkg(entry_price=0.90, stop_pct=-40)
         await bm.place_brackets(pkg)
         bracket = pkg["_brackets"]["leg_1"]
-        assert 0.50 < bracket["stop_price"] < 0.60
+        assert bracket["stop_price"] == pytest.approx(0.54, abs=0.001)
 
     @pytest.mark.asyncio
     async def test_cancel_brackets(self):

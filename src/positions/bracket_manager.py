@@ -132,7 +132,7 @@ class BracketManager:
             return {"skipped": True, "reason": "new stop not higher than current"}
 
         new_stop_price = round(max(new_stop_price, MIN_SELL_PRICE), 4)
-        old_stop = info["stop_price"]
+        old_stop = info.get("stop_price", 0)
         info["stop_price"] = new_stop_price
         info["last_adjusted"] = time.time()
         logger.debug("Bracket stop adjusted: %s %.4f → %.4f", leg_id, old_stop, new_stop_price)
