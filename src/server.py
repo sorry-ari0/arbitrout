@@ -324,6 +324,44 @@ async def lifespan(app: FastAPI):
             init_position_system(pm, exit_engine, ai, trade_journal=journal, auto_trader=_auto_trader, insider_tracker=insider)
             _exit_task = True
             logger.info("Position system initialized with %d executors", len(executors))
+
+            # BTC 5-min directional sniper (Phase 1)
+            _btc_sniper = None
+            _price_feed = None
+            try:
+                from positions.price_feed import BinancePriceFeed
+                from positions.btc_sniper import BtcSniper
+
+                _price_feed = BinancePriceFeed()
+                _price_feed.start()
+
+                sniper_bankroll = float(os.environ.get("SNIPER_BANKROLL", "500"))
+                sniper_mode = os.environ.get("SNIPER_MODE", "paper" if is_paper_mode() else "safe")
+                _btc_sniper = BtcSniper(_price_feed, position_manager=pm,
+                                         bankroll=sniper_bankroll, mode=sniper_mode)
+                _btc_sniper.start()
+                logger.info("BTC 5-min sniper started (bankroll=$%.0f, mode=%s)", sniper_bankroll, sniper_mode)
+            except Exception as e:
+                logger.warning("BTC sniper init failed (non-critical): %s", e)
+
+            # Market maker (Phase 2)
+            _market_maker = None
+            try:
+                from positions.market_maker import MarketMaker
+
+                if _price_feed is None:
+                    from positions.price_feed import BinancePriceFeed
+                    _price_feed = BinancePriceFeed()
+                    _price_feed.start()
+
+                mm_capital = float(os.environ.get("MM_CAPITAL", "1000"))
+                _market_maker = MarketMaker(_price_feed, position_manager=pm,
+                                            total_capital=mm_capital)
+                _market_maker.start()
+                logger.info("Market maker started (capital=$%.0f)", mm_capital)
+            except Exception as e:
+                logger.warning("Market maker init failed (non-critical): %s", e)
+
         except Exception as e:
             logger.error("Position system init failed: %s", e)
 
@@ -385,6 +423,13 @@ async def lifespan(app: FastAPI):
                 await news_ai.close()
             if insider:
                 insider.stop()
+            # Shutdown new strategy modules
+            if _btc_sniper:
+                _btc_sniper.stop()
+            if _market_maker:
+                _market_maker.stop()
+            if _price_feed:
+                _price_feed.stop()
         except Exception:
             pass
     if scheduler:
