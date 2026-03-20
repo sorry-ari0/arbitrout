@@ -1000,6 +1000,8 @@ python -m uvicorn server:app --host 127.0.0.1 --port 8500 --log-level info
   - **Duplicate position entries fixed:** Auto trader now checks BOTH `buy_yes_market_id` AND `buy_no_market_id` against open positions (was only checking YES side). Also refreshes `open_market_ids` after each successful trade within a scan cycle so later iterations see positions opened earlier in the same cycle. Root cause of NCAA 5x entry ($68 loss) and Crude Oil 3x entry ($46 loss).
   - **Arb engine dedup fix:** Changed dedup key from directional `(A, B)` tuple to order-independent `frozenset([A, B])` + `match_id` dedup. Eliminates duplicate opportunities shown on dashboard.
   - **update_pnl() zeroing fix:** Added early return for closed packages and changed cost summation to include all legs (not just open ones). Previously, closed packages had `total_cost` reset to $0, corrupting dashboard stats.
+  - **Storage-layer dedup guard:** `_execute_package_locked()` rejects packages with condition IDs already open (case-insensitive). Defense-in-depth catch regardless of caller.
+  - **Signal-driven re-entry:** Dedup guards (auto trader + position manager) allow re-entry when news (`_news_driven`) or insider signals are present. New information can warrant adding to an existing position. Flags propagate from opportunity → auto_trader → package. Plain duplicates (no signal) remain blocked.
   - Spec: `docs/superpowers/specs/2026-03-19-exit-optimization-design.md`
   - Plan: `docs/superpowers/plans/2026-03-19-exit-optimization.md`
 - **Previous changes (2026-03-19) — Trading Performance Overhaul (branch: feature/trading-perf-overhaul):**
