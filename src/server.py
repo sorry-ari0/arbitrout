@@ -155,13 +155,23 @@ _probability_model = None  # Module-level ref for consensus probability model
 
 
 async def _auto_scan_loop():
-    """Background task: auto-scan for arbitrage every 60 seconds.
+    """Background task: auto-scan for arbitrage every 10 seconds.
 
     After each scan, immediately notifies the auto trader so it can
     evaluate and execute on opportunities within seconds — not minutes.
+
+    Reduced from 60s to 10s: with authenticated Kalshi API (1-3s fetch)
+    and cached Polymarket data, scans complete in 2-5s. The 10s interval
+    gives 6x more opportunity detection on medium-duration markets
+    without stacking scans.
     """
     await asyncio.sleep(5)  # wait for server to fully start
+    _scan_in_progress = False
     while True:
+        if _scan_in_progress:
+            await asyncio.sleep(2)
+            continue
+        _scan_in_progress = True
         try:
             scanner = get_scanner()
             result = await scanner.scan()
@@ -192,7 +202,9 @@ async def _auto_scan_loop():
             break
         except Exception as exc:
             logger.warning("Auto-scan error: %s", exc)
-        await asyncio.sleep(60)
+        finally:
+            _scan_in_progress = False
+        await asyncio.sleep(10)
 
 
 @asynccontextmanager
