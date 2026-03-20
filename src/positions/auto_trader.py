@@ -255,8 +255,8 @@ class AutoTrader:
                     self.dlog.log_opportunity_skip(opp_title, "zero_price")
                 continue
 
-            # Filter: require minimum spread
-            spread_pct = opp.get("profit_pct", 0)
+            # Filter: require minimum spread (use net profit after fees when available)
+            spread_pct = opp.get("net_profit_pct") or opp.get("profit_pct", 0)
             if spread_pct < MIN_SPREAD_PCT:
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "low_spread", spread_pct=spread_pct)
@@ -702,14 +702,15 @@ class AutoTrader:
                     continue
 
                 # Skip extreme OTM (lottery tickets) — entry < 0.15 loses 85%+ of the time
-                # Skip extreme ITM (entry > 0.85) — tiny upside (max 17%) not worth the risk
+                # Allow high-probability entries (> 0.85) — they resolve at $1.00
+                # Only skip truly extreme entries (> 0.96) where fees exceed max profit
                 if side_price < 0.15:
                     self._trades_skipped += 1
                     if self.dlog:
                         self.dlog.log_opportunity_skip(opp_title, "extreme_otm",
                                                        side=side, price=round(side_price, 4))
                     continue
-                if side_price > 0.85:
+                if side_price > 0.96:
                     self._trades_skipped += 1
                     if self.dlog:
                         self.dlog.log_opportunity_skip(opp_title, "extreme_itm",
@@ -759,23 +760,46 @@ class AutoTrader:
             # Exit rules — strategy-dependent
             if strategy == "cross_platform_arb":
                 # Cross-platform arb: guaranteed profit at resolution — HOLD TO RESOLUTION
-                # Only exit on safety overrides (spread_inversion, platform_error)
-                # No trailing stop, no time decay — the spread is locked in
-                pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -20}))
-                # Safety only — if spread inverts, exit immediately
+                # Fee-aware stop: only exit if loss exceeds net spread + fees
+                # The spread is locked in at entry; exiting early forfeits the guarantee
+                net_pct = opp.get("net_profit_pct", spread_pct)
+                # Stop loss = -(net spread + 5% buffer) — only exit on genuine spread collapse
+                arb_stop = round(max(-60, -(net_pct + 5)), 1)
+                pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": arb_stop}))
+                # No trailing stop, no time decay — these resolve at $0 or $1
+                # Flag as hold-to-resolution so exit engine skips soft triggers
+                pkg["_hold_to_resolution"] = True
             elif strategy == "synthetic_derivative":
                 # Synthetics: structural edge from different strike prices — HOLD TO RESOLUTION
-                # The payoff depends on where BTC lands relative to strikes
+                # The payoff depends on where the underlying lands relative to strikes
                 # Wide stop only — cutting early destroys the structural edge
                 pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 80}))
                 pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -50}))
                 # No trailing stop — synthetics need room to breathe
+                pkg["_hold_to_resolution"] = True
             else:
-                # Pure prediction: directional bet — tuned from 31-trade analysis
-                # Wide stops, let winners run to near-resolution, cut only deep losers
-                pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 50}))
-                pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -40}))
-                pkg["exit_rules"].append(create_exit_rule("trailing_stop", {"current": 35, "bound_min": 15, "bound_max": 50}))
+                # Pure prediction: directional bet
+                # Differentiate by entry price level:
+                #   High-probability (> 0.85): hold to resolution, no trailing stop
+                #   Mid-range (0.30-0.85): standard trailing stop
+                #   Longshots (< 0.30): wide trailing stop
+                avg_entry = side_price if not is_cross_platform else 0.5
+                if avg_entry > 0.85:
+                    # High-probability contracts resolve at $1.00 — hold to resolution
+                    # Max upside is only 5-17%, trailing stops destroy these
+                    # Target at realistic max (price → $1.00 minus fees)
+                    max_profit = round(((1.0 - avg_entry) / avg_entry) * 100, 1)
+                    pkg["exit_rules"].append(create_exit_rule("target_profit",
+                        {"target_pct": max(5, max_profit - 2)}))
+                    # Wide stop only for catastrophic thesis invalidation
+                    pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -60}))
+                    # No trailing stop — these should resolve, not be scalped
+                    pkg["_hold_to_resolution"] = True
+                else:
+                    # Standard prediction — tuned from 31-trade analysis
+                    pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 50}))
+                    pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -40}))
+                    pkg["exit_rules"].append(create_exit_rule("trailing_stop", {"current": 35, "bound_min": 15, "bound_max": 50}))
 
             # Execute
             pkg_name = pkg.get("name", opp_title)

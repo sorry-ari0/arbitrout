@@ -16,8 +16,8 @@ def _make_pkg(strategy="cross_platform_arb"):
 class TestHeuristics:
     def test_spread_inversion_is_safety(self):
         pkg = _make_pkg()
-        pkg["legs"][0]["current_price"] = 0.75
-        pkg["legs"][1]["current_price"] = 0.30  # 1.0 - (0.75+0.30) = -0.05
+        pkg["legs"][0]["current_price"] = 0.80
+        pkg["legs"][1]["current_price"] = 0.30  # combined 1.10 > 1.05 fee-aware threshold
         triggers = evaluate_heuristics(pkg)
         assert any(t.get("safety_override") for t in triggers)
 
