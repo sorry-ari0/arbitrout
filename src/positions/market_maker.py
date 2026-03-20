@@ -27,6 +27,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 from .price_feed import BinancePriceFeed
 
@@ -359,6 +360,15 @@ class MarketMaker:
                     # Skip 5-min markets (sniper handles those)
                     if "5m" in slug or "5-min" in title.lower():
                         continue
+
+                    # Skip markets expiring within 2 hours (not enough time to make)
+                    if expiry:
+                        try:
+                            exp_dt = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
+                            if (exp_dt - datetime.now(timezone.utc)).total_seconds() < 7200:
+                                continue
+                        except (ValueError, TypeError):
+                            pass
 
                     # Match to an asset we have a price feed for
                     asset = self._detect_asset_from_title(title)
