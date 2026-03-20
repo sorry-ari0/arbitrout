@@ -323,7 +323,7 @@ class ExitEngine:
     }
     # No cooldown: target_hit, stop_loss, trailing_stop, safety overrides
 
-    def __init__(self, position_manager, ai_advisor=None, interval: float = 60.0, decision_logger=None, news_scanner=None):
+    def __init__(self, position_manager, ai_advisor=None, interval: float = 60.0, decision_logger=None, news_scanner=None, bracket_manager=None):
         self.pm = position_manager
         self.ai = ai_advisor
         self.interval = interval
@@ -333,6 +333,7 @@ class ExitEngine:
         # Cooldown tracker: {(pkg_id, trigger_name): last_fire_timestamp}
         self._trigger_cooldowns: dict[tuple[str, str], float] = {}
         self._news_scanner = news_scanner
+        self._bracket_manager = bracket_manager
 
     def start(self):
         """Start the exit engine scan loop."""
@@ -375,13 +376,94 @@ class ExitEngine:
                     logger.warning("Failed to resolve pending order %s/%s: %s",
                                    pkg["id"], leg_id, result.get("error", "?"))
 
+    async def _resolve_bracket_fills(self):
+        """Check all bracket orders for fills and finalize exits."""
+        if not self._bracket_manager:
+            return
+        for pkg in self.pm.list_packages("open"):
+            if not pkg.get("_brackets"):
+                continue
+            fills = await self._bracket_manager.check_brackets(pkg)
+            for fill in fills:
+                leg = next((l for l in pkg["legs"] if l["leg_id"] == fill["leg_id"]), None)
+                if not leg or leg["status"] != "open":
+                    continue
+                # Finalize the exit
+                trigger = f"bracket_{fill['type']}"
+                leg["status"] = "closed"
+                leg["exit_price"] = fill["price"]
+                leg["exit_quantity"] = fill["quantity"]
+                leg["sell_fees"] = fill.get("fee", 0.0)
+                leg["exit_trigger"] = trigger
+                leg["exit_order_type"] = "bracket_maker"
+                leg["exit_value"] = round(fill["quantity"] * fill["price"], 4)
+                leg["current_value"] = round(fill["quantity"] * fill["price"] - fill.get("fee", 0.0), 4)
+                pkg["execution_log"].append({
+                    "action": "sell", "leg_id": fill["leg_id"],
+                    "platform": leg["platform"], "tx_id": fill["order_id"],
+                    "price": fill["price"], "fees": fill.get("fee", 0.0),
+                    "trigger": trigger, "exit_order_type": "bracket_maker",
+                    "timestamp": time.time(),
+                })
+                logger.info("Bracket %s filled for %s/%s @ %.4f (0%% maker fee)",
+                            fill["type"], pkg["id"], fill["leg_id"], fill["price"])
+                if self.dlog:
+                    self.dlog.log_safety_override(pkg["id"], trigger,
+                        f"Bracket {fill['type']} order filled at {fill['price']:.4f}")
+
+            # Check if package is fully closed
+            if all(l["status"] in ("closed", "advisory") for l in pkg["legs"]):
+                pkg["status"] = "closed"
+                pkg["current_value"] = round(sum(
+                    l.get("quantity", 0) * l.get("exit_price", l.get("current_price", l.get("entry_price", 0)))
+                    for l in pkg["legs"] if l.get("status") != "advisory"
+                ), 4)
+                if self.pm.trade_journal:
+                    try:
+                        self.pm.trade_journal.record_close(pkg, exit_trigger=trigger)
+                    except Exception as e:
+                        logger.warning("Failed to record bracket exit: %s", e)
+                pkg["updated_at"] = time.time()
+            self.pm.save()
+
+    async def _adjust_bracket_trails(self):
+        """Update leg-level peaks and adjust bracket stop levels (rolling trail).
+
+        Stop adjustment is sync (no CLOB orders) — just updates the tracked level.
+        Uses >2% of current stop as threshold to avoid noisy adjustments.
+        """
+        if not self._bracket_manager:
+            return
+        for pkg in self.pm.list_packages("open"):
+            brackets = pkg.get("_brackets", {})
+            if not brackets:
+                continue
+            for leg_id in list(brackets.keys()):
+                # Update leg-level peak from current price
+                leg = next((l for l in pkg["legs"] if l["leg_id"] == leg_id), None)
+                if leg:
+                    self._bracket_manager.update_peak(pkg, leg_id, leg.get("current_price", 0))
+
+                new_stop = self._bracket_manager._compute_trail_price(pkg, leg_id)
+                if new_stop:
+                    current_stop = brackets[leg_id].get("stop_price", 0)
+                    # Only adjust if meaningful move (>2% of current stop to reduce churn)
+                    threshold = max(current_stop * 0.02, 0.005)
+                    if new_stop > current_stop + threshold:
+                        self._bracket_manager.adjust_stop(pkg, leg_id, new_stop)
+
     async def _tick(self):
         """Process one scan cycle — evaluate all open packages.
 
         Batches AI reviews: collects all non-safety triggers across packages,
         sends them in a single LLM call, then applies verdicts. This avoids
         Groq/Gemini 429 rate limiting from multiple calls per tick.
+        Bracket fills and trail adjustments are resolved before heuristic evaluation.
         """
+        # Resolve bracket fills first
+        await self._resolve_bracket_fills()
+        # Adjust trailing stop brackets
+        await self._adjust_bracket_trails()
         # Resolve any pending limit orders from previous tick
         await self._resolve_pending_limit_orders()
         open_pkgs = self.pm.list_packages("open")
@@ -431,6 +513,11 @@ class ExitEngine:
             safety_triggers = [t for t in filtered if t.get("safety_override")]
             ai_triggers = [t for t in filtered if not t.get("safety_override")]
 
+            # Cancel bracket orders before safety override (only when safety triggers fire)
+            if safety_triggers and self._bracket_manager and pkg.get("_brackets"):
+                await self._bracket_manager.cancel_brackets(pkg)
+                logger.warning("Cancelled bracket orders for %s due to safety override", pkg["id"])
+
             # Cancel any pending limit orders before executing safety override
             for pending_leg_id in list(pkg.get("_pending_limit_orders", {}).keys()):
                 pending_info = pkg["_pending_limit_orders"][pending_leg_id]
@@ -451,6 +538,10 @@ class ExitEngine:
                             await self.pm.exit_leg(pkg["id"], leg["leg_id"], trigger=trigger["name"])
                 finally:
                     pkg.pop("_exiting", None)
+
+            # Skip AI review for bracketed packages — brackets manage exits
+            if pkg.get("_brackets"):
+                continue
 
             # Collect AI triggers for batched review
             if ai_triggers and not pkg.get("_exiting"):
