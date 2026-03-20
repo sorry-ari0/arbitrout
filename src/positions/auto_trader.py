@@ -225,9 +225,11 @@ class AutoTrader:
             opportunities = await self._scan_polymarket()
 
         # Merge queued news opportunities with score boost
+        # News-driven entries can bypass dedup to add to existing positions
         news_opps = await self._drain_news_opportunities()
         for news_opp in news_opps:
             news_opp["_score"] = news_opp.get("_score", 10.0) * 2.0  # News edge boost
+            news_opp["_news_driven"] = True
             opportunities.append(news_opp)
         if news_opps:
             logger.info("Auto trader: merged %d news opportunities", len(news_opps))
@@ -294,9 +296,11 @@ class AutoTrader:
                 continue
 
             # Skip markets we already have positions on (check BOTH sides, case-insensitive)
+            # EXCEPTION: allow re-entry when news or insider signals provide new information
+            has_signal = bool(opp.get("insider_signal") or opp.get("_news_driven") or opp.get("_insider_driven"))
             yes_mid = opp.get("buy_yes_market_id", "").lower()
             no_mid = opp.get("buy_no_market_id", "").lower()
-            if (yes_mid and yes_mid in open_market_ids) or (no_mid and no_mid in open_market_ids):
+            if not has_signal and ((yes_mid and yes_mid in open_market_ids) or (no_mid and no_mid in open_market_ids)):
                 self._trades_skipped += 1
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "already_open")
@@ -497,16 +501,18 @@ class AutoTrader:
                         continue
 
             # Also check open positions by title — don't open duplicates of existing positions
-            open_titles = set()
-            for p in self.pm.list_packages("open"):
-                ptitle = (p.get("name", "").replace("Auto: ", "").replace("News: ", "").lower().strip())[:50]
-                if ptitle:
-                    open_titles.add(ptitle)
-            if norm_title in open_titles:
-                self._trades_skipped += 1
-                if self.dlog:
-                    self.dlog.log_opportunity_skip(opp_title, "duplicate_open_position")
-                continue
+            # (news/insider signals can override to allow adding to a position)
+            if not has_signal:
+                open_titles = set()
+                for p in self.pm.list_packages("open"):
+                    ptitle = (p.get("name", "").replace("Auto: ", "").replace("News: ", "").lower().strip())[:50]
+                    if ptitle:
+                        open_titles.add(ptitle)
+                if norm_title in open_titles:
+                    self._trades_skipped += 1
+                    if self.dlog:
+                        self.dlog.log_opportunity_skip(opp_title, "duplicate_open_position")
+                    continue
 
             # Multi-outcome arbitrage: buy all outcomes when sum < $1.00
             if opp.get("opportunity_type") == "multi_outcome_arb":
@@ -671,6 +677,12 @@ class AutoTrader:
                 pkg = create_package(f"Auto: {trade_title[:60]}", strategy)
             except ValueError:
                 pkg = create_package(f"Auto: {trade_title[:60]}", "pure_prediction")
+
+            # Propagate signal flags so position_manager dedup guard allows re-entry
+            if opp.get("_news_driven"):
+                pkg["_news_driven"] = True
+            if opp.get("insider_signal"):
+                pkg["insider_signal"] = opp["insider_signal"]
 
             if is_cross_platform or is_synthetic:
                 # Multi-leg trade: cross-platform arb OR synthetic derivative
