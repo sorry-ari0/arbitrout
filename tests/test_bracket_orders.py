@@ -360,6 +360,50 @@ class TestPaperBracketSimulation:
         assert abs(qty_after_cancel - qty_before) < 1  # Restored
 
 
+class TestBracketOnEntry:
+    @pytest.mark.asyncio
+    async def test_brackets_placed_after_entry(self):
+        """After execute_package succeeds, brackets should be placed automatically."""
+        from positions.bracket_manager import BracketManager
+        from positions.position_manager import PositionManager, create_package, create_exit_rule
+        from pathlib import Path
+        import tempfile
+
+        executor = FakeExecutor()
+        # Add buy_limit for entry
+        async def fake_buy_limit(asset_id, amount_usd, price=None):
+            qty = amount_usd / 0.90
+            return ExecutionResult(True, "paper_entry1", 0.90, qty, 0.0, None)
+        executor.buy_limit = fake_buy_limit
+        executor.get_current_price = AsyncMock(return_value=0.90)
+
+        bm = BracketManager({"polymarket": executor})
+        pm = PositionManager(
+            executors={"polymarket": executor},
+            data_dir=Path(tempfile.mkdtemp()),
+            bracket_manager=bm,
+        )
+
+        pkg = create_package("Test Bracket Entry", "pure_prediction")
+        pkg["legs"] = [{
+            "leg_id": "leg_1", "platform": "polymarket",
+            "asset_id": "0xtest:NO", "side": "NO",
+            "cost": 200, "status": "pending",
+            "entry_price": 0.90,
+        }]
+        pkg["exit_rules"] = [
+            create_exit_rule("target_profit", {"target_pct": 11}),
+            create_exit_rule("stop_loss", {"stop_pct": -40}),
+        ]
+        pkg["_use_limit_orders"] = True
+        pkg["_use_brackets"] = True
+
+        result = await pm.execute_package(pkg)
+        assert result["success"] is True
+        assert "_brackets" in pm.packages[pkg["id"]]
+        assert "leg_1" in pm.packages[pkg["id"]]["_brackets"]
+
+
 class TestExitEngineIntegration:
     @pytest.mark.asyncio
     async def test_exit_engine_resolves_bracket_fill(self):
