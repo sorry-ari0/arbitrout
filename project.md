@@ -8,8 +8,8 @@ Branch: main
 ## Overview
 Arbitrout is a prediction market trading system with eleven core capabilities:
 1. **Cross-platform arbitrage scanner** — finds price discrepancies across Polymarket, PredictIt, Limitless, Kalshi, and more
-2. **Autonomous paper trading** — auto trader scans ALL platforms (9 adapters, 10 executors) for opportunities, opens directional bets and cross-platform arb with risk management
-3. **Insider/whale tracker** — monitors top Polymarket traders, classifies wallets (conviction/market_maker/unknown), conviction-weighted signals with 5x/0x weighting
+2. **Autonomous paper trading** — auto trader scans ALL platforms (8 active adapters, 10 executors) for opportunities, opens directional bets and cross-platform arb with risk management
+3. **Insider/whale tracker** — monitors top Polymarket traders, classifies wallets (conviction/market_maker/unknown), conviction-weighted signals with 3-5x/0x weighting
 4. **AI news scanner** — monitors RSS feeds, uses AI to match headlines to prediction markets, executes trades on breaking news before markets react
 5. **Political synthetic derivatives** — rule-based classification + LLM-driven multi-leg strategy generation for political prediction markets, with cross-platform correlation detection and fee-adjusted expected value analysis
 6. **BTC 5-min directional sniper** — streams real-time BTC price from Binance WebSocket, computes composite directional signal (window delta + micro momentum + tick trend) at T-10s before 5-min market close, places maker limit orders (0% fee + USDC rebates) on the winning side. Research-validated: 85%+ win rate on these markets.
@@ -83,7 +83,7 @@ server.py creates all subsystems and injects dependencies:
 |                      ARBITRAGE PIPELINE                              |
 |  (independent — feeds dashboard + optional input to auto trader)     |
 |                                                                      |
-|  10 Adapters ──fetch──> NormalizedEvents                             |
+|  8 Adapters ──fetch──> NormalizedEvents                              |
 |       |                      |                                       |
 |       |              entity extraction                               |
 |       |              (crypto tickers, names,                         |
@@ -127,13 +127,12 @@ server.py creates all subsystems and injects dependencies:
 |       |  For each open package:                                      |
 |       |  1. Fetch current prices (PaperExecutor → real API)          |
 |       |  2. Update P&L (deduct 1% estimated sell fees)               |
-|       |  3. Evaluate 18 heuristic triggers                           |
+|       |  3. Evaluate 21 heuristic triggers                           |
 |       |  4. Route triggers:                                          |
 |       |                                                              |
 |       |     SAFETY OVERRIDES (immediate, no AI):                     |
 |       |       #7  spread_inversion (YES+NO > 1.0)                    |
-|       |       #10 time_24h (expiry < 24 hours)                       |
-|       |       #11 time_6h  (expiry < 6 hours)                        |
+|       |       #21 political_event_resolved (price <=0.01/>=0.99)     |
 |       |           |                                                  |
 |       |           +---> PositionManager.exit_leg() immediately       |
 |       |                                                              |
@@ -161,12 +160,12 @@ server.py creates all subsystems and injects dependencies:
 |       |  5. Track per-wallet accuracy on resolved markets            |
 |       |                                                              |
 |       +---> AutoTrader reads signals to boost trade scores           |
-|             signal = 0.2*count + 0.3*value + 0.2*suspicious          |
-|                      + 0.3*accuracy                                  |
+|             signal = 0.15*count + 0.25*value + 0.35*conviction       |
+|                      + 0.25*accuracy                                 |
 |                                                                      |
 |  NewsScanner (every 150s)                                            |
 |       |                                                              |
-|       |  1. Fetch 8 RSS feeds (crypto, macro, finance) concurrently  |
+|       |  1. Fetch 14 RSS feeds (crypto, politics, macro, finance)    |
 |       |  2. Dedup: SHA-256 hash (24h) + >80% word overlap (30m)      |
 |       |  3. Pass 1: AI scans headlines vs 200 Polymarket markets     |
 |       |     (Groq → Gemini → OpenRouter chain)                       |
@@ -267,7 +266,7 @@ Package: "Auto: Will ETH hit $5000?"
     - stop_loss:     exit all if P&L <= -20%
     - trailing_stop: exit if drawdown from peak >= 12%
 
-  P&L Calculation (every 30s):
+  P&L Calculation (every 60s):
     current_value   = sum(qty * current_price) for open legs
     estimated_fees  = current_value * 1% (conservative sell-side)
     net_value       = current_value - estimated_fees
@@ -353,19 +352,19 @@ For each crypto market opportunity:
 ### Insider Signal Strength Formula
 
 ```
-signal_strength = 0.2 * normalized_insider_count
-                + 0.3 * normalized_total_value
-                + 0.2 * normalized_suspicious_count
-                + 0.3 * accuracy_score
+signal_strength = 0.15 * normalized_insider_count
+                + 0.25 * normalized_total_value
+                + 0.35 * conviction_score
+                + 0.25 * accuracy_score
 
   insider_count:     number of flagged wallets holding this market
   total_value:       combined USD value of insider positions
-  suspicious_count:  insiders with win rate > 80%
+  conviction_score:  min(conviction_count / 2, 1.0) — caps at 2 conviction traders
   accuracy_score:    weighted average of per-wallet accuracy
                      (only wallets with 3+ resolved markets count)
 
 Wallet Classification:
-  conviction:     ROI > 20%, volume < $50M → 5x signal weight
+  conviction:     ROI > 15% (no volume gate) → 3-5x signal weight (scales with ROI: 3.0 + min(roi*5, 2.0))
   market_maker:   ROI < 5%, volume > $100M → 0x weight (excluded from directional signals)
   watchlist:      HIGH_CONVICTION_WATCHLIST (8 wallets: Theo4, Fredi9999, etc.) → 5x weight
   unknown:        Default → 1x weight
@@ -564,12 +563,12 @@ The exit engine runs a 60-second scan loop evaluating all open packages.
 3. Recalculate P&L (fee-aware)
 4. Track negative streak counter
 5. Skip packages with pending limit orders (treated as "exiting")
-6. Evaluate all 18 heuristic triggers
+6. Evaluate all 21 heuristic triggers
 7. Route fired triggers: safety overrides execute immediately (cancel pending limit orders first), others go to AI advisor
 8. AI-approved exits use limit orders (0% maker fee) except stop_loss which always uses FOK
 9. AI prompt includes recent news headlines from news_scanner — no negative news → strong REJECT bias for trailing_stop, negative_drift, time_decay
 
-**18 Heuristic Triggers:**
+**21 Heuristic Triggers:**
 
 | ID | Name | Category | Action | Safety? |
 |----|------|----------|--------|---------|
@@ -642,7 +641,7 @@ The exit engine runs a 60-second scan loop evaluating all open packages.
    - Weather forecast (3x edge premium): from `WeatherScanner.scan()` — NWS forecast edge on Kalshi
    - Political synthetic derivatives: from PoliticalAnalyzer, scored by `EV * confidence * cross_platform_boost(1.5x)`
 3. Fallback: direct Polymarket Gamma API scan if scanner fails entirely
-4. **ITM/OTM filter:** skips entries with side price > $0.85 (tiny upside) or < $0.15 (lottery tickets)
+4. **ITM/OTM filter:** skips entries with side price > $0.96 (fees exceed max profit) or < $0.15 (lottery tickets)
 5. **Filters:** skips near-resolved (>0.92 or <0.08), near-50/50 (0.42-0.58), <2 day expiry, AND <1 hour expiry (short-duration markets with dynamic fees up to 3.15%, dominated by sub-100ms bots)
 6. Calculates profit potential AFTER estimated round-trip fees: `raw_profit = ((1.0 - favored_price) / favored_price) * 100`, then `net_profit = raw_profit - 2%` round-trip fees
 7. Scores each market: `profit_pct * crypto_boost(2x) * expiry_boost(2x if 3-14d, 1.5x if 14-30d) * volume_boost(1.5x if >100K, 1.2x if >10K) * conviction_boost(1.5x if >0.3) * insider_boost * favorite_longshot_bias * cross_platform_disagreement_boost(1.3x if >10% deviation)`
@@ -657,10 +656,10 @@ The exit engine runs a 60-second scan loop evaluating all open packages.
 16. **Daily trade cap:** Max 3 new trades per calendar day (counter resets at midnight)
 17. Exit rules tuned from 31-trade paper data: target profit (50%), stop loss (-40%), trailing stop (35%, bounds 15-50%)
 18. **Variable Kelly sizing:** 1/4 Kelly for favorites (>=0.70), 1/5 for mid-range, 1/8 for longshots (<=0.30). Reduces risk on uncertain positions.
-19. **24h minimum hold period:** All new packages get `_min_hold_until` timestamp. During hold, soft triggers (trailing_stop, negative_drift, time_decay, stale_position) are suppressed. Safety overrides (spread_inversion) and mechanical exits (target_hit, stop_loss) still fire. Research: <24h holds underperform by 18%.
+19. **24h minimum hold period:** All new packages get `_min_hold_until` timestamp. During hold, soft triggers (trailing_stop, negative_drift, time_decay, stale_position) are suppressed. Safety overrides (spread_inversion, political_event_resolved) and mechanical exits (target_hit, stop_loss) still fire. Research: <24h holds underperform by 18%.
 20. Position limits: $200 max per trade, $5 min, 7 concurrent positions (3 reserved for news), $1400 auto exposure + $600 news
 21. **Market loss limit:** Block re-entry after 2 losses on the same market (prevents churning)
-16. **Decision logging:** all buys, skips (with reason), and failures logged to `decision_log.jsonl`
+22. **Decision logging:** all buys, skips (with reason), and failures logged to `decision_log.jsonl`
 
 ### How the Insider Tracker Works
 
@@ -672,7 +671,7 @@ The exit engine runs a 60-second scan loop evaluating all open packages.
    - **Mass entry:** 2+ insiders enter same market → alert
    - **Size increase:** Position grows >50% → alert
 6. Auto-triggers on significant movements ($5K+ value or suspicious wallets)
-7. Signal strength formula: `0.2*insider_count + 0.3*total_value + 0.2*suspicious_count + 0.3*accuracy_score`
+7. Signal strength formula: `0.15*insider_count + 0.25*total_value + 0.35*conviction_score + 0.25*accuracy_score`
 8. Accuracy tracking: when markets resolve, `record_resolution()` compares insider direction vs outcome
 9. Per-wallet accuracy: min 3 resolved markets before contributing to signal strength
 10. Data persisted to `insider_signals.json`
@@ -788,7 +787,7 @@ is_configured() → bool
 
 ---
 
-## Subsystem 5: Political Synthetic Derivatives
+## Subsystem 4: Political Synthetic Derivatives
 
 ### Files
 | File | Purpose |
@@ -881,7 +880,7 @@ PoliticalOpportunity:
 
 ---
 
-## Subsystem 6: Universal Eval Logger
+## Subsystem 5: Universal Eval Logger
 
 ### Files
 | File | Purpose |
@@ -921,7 +920,7 @@ PoliticalOpportunity:
 | Crypto Spot | 0% | 0% | Synthetic (no real fees) |
 | Kraken | 0.16% | 0.26% | CLI via WSL |
 
-- Paper executor uses separate buy/sell fee rates: buys at maker rate, sells always at taker rate
+- Paper executor uses separate buy/sell fee rates: buys at maker rate, limit sells at maker rate, FOK sells at taker rate
 - P&L always calculated AFTER fees (estimated 1% sell-side for unrealized)
 - Auto trader deducts 2% round-trip from profit assessment before entering (0% maker entry + ~2% taker exit = 2% total)
 - Trade journal records buy_fees, sell_fees, total_fees per completed trade
@@ -960,12 +959,12 @@ PoliticalOpportunity:
 
 ### Alert Deduplication
 - `PositionManager.add_alert()` checks for existing pending alert with same `pkg_id + trigger_name` before creating a new one
-- Prevents exit engine (30s loop) from creating thousands of duplicate alerts for the same trigger
+- Prevents exit engine (60s loop) from creating thousands of duplicate alerts for the same trigger
 
 ## Git Workflow
 1. Feature branch: `feat/derivative-position-manager`
 2. All changes committed to feature branch
-3. Tests in `tests/` (130 passing, ignore test_arbitrage.py)
+3. Tests in `tests/` (324 passing, ignore test_arbitrage.py)
 4. Never push directly to main
 
 ## Running
