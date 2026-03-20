@@ -45,12 +45,14 @@ class AutoTrader:
     """Autonomous paper trader that creates packages from scanner opportunities."""
 
     def __init__(self, position_manager, scanner=None, insider_tracker=None,
-                 interval: float = SCAN_INTERVAL, decision_logger=None):
+                 interval: float = SCAN_INTERVAL, decision_logger=None,
+                 probability_model=None):
         self.pm = position_manager
         self.scanner = scanner
         self.insider_tracker = insider_tracker
         self.interval = interval
         self.dlog = decision_logger
+        self.probability_model = probability_model
         self._task = None
         self._running = False
         self._trades_opened = 0
@@ -361,6 +363,13 @@ class AutoTrader:
                     if insider_signal.get("suspicious_count", 0) > 0:
                         score *= 1.5  # Extra boost for suspicious insiders
                     opp["insider_signal"] = insider_signal
+
+            # Cross-platform disagreement boost: if platforms disagree >10%,
+            # there may be an informational edge worth capturing
+            if self.probability_model:
+                consensus = self.probability_model.get_consensus(opp_title)
+                if consensus and consensus.get("max_deviation", 0) > 0.10:
+                    score *= 1.3
 
             # Skip low-score opportunities
             if score < MIN_SPREAD_PCT:
