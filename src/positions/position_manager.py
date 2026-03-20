@@ -210,21 +210,26 @@ class PositionManager:
 
     async def _execute_package_locked(self, pkg: dict) -> dict:
         # Dedup guard: reject packages with condition IDs already open
-        open_cids = set()
-        for p in self.packages.values():
-            if p.get("status") != "open":
-                continue
-            for leg in p.get("legs", []):
-                if leg.get("status") == "open":
-                    aid = leg.get("asset_id", "")
-                    cid = (aid.split(":")[0] if ":" in aid else aid).lower()
-                    if cid:
-                        open_cids.add(cid)
-        for leg in pkg.get("legs", []):
-            aid = leg.get("asset_id", "")
-            cid = (aid.split(":")[0] if ":" in aid else aid).lower()
-            if cid and cid in open_cids:
-                return {"success": False, "error": f"Duplicate: {cid[:16]}... already open"}
+        # EXCEPTION: allow re-entry when news or insider signals warrant it
+        # (the new position is linked to the existing one, not independent)
+        has_signal = bool(pkg.get("_news_signal") or pkg.get("insider_signal")
+                         or pkg.get("_news_driven") or pkg.get("_insider_driven"))
+        if not has_signal:
+            open_cids = set()
+            for p in self.packages.values():
+                if p.get("status") != "open":
+                    continue
+                for leg in p.get("legs", []):
+                    if leg.get("status") == "open":
+                        aid = leg.get("asset_id", "")
+                        cid = (aid.split(":")[0] if ":" in aid else aid).lower()
+                        if cid:
+                            open_cids.add(cid)
+            for leg in pkg.get("legs", []):
+                aid = leg.get("asset_id", "")
+                cid = (aid.split(":")[0] if ":" in aid else aid).lower()
+                if cid and cid in open_cids:
+                    return {"success": False, "error": f"Duplicate: {cid[:16]}... already open"}
 
         executed = []
         for leg in pkg["legs"]:
