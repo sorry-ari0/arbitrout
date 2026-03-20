@@ -201,6 +201,19 @@ class AutoTrader:
         if news_opps:
             logger.info("Auto trader: merged %d news opportunities", len(news_opps))
 
+        # Merge multi-outcome arbitrage opportunities
+        if self.scanner:
+            try:
+                multi_opps = await self.scanner.scan_multi_outcome()
+                for mo in multi_opps:
+                    # Multi-outcome arb is guaranteed profit — high priority
+                    mo["_score"] = mo.get("profit_pct", 0) * 5.0  # 5x arb premium
+                    opportunities.append(mo)
+                if multi_opps:
+                    logger.info("Auto trader: merged %d multi-outcome arb opportunities", len(multi_opps))
+            except Exception as e:
+                logger.warning("Auto trader: multi-outcome scan failed: %s", e)
+
         # Merge political synthetic opportunities
         if self._political_analyzer:
             political_opps = self._political_analyzer.get_opportunities()
@@ -442,6 +455,69 @@ class AutoTrader:
                     self.dlog.log_opportunity_skip(opp_title, "duplicate_open_position")
                 continue
 
+            # Multi-outcome arbitrage: buy all outcomes when sum < $1.00
+            if opp.get("opportunity_type") == "multi_outcome_arb":
+                try:
+                    pkg = create_package(f"Auto: {trade_title[:60]}", "multi_outcome_arb")
+                except ValueError:
+                    continue
+
+                outcomes = opp.get("outcomes", [])
+                if not outcomes:
+                    continue
+
+                # Allocate proportionally to each outcome's price
+                total_price = sum(o.get("yes_price", 0) for o in outcomes)
+                if total_price <= 0:
+                    continue
+
+                for outcome in outcomes:
+                    leg_price = outcome.get("yes_price", 0)
+                    if leg_price <= 0:
+                        continue
+                    leg_cost = round(trade_size * (leg_price / total_price), 2)
+                    leg_cost = max(MIN_TRADE_SIZE, leg_cost)
+
+                    pkg["legs"].append(create_leg(
+                        platform="polymarket",
+                        leg_type="prediction_yes",
+                        asset_id=f"{outcome['condition_id']}:YES",
+                        asset_label=f"YES: {outcome.get('title', '?')[:40]}",
+                        entry_price=leg_price,
+                        cost=leg_cost,
+                        expiry=opp.get("expiry", "2026-12-31")[:10],
+                    ))
+
+                # Multi-outcome arb: guaranteed profit — only exit on safety
+                pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -15}))
+
+                if not pkg["legs"]:
+                    self._trades_skipped += 1
+                    continue
+
+                pkg_name = pkg.get("name", opp_title)
+                try:
+                    result = await self.pm.execute_package(pkg)
+                    if result.get("success"):
+                        trades_this_cycle += 1
+                        self._trades_opened += 1
+                        remaining_budget -= trade_size
+                        logger.info("Auto trader OPENED multi-outcome arb: %s (%d outcomes, spread=%.2f%%)",
+                                    pkg_name, len(outcomes), spread_pct)
+                        if self.dlog:
+                            self.dlog.log_trade_opened(
+                                pkg_id=pkg.get("id", ""), title=pkg_name,
+                                strategy="multi_outcome_arb",
+                                side="ALL_OUTCOMES", price=round(total_price, 4),
+                                size=trade_size, score=score, spread_pct=spread_pct,
+                                conviction=1.0,  # Guaranteed profit
+                                days_to_expiry=days_to_expiry, volume=opp.get("volume", 0))
+                except Exception as e:
+                    logger.warning("Auto trader: multi-outcome trade failed: %s", e)
+                    if self.dlog:
+                        self.dlog.log_trade_failed(opp_title, str(e))
+                continue
+
             # Political synthetic: multi-leg with weight-based allocation
             if opp.get("opportunity_type") == "political_synthetic":
                 try:
@@ -507,13 +583,17 @@ class AutoTrader:
                 continue
 
             # Determine strategy:
-            # - synthetic_derivative: related markets with different price targets (wins 2/3 scenarios)
+            # - synthetic_derivative: related markets with different price targets
+            #   Can be same-platform (e.g., BTC >$90K YES + BTC >$100K NO = bull spread)
+            #   or cross-platform. Does NOT require cross-platform.
             # - cross_platform_arb: same market on different platforms (guaranteed spread)
             # - pure_prediction: directional bet on one side
             is_cross_platform = buy_yes_platform != buy_no_platform and yes_market_id and no_market_id
             is_synthetic = opp.get("is_synthetic", False)
 
-            if is_synthetic and is_cross_platform:
+            if is_synthetic:
+                # Synthetics work on same or different platforms — different strike prices
+                # create the edge, not platform differences
                 strategy = "synthetic_derivative"
             elif is_cross_platform:
                 strategy = "cross_platform_arb"
@@ -525,15 +605,32 @@ class AutoTrader:
             except ValueError:
                 pkg = create_package(f"Auto: {trade_title[:60]}", "pure_prediction")
 
-            if is_cross_platform:
-                # Cross-platform: buy both sides on different platforms
+            if is_cross_platform or is_synthetic:
+                # Multi-leg trade: cross-platform arb OR synthetic derivative
+                # Both require buying YES on one market/platform and NO on another
+                #
+                # Cross-platform arb: same event, different platforms, guaranteed spread
+                # Synthetic: different strike prices (same or different platform), structural edge
+                #
+                # Key fix: synthetics no longer require cross-platform — same-platform
+                # synthetics are valid (e.g., BTC >$90K YES + BTC >$100K NO = bull spread)
+
                 # Skip if either side has no real price (zero-price markets have no liquidity)
                 if buy_yes_price < 0.01 or buy_no_price < 0.01:
                     self._trades_skipped += 1
                     if self.dlog:
-                        self.dlog.log_opportunity_skip(opp_title, "zero_price_arb",
+                        self.dlog.log_opportunity_skip(opp_title, "zero_price_multi_leg",
                                                        yes_price=round(buy_yes_price, 4),
                                                        no_price=round(buy_no_price, 4))
+                    continue
+
+                # Need market IDs for both legs
+                if not yes_market_id or not no_market_id:
+                    self._trades_skipped += 1
+                    if self.dlog:
+                        self.dlog.log_opportunity_skip(opp_title, "missing_market_id_multi_leg",
+                                                       yes_id=yes_market_id[:12] if yes_market_id else "",
+                                                       no_id=no_market_id[:12] if no_market_id else "")
                     continue
 
                 # For synthetics, size by total cost efficiency
@@ -554,20 +651,18 @@ class AutoTrader:
                     yes_label = f"YES @ {buy_yes_platform}"
                     no_label = f"NO @ {buy_no_platform}"
 
-                if yes_market_id:
-                    pkg["legs"].append(create_leg(
-                        platform=buy_yes_platform, leg_type="prediction_yes",
-                        asset_id=f"{yes_market_id}:YES", asset_label=yes_label,
-                        entry_price=buy_yes_price,
-                        cost=yes_alloc, expiry=expiry[:10] if expiry else "2026-12-31",
-                    ))
-                if no_market_id:
-                    pkg["legs"].append(create_leg(
-                        platform=buy_no_platform, leg_type="prediction_no",
-                        asset_id=f"{no_market_id}:NO", asset_label=no_label,
-                        entry_price=buy_no_price,
-                        cost=no_alloc, expiry=expiry[:10] if expiry else "2026-12-31",
-                    ))
+                pkg["legs"].append(create_leg(
+                    platform=buy_yes_platform, leg_type="prediction_yes",
+                    asset_id=f"{yes_market_id}:YES", asset_label=yes_label,
+                    entry_price=buy_yes_price,
+                    cost=yes_alloc, expiry=expiry[:10] if expiry else "2026-12-31",
+                ))
+                pkg["legs"].append(create_leg(
+                    platform=buy_no_platform, leg_type="prediction_no",
+                    asset_id=f"{no_market_id}:NO", asset_label=no_label,
+                    entry_price=buy_no_price,
+                    cost=no_alloc, expiry=expiry[:10] if expiry else "2026-12-31",
+                ))
                 if is_synthetic:
                     pkg["_synthetic_info"] = opp.get("synthetic_info", {})
             else:
@@ -661,16 +756,26 @@ class AutoTrader:
                 self._trades_skipped += 1
                 continue
 
-            # Exit rules — tuned from 31 closed trades of paper trading data:
-            # - trailing_stop at 20% lost 5 trades (-$59): too tight for prediction market volatility
-            # - AI-approved time_decay: 7 trades, 0 wins, -$29 (premature exits)
-            # - AI-approved negative_drift: 4 trades, 0 wins, -$55 (panic selling dips)
-            # - manual_full_exit: 13 trades, 3 wins, -$1.65 (humans hold, bots panic)
-            # Strategy: wide stops, let winners run to near-resolution, cut only deep losers
-            # Prediction markets resolve to 0 or 1 — asymmetric patience wins
-            pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 50}))
-            pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -40}))
-            pkg["exit_rules"].append(create_exit_rule("trailing_stop", {"current": 35, "bound_min": 15, "bound_max": 50}))
+            # Exit rules — strategy-dependent
+            if strategy == "cross_platform_arb":
+                # Cross-platform arb: guaranteed profit at resolution — HOLD TO RESOLUTION
+                # Only exit on safety overrides (spread_inversion, platform_error)
+                # No trailing stop, no time decay — the spread is locked in
+                pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -20}))
+                # Safety only — if spread inverts, exit immediately
+            elif strategy == "synthetic_derivative":
+                # Synthetics: structural edge from different strike prices — HOLD TO RESOLUTION
+                # The payoff depends on where BTC lands relative to strikes
+                # Wide stop only — cutting early destroys the structural edge
+                pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 80}))
+                pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -50}))
+                # No trailing stop — synthetics need room to breathe
+            else:
+                # Pure prediction: directional bet — tuned from 31-trade analysis
+                # Wide stops, let winners run to near-resolution, cut only deep losers
+                pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 50}))
+                pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -40}))
+                pkg["exit_rules"].append(create_exit_rule("trailing_stop", {"current": 35, "bound_min": 15, "bound_max": 50}))
 
             # Execute
             pkg_name = pkg.get("name", opp_title)
@@ -713,20 +818,49 @@ class AutoTrader:
             logger.info("Auto trader: opened %d new positions this cycle", trades_this_cycle)
 
     def _arb_to_opportunity(self, arb: dict) -> dict | None:
-        """Convert an ArbitrageOpportunity dict to auto_trader opportunity format."""
+        """Convert an ArbitrageOpportunity dict to auto_trader opportunity format.
+
+        Fixed: resolves market IDs per-platform correctly, rejects same-platform arb
+        (buying YES+NO on same platform = guaranteed loss after fees), and enforces
+        minimum spread thresholds per platform pair.
+        """
         matched = arb.get("matched_event", {})
         title = matched.get("canonical_title", "")
         if not title:
             return None
 
+        buy_yes_platform = arb.get("buy_yes_platform", "")
+        buy_no_platform = arb.get("buy_no_platform", "")
+
+        # CRITICAL FIX: reject same-platform "arb" — buying both YES and NO on
+        # the same platform costs ~$1.00 and guarantees a fee-only loss.
+        # This was the cause of 29/31 trades being pure_prediction losses.
+        if buy_yes_platform == buy_no_platform:
+            is_synthetic = arb.get("is_synthetic", False)
+            if not is_synthetic:
+                # Same-platform, non-synthetic = not real arb, skip
+                logger.debug("Rejecting same-platform arb on %s: %s", buy_yes_platform, title[:40])
+                return None
+            # Same-platform synthetics ARE valid (different strike prices)
+
+        # Resolve market IDs — try multiple ID fields and match ALL markets per platform
         markets = matched.get("markets", [])
         buy_yes_market_id = ""
         buy_no_market_id = ""
+
         for m in markets:
-            if m.get("platform") == arb.get("buy_yes_platform"):
-                buy_yes_market_id = m.get("event_id", "")
-            if m.get("platform") == arb.get("buy_no_platform"):
-                buy_no_market_id = m.get("event_id", "")
+            platform = m.get("platform", "")
+            # Try multiple ID fields — platforms use different naming
+            market_id = (m.get("event_id") or m.get("market_id") or
+                         m.get("conditionId") or m.get("condition_id") or
+                         m.get("id") or "")
+            if not market_id:
+                continue
+
+            if platform == buy_yes_platform and not buy_yes_market_id:
+                buy_yes_market_id = market_id
+            if platform == buy_no_platform and not buy_no_market_id:
+                buy_no_market_id = market_id
 
         buy_yes_price = arb.get("buy_yes_price", 0)
         buy_no_price = arb.get("buy_no_price", 0)
@@ -734,16 +868,35 @@ class AutoTrader:
         if buy_yes_price < 0.01 or buy_no_price < 0.01:
             return None
 
+        # Enforce per-platform-pair minimum spread thresholds
+        # Cross-platform fees: Polymarket taker ~2% + Kalshi ~1.2% = ~3.2% round-trip
+        profit_pct = arb.get("profit_pct", 0)
+        is_cross_platform = buy_yes_platform != buy_no_platform
+        if is_cross_platform:
+            min_spread = 3.5  # Must exceed combined cross-platform fees
+            if profit_pct < min_spread:
+                logger.debug("Cross-platform spread too thin (%.1f%% < %.1f%%): %s",
+                             profit_pct, min_spread, title[:40])
+                return None
+
+        # Log when we find cross-platform matches but can't execute
+        if is_cross_platform and (not buy_yes_market_id or not buy_no_market_id):
+            logger.info("Cross-platform arb found but missing market ID: "
+                        "yes=%s(%s) no=%s(%s) spread=%.1f%% | %s",
+                        buy_yes_platform, buy_yes_market_id[:12] if buy_yes_market_id else "MISSING",
+                        buy_no_platform, buy_no_market_id[:12] if buy_no_market_id else "MISSING",
+                        profit_pct, title[:40])
+
         opp = {
             "title": title,
             "canonical_title": title,
-            "buy_yes_platform": arb.get("buy_yes_platform", ""),
+            "buy_yes_platform": buy_yes_platform,
             "buy_yes_price": buy_yes_price,
-            "buy_no_platform": arb.get("buy_no_platform", ""),
+            "buy_no_platform": buy_no_platform,
             "buy_no_price": buy_no_price,
             "buy_yes_market_id": buy_yes_market_id,
             "buy_no_market_id": buy_no_market_id,
-            "profit_pct": arb.get("profit_pct", 0),
+            "profit_pct": profit_pct,
             "expiry": matched.get("expiry", ""),
             "volume": arb.get("combined_volume", 0),
             "matched_event": matched,

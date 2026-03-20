@@ -708,6 +708,136 @@ class ArbitrageScanner:
         with self._lock:
             return self._last_feed
 
+    async def scan_multi_outcome(self) -> list[dict]:
+        """Scan for multi-outcome arbitrage opportunities on Polymarket.
+
+        Multi-outcome arb: events with 3+ outcomes where the sum of all YES
+        prices is < $1.00. Buy all outcomes → guaranteed profit at resolution
+        since exactly one outcome resolves to $1.00.
+
+        Example: "Who will win the NBA championship?" with 30 teams.
+        If all YES prices sum to $0.94, buying all = $0.06 guaranteed profit.
+
+        Uses maker orders (0% fee) to enter, so profit = $1.00 - sum(prices).
+        """
+        try:
+            import httpx
+        except ImportError:
+            logger.warning("httpx not available for multi-outcome scan")
+            return []
+
+        opportunities = []
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                # Fetch Polymarket events (grouped markets)
+                resp = await client.get(
+                    "https://gamma-api.polymarket.com/events",
+                    params={
+                        "closed": "false",
+                        "limit": 50,
+                        "order": "volume",
+                        "ascending": "false",
+                    }
+                )
+                if resp.status_code != 200:
+                    logger.warning("Multi-outcome scan: API returned %d", resp.status_code)
+                    return []
+
+                events = resp.json()
+                if not isinstance(events, list):
+                    events = events.get("data", events.get("events", []))
+
+                for event in events:
+                    event_title = event.get("title", "")
+                    markets = event.get("markets", [])
+
+                    # Only multi-outcome events (3+ markets under one event)
+                    if len(markets) < 3:
+                        continue
+
+                    # Sum all YES prices
+                    total_yes = 0.0
+                    valid_markets = []
+                    for m in markets:
+                        # Parse outcomePrices
+                        yes_price = 0.0
+                        outcome_prices = m.get("outcomePrices", "")
+                        if isinstance(outcome_prices, str) and outcome_prices.startswith("["):
+                            try:
+                                prices = json.loads(outcome_prices)
+                                if prices:
+                                    yes_price = float(prices[0])
+                            except (json.JSONDecodeError, ValueError, IndexError):
+                                pass
+                        if yes_price <= 0:
+                            yes_price = float(m.get("bestBid", 0) or 0)
+
+                        if yes_price > 0:
+                            condition_id = m.get("conditionId", m.get("condition_id", ""))
+                            valid_markets.append({
+                                "title": m.get("question", m.get("title", "")),
+                                "condition_id": condition_id,
+                                "yes_price": round(yes_price, 4),
+                                "volume": int(float(m.get("volume", 0) or 0)),
+                            })
+                            total_yes += yes_price
+
+                    if len(valid_markets) < 3:
+                        continue
+
+                    # Arb exists when sum < $1.00 (minus fee buffer)
+                    # Maker orders = 0% fee, so profit = 1.0 - total_yes
+                    # But we need a buffer for execution risk
+                    fee_buffer = 0.01  # 1 cent buffer for rounding/execution
+                    spread = 1.0 - total_yes
+
+                    if spread > fee_buffer:
+                        profit_pct = round(spread / total_yes * 100, 2) if total_yes > 0 else 0
+
+                        opp = {
+                            "opportunity_type": "multi_outcome_arb",
+                            "title": event_title,
+                            "canonical_title": event_title,
+                            "platform": "polymarket",
+                            "outcomes": valid_markets,
+                            "outcome_count": len(valid_markets),
+                            "total_yes_price": round(total_yes, 4),
+                            "spread": round(spread, 4),
+                            "profit_pct": profit_pct,
+                            "buy_yes_platform": "polymarket",
+                            "buy_no_platform": "polymarket",
+                            "buy_yes_price": round(total_yes / len(valid_markets), 4),  # avg
+                            "buy_no_price": 0,
+                            "buy_yes_market_id": valid_markets[0]["condition_id"],
+                            "buy_no_market_id": "",
+                            "expiry": event.get("endDate", ""),
+                            "volume": sum(m["volume"] for m in valid_markets),
+                        }
+                        opportunities.append(opp)
+
+                        logger.info("Multi-outcome arb: %s | %d outcomes | sum=%.4f | spread=%.4f (%.2f%%)",
+                                    event_title[:50], len(valid_markets), total_yes, spread, profit_pct)
+
+                        # Log if decision logger available
+                        if self._dlog:
+                            self._dlog.log_opportunity_detected(
+                                title=event_title,
+                                strategy_type="multi_outcome_arb",
+                                spread_pct=profit_pct,
+                                platforms=["polymarket"],
+                                yes_price=round(total_yes, 4),
+                                no_price=0,
+                                is_synthetic=False,
+                                volume=opp["volume"],
+                                event_ids=[m["condition_id"] for m in valid_markets[:5]],
+                            )
+
+        except Exception as e:
+            logger.warning("Multi-outcome scan error: %s", e)
+
+        logger.info("Multi-outcome scan: %d opportunities from grouped events", len(opportunities))
+        return opportunities
+
     def _save_cache(self, events: list[NormalizedEvent]):
         """Persist latest events to disk for offline viewing."""
         try:
