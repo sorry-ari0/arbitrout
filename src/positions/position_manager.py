@@ -253,9 +253,13 @@ class PositionManager:
         self.add_package(pkg)
         return {"success": True, "package_id": pkg["id"]}
 
-    async def exit_leg(self, pkg_id: str, leg_id: str, trigger: str = "manual") -> dict:
-        """Exit (sell) a single leg."""
+    async def exit_leg(self, pkg_id: str, leg_id: str, trigger: str = "manual",
+                       use_limit: bool = False) -> dict:
+        """Exit (sell) a single leg. If use_limit=True, places a GTC limit order
+        and returns {"pending": True, "order_id": ...} — caller resolves later."""
         async with self._lock:
+            if use_limit:
+                return await self._place_limit_sell(pkg_id, leg_id, trigger)
             return await self._exit_leg_locked(pkg_id, leg_id, trigger)
 
     async def _exit_leg_locked(self, pkg_id: str, leg_id: str, trigger: str = "manual") -> dict:
@@ -283,6 +287,7 @@ class PositionManager:
             leg["exit_quantity"] = result.filled_quantity
             leg["sell_fees"] = result.fees
             leg["exit_trigger"] = trigger
+            leg["exit_order_type"] = "fok_direct"
             # exit_value = gross proceeds from the sell (before fees deducted)
             leg["exit_value"] = round(result.filled_quantity * result.filled_price, 4)
             # current_value tracks net (after fees) for P&L display
@@ -290,7 +295,8 @@ class PositionManager:
             pkg["execution_log"].append({
                 "action": "sell", "leg_id": leg_id, "platform": leg["platform"],
                 "tx_id": result.tx_id, "price": result.filled_price,
-                "fees": result.fees, "trigger": trigger, "timestamp": time.time(),
+                "fees": result.fees, "trigger": trigger,
+                "exit_order_type": "fok_direct", "timestamp": time.time(),
             })
             if all(l["status"] in ("closed", "advisory") for l in pkg["legs"]):
                 pkg["status"] = STATUS_CLOSED
@@ -310,6 +316,158 @@ class PositionManager:
             self.save()
             return {"success": True, "tx_id": result.tx_id}
         return {"success": False, "error": result.error}
+
+    async def _place_limit_sell(self, pkg_id: str, leg_id: str, trigger: str) -> dict:
+        """Place a GTC limit sell order. Does NOT finalize the exit — returns pending."""
+        pkg = self.packages.get(pkg_id)
+        if not pkg:
+            return {"success": False, "error": "Package not found"}
+
+        leg = next((l for l in pkg["legs"] if l["leg_id"] == leg_id), None)
+        if not leg or leg["status"] != "open":
+            return {"success": False, "error": "Leg not found or not open"}
+
+        executor = self.executors.get(leg["platform"])
+        if not executor:
+            return {"success": False, "error": f"No executor for {leg['platform']}"}
+
+        # Limit price: midpoint minus max(1 cent, 1% of price)
+        mid = leg.get("current_price", 0)
+        if mid <= 0:
+            return await self._exit_leg_locked(pkg_id, leg_id, trigger)
+        offset = max(0.01, mid * 0.01)
+        limit_price = round(mid - offset, 4)
+        if limit_price <= 0:
+            return await self._exit_leg_locked(pkg_id, leg_id, trigger)
+
+        # Place limit order (same call for paper or real executor)
+        result = await executor.sell_limit(leg["asset_id"], leg["quantity"], limit_price)
+
+        if not result.success:
+            logger.warning("Limit sell failed for %s, falling back to FOK: %s", leg_id, result.error)
+            return await self._exit_leg_locked(pkg_id, leg_id, trigger)
+
+        # Record pending order
+        if "_pending_limit_orders" not in pkg:
+            pkg["_pending_limit_orders"] = {}
+        pkg["_pending_limit_orders"][leg_id] = {
+            "order_id": result.tx_id,
+            "placed_at": time.time(),
+            "quantity": leg["quantity"],
+            "asset_id": leg["asset_id"],
+            "platform": leg["platform"],
+            "trigger": trigger,
+            "limit_price": limit_price,
+        }
+        self.save()
+        logger.info("Placed limit sell for %s @ %.4f (order %s)", leg_id, limit_price, result.tx_id)
+        return {"pending": True, "order_id": result.tx_id}
+
+    async def resolve_pending_order(self, pkg_id: str, leg_id: str) -> dict:
+        """Check a pending limit order and finalize or cancel+FOK.
+        Per spec: check status OUTSIDE the lock (network call), then acquire
+        lock only for finalization (writing exit data)."""
+        # --- Phase 1: read state and check order status WITHOUT lock ---
+        pkg = self.packages.get(pkg_id)
+        if not pkg:
+            return {"success": False, "error": "Package not found"}
+        pending = pkg.get("_pending_limit_orders", {}).get(leg_id)
+        if not pending:
+            return {"success": False, "error": "No pending order for this leg"}
+        executor = self.executors.get(pending["platform"])
+        if not executor:
+            return {"success": False, "error": f"No executor for {pending['platform']}"}
+
+        order_id = pending["order_id"]
+        status = await executor.check_order_status(order_id)  # Network call — no lock held
+        order_status = status.get("status", "unknown").lower()
+
+        # --- Phase 2: acquire lock only for finalization ---
+        async with self._lock:
+            # Re-read state in case it changed while we were unlocked
+            pkg = self.packages.get(pkg_id)
+            if not pkg:
+                return {"success": False, "error": "Package not found"}
+            pending = pkg.get("_pending_limit_orders", {}).get(leg_id)
+            if not pending:
+                return {"success": False, "error": "No pending order (resolved by safety override?)"}
+            leg = next((l for l in pkg["legs"] if l["leg_id"] == leg_id), None)
+            if not leg:
+                return {"success": False, "error": "Leg not found"}
+
+            if order_status == "filled":
+                fill_price = status.get("price", pending["limit_price"])
+                fill_qty = status.get("size_matched", pending["quantity"])
+                fill_fee = status.get("fee", 0.0)
+                self._finalize_exit(pkg, leg, pending["trigger"], fill_price, fill_qty, fill_fee, "limit_filled")
+                del pkg["_pending_limit_orders"][leg_id]
+                if not pkg["_pending_limit_orders"]:
+                    del pkg["_pending_limit_orders"]
+                self.save()
+                return {"success": True, "exit_order_type": "limit_filled"}
+
+            elif order_status == "partially_filled":
+                await executor.cancel_order(order_id)
+                filled_qty = float(status.get("size_matched", 0))
+                remaining = pending["quantity"] - filled_qty
+                if filled_qty > 0:
+                    fill_price = status.get("price", pending["limit_price"])
+                    fill_fee = status.get("fee", 0.0)
+                    leg["quantity"] = remaining
+                if remaining > 0.001:
+                    result = await executor.sell(pending["asset_id"], remaining)
+                    if result.success:
+                        self._finalize_exit(pkg, leg, pending["trigger"], result.filled_price,
+                                            pending["quantity"], result.fees, "limit_partial_fok")
+                del pkg["_pending_limit_orders"][leg_id]
+                if not pkg["_pending_limit_orders"]:
+                    del pkg["_pending_limit_orders"]
+                self.save()
+                return {"success": True, "exit_order_type": "limit_partial_fok"}
+
+            elif time.time() - pending["placed_at"] > 60:
+                await executor.cancel_order(order_id)
+                del pkg["_pending_limit_orders"][leg_id]
+                if not pkg["_pending_limit_orders"]:
+                    del pkg["_pending_limit_orders"]
+                logger.info("Limit order timed out for %s, falling back to FOK", leg_id)
+                return await self._exit_leg_locked(pkg_id, leg_id, pending["trigger"])
+
+            else:
+                return {"pending": True, "order_id": order_id}
+
+    def _finalize_exit(self, pkg: dict, leg: dict, trigger: str,
+                       fill_price: float, fill_qty: float, fees: float,
+                       exit_order_type: str):
+        """Finalize a leg exit — same logic as _exit_leg_locked but with provided fill data."""
+        leg["status"] = "closed"
+        leg["exit_price"] = fill_price
+        leg["exit_quantity"] = fill_qty
+        leg["sell_fees"] = fees
+        leg["exit_trigger"] = trigger
+        leg["exit_order_type"] = exit_order_type
+        leg["exit_value"] = round(fill_qty * fill_price, 4)
+        leg["current_value"] = round(fill_qty * fill_price - fees, 4)
+        pkg["execution_log"].append({
+            "action": "sell", "leg_id": leg["leg_id"], "platform": leg["platform"],
+            "tx_id": None, "price": fill_price, "fees": fees,
+            "trigger": trigger, "exit_order_type": exit_order_type,
+            "timestamp": time.time(),
+        })
+        if all(l["status"] in ("closed", "advisory") for l in pkg["legs"]):
+            pkg["status"] = STATUS_CLOSED
+            pkg["current_value"] = round(sum(
+                l.get("quantity", 0) * l.get("exit_price", l.get("current_price", l.get("entry_price", 0)))
+                for l in pkg["legs"] if l.get("status") != "advisory"
+            ), 4)
+            if self.trade_journal:
+                try:
+                    self.trade_journal.record_close(pkg, exit_trigger=trigger)
+                except Exception as e:
+                    logger.warning("Failed to record trade journal: %s", e)
+        else:
+            pkg["status"] = STATUS_PARTIAL
+        pkg["updated_at"] = time.time()
 
     async def _rollback(self, pkg: dict, executed_legs: list[dict]):
         """Attempt to sell already-bought legs on failure. Persists rollback status."""
