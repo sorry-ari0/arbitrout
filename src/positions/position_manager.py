@@ -13,7 +13,7 @@ STATUS_OPEN = "open"
 STATUS_CLOSED = "closed"
 STATUS_PARTIAL = "partial_exit"
 
-STRATEGY_TYPES = ("spot_plus_hedge", "cross_platform_arb", "synthetic_derivative", "pure_prediction", "news_driven", "political_synthetic", "btc_sniper", "multi_outcome_arb", "market_making")
+STRATEGY_TYPES = ("spot_plus_hedge", "cross_platform_arb", "synthetic_derivative", "pure_prediction", "news_driven", "political_synthetic", "btc_sniper", "multi_outcome_arb", "market_making", "portfolio_no", "weather_forecast")
 
 
 def create_package(name: str, strategy_type: str) -> dict:
@@ -231,6 +231,101 @@ class PositionManager:
                 if cid and cid in open_cids:
                     return {"success": False, "error": f"Duplicate: {cid[:16]}... already open"}
 
+        # Determine if parallel execution is appropriate:
+        # Cross-platform arb legs should execute simultaneously to minimize slippage
+        use_parallel = pkg.get("_parallel_execution", False)
+        leg_platforms = set(l["platform"] for l in pkg["legs"] if l["platform"] != "robinhood")
+        if len(leg_platforms) > 1 and pkg.get("strategy_type") in ("cross_platform_arb",):
+            use_parallel = True
+
+        if use_parallel:
+            result = await self._execute_legs_parallel(pkg)
+        else:
+            result = await self._execute_legs_sequential(pkg)
+
+        if result is not None:
+            return result  # Error occurred
+
+        # Finalize package
+        pkg["total_cost"] = sum(l["cost"] for l in pkg["legs"])
+        pkg["current_value"] = pkg["total_cost"]
+        pkg["peak_value"] = pkg["total_cost"]
+        self.add_package(pkg)
+        return {"success": True, "package_id": pkg["id"]}
+
+    async def _execute_legs_parallel(self, pkg: dict) -> dict:
+        """Execute all legs concurrently via asyncio.gather for cross-platform arb."""
+
+        async def _exec_one(leg):
+            platform = leg["platform"]
+            executor = self.executors.get(platform)
+            if not executor:
+                if platform == "robinhood":
+                    leg["status"] = "advisory"
+                    leg["tx_id"] = "advisory_only"
+                    return leg, None, None
+                return leg, None, f"No executor for platform: {platform}"
+
+            use_limit = pkg.get("_use_limit_orders", False)
+            if use_limit and hasattr(executor, 'buy_limit'):
+                result = await executor.buy_limit(
+                    asset_id=leg["asset_id"],
+                    amount_usd=leg["cost"],
+                    price=leg["entry_price"],
+                )
+            else:
+                buy_kwargs = {"asset_id": leg["asset_id"], "amount_usd": leg["cost"]}
+                if hasattr(executor, 'real'):
+                    buy_kwargs["fallback_price"] = leg["entry_price"]
+                result = await executor.buy(**buy_kwargs)
+            return leg, result, None
+
+        # Execute all legs concurrently
+        tasks = [_exec_one(leg) for leg in pkg["legs"]]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        executed = []
+        failed = False
+        error_msg = ""
+        for item in results:
+            if isinstance(item, Exception):
+                failed = True
+                error_msg = str(item)
+                break
+            leg, result, err = item
+            if err:
+                failed = True
+                error_msg = err
+                break
+            if result is None:
+                continue  # advisory leg
+            if result.success:
+                leg["tx_id"] = result.tx_id
+                leg["entry_price"] = result.filled_price if result.filled_price > 0 else leg["entry_price"]
+                leg["quantity"] = result.filled_quantity if result.filled_quantity > 0 else leg["quantity"]
+                leg["buy_fees"] = result.fees
+                leg["status"] = "open"
+                executed.append(leg)
+                pkg["execution_log"].append({
+                    "action": "buy", "leg_id": leg["leg_id"], "platform": leg["platform"],
+                    "tx_id": result.tx_id, "price": result.filled_price,
+                    "quantity": result.filled_quantity, "fees": result.fees,
+                    "timestamp": time.time(),
+                })
+            else:
+                failed = True
+                error_msg = f"Leg {leg['leg_id']} failed: {result.error}"
+                break
+
+        if failed:
+            logger.error("Parallel execution failed: %s", error_msg)
+            await self._rollback(pkg, executed)
+            return {"success": False, "error": error_msg}
+
+        return None  # Signal caller to continue with finalization
+
+    async def _execute_legs_sequential(self, pkg: dict) -> dict | None:
+        """Execute legs one at a time (default for same-platform strategies)."""
         executed = []
         for leg in pkg["legs"]:
             platform = leg["platform"]
@@ -274,11 +369,7 @@ class PositionManager:
                 await self._rollback(pkg, executed)
                 return {"success": False, "error": f"Leg {leg['leg_id']} failed: {result.error}"}
 
-        pkg["total_cost"] = sum(l["cost"] for l in pkg["legs"])
-        pkg["current_value"] = pkg["total_cost"]
-        pkg["peak_value"] = pkg["total_cost"]
-        self.add_package(pkg)
-        return {"success": True, "package_id": pkg["id"]}
+        return None  # Success — caller finalizes
 
     async def exit_leg(self, pkg_id: str, leg_id: str, trigger: str = "manual",
                        use_limit: bool = False) -> dict:
