@@ -5,6 +5,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import pytest
 import time
+from unittest.mock import AsyncMock, MagicMock
 from execution.base_executor import ExecutionResult
 
 
@@ -295,3 +296,65 @@ class TestBracketFillDetection:
         assert len(fills) == 1
         assert fills[0].get("partial") is True
         assert "leg_1" not in pkg.get("_brackets", {})
+
+
+class TestPaperBracketSimulation:
+    @pytest.mark.asyncio
+    async def test_paper_target_rests_until_price_rises(self):
+        """Paper executor sell_limit should rest until market price >= limit price."""
+        from execution.paper_executor import PaperExecutor
+
+        real = AsyncMock()
+        real.platform = "polymarket"
+        real.get_current_price = AsyncMock(return_value=0.90)
+        real.is_configured = MagicMock(return_value=True)
+
+        paper = PaperExecutor(real, starting_balance=10000)
+
+        # First buy some shares so we have a position to sell
+        buy_result = await paper.buy(asset_id="0xtest:NO", amount_usd=200)
+        assert buy_result.success
+
+        # Place a target sell at $0.95
+        result = await paper.sell_limit("0xtest:NO", 100, 0.95)
+        assert result.success
+        order_id = result.tx_id
+
+        # At current price 0.90, order should NOT be filled (ask > market)
+        status = await paper.check_order_status(order_id)
+        assert status["status"] == "open"
+
+        # Price rises to 0.96 — someone buys at our $0.95 ask → fills
+        real.get_current_price = AsyncMock(return_value=0.96)
+        status = await paper.check_order_status(order_id)
+        assert status["status"] == "filled"
+        assert status["price"] == 0.95  # Fills at limit price, not market
+
+    @pytest.mark.asyncio
+    async def test_paper_cancel_resting_order(self):
+        from execution.paper_executor import PaperExecutor
+
+        real = AsyncMock()
+        real.platform = "polymarket"
+        real.get_current_price = AsyncMock(return_value=0.90)
+        real.is_configured = MagicMock(return_value=True)
+
+        paper = PaperExecutor(real, starting_balance=10000)
+
+        # Buy first
+        await paper.buy(asset_id="0xtest:NO", amount_usd=200)
+        qty_before = paper.positions["0xtest:NO"]["quantity"]
+
+        result = await paper.sell_limit("0xtest:NO", 100, 0.95)
+        order_id = result.tx_id
+
+        # Quantity should be reserved (reduced)
+        qty_after_place = paper.positions.get("0xtest:NO", {}).get("quantity", 0)
+        assert qty_after_place < qty_before
+
+        cancelled = await paper.cancel_order(order_id)
+        assert cancelled is True
+
+        # Quantity should be unreserved (restored)
+        qty_after_cancel = paper.positions["0xtest:NO"]["quantity"]
+        assert abs(qty_after_cancel - qty_before) < 1  # Restored
