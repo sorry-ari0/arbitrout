@@ -604,25 +604,30 @@ function showEventDetail(opp) {
             scenDiv.appendChild(scenTitle);
 
             var scenarios = synthInfo.scenarios;
-            var scenOrder = ['above_both', 'between', 'below_both'];
-            var scenIcons = {above_both: '\u2705', between: '\u2705', below_both: '\u274C'};
-            scenOrder.forEach(function(key) {
+            // Iterate all scenario keys dynamically (handles crypto, threshold, range types)
+            Object.keys(scenarios).forEach(function(key) {
                 var s = scenarios[key];
                 if (!s) return;
                 var line = document.createElement('div');
                 line.style.cssText = 'padding:2px 0;color:var(--arb-text);';
-                var icon = scenIcons[key] || '';
+                var icon = s.net > 0 ? '\u2705' : '\u274C';
                 var color = s.net > 0 ? 'var(--arb-green)' : '#ff5252';
-                line.innerHTML = icon + ' ' + s.condition +
-                    ': <span style="color:' + color + ';font-weight:700;">' +
-                    (s.net > 0 ? '+' : '') + (s.return_pct).toFixed(1) + '%</span>';
+                var iconSpan = document.createElement('span');
+                iconSpan.textContent = icon + ' ' + s.condition + ': ';
+                line.appendChild(iconSpan);
+                var pctSpan = document.createElement('span');
+                pctSpan.style.cssText = 'color:' + color + ';font-weight:700;';
+                pctSpan.textContent = (s.net > 0 ? '+' : '') + (s.return_pct).toFixed(1) + '%';
+                line.appendChild(pctSpan);
                 scenDiv.appendChild(line);
             });
 
             if (synthInfo.high_strike && synthInfo.low_strike) {
                 var range = document.createElement('div');
                 range.style.cssText = 'margin-top:4px;color:var(--arb-muted);font-style:italic;';
-                range.textContent = 'Range: $' + synthInfo.low_strike.toLocaleString() + ' - $' + synthInfo.high_strike.toLocaleString();
+                var isCrypto = synthInfo.type === 'range_synthetic' || synthInfo.type === 'range_vs_directional';
+                var prefix = isCrypto ? '$' : '';
+                range.textContent = 'Thresholds: ' + prefix + synthInfo.low_strike.toLocaleString() + ' - ' + prefix + synthInfo.high_strike.toLocaleString();
                 scenDiv.appendChild(range);
             }
             tradeEl.appendChild(scenDiv);

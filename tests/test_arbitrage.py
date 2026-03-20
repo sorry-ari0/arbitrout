@@ -322,6 +322,54 @@ class TestConfidenceScoring:
         assert opps[0].confidence == "high"
 
 
+class TestCrossThresholdSynthetics:
+    """Tests for cross-threshold synthetic derivative detection."""
+
+    def test_corners_different_thresholds_detected_as_synthetic(self):
+        """7+ corners and 9+ corners should create a synthetic, not be filtered."""
+        ev_a = _make_event("polymarket", "p1", "Will Team A have 7 or more total corners?", yes=0.245, no=0.755)
+        ev_b = _make_event("limitless", "l1", "Will Team A have 9 or more total corners?", yes=0.805, no=0.196)
+        matched = _make_matched([ev_a, ev_b], "Team A corners")
+        opps = find_arbitrage([matched])
+        assert len(opps) == 1
+        opp = opps[0]
+        assert opp.is_synthetic
+        assert opp.synthetic_info.get("type") == "cross_threshold"
+        # All scenarios win (nested thresholds)
+        assert opp.synthetic_info.get("loss_conditions", 1) == 0
+
+    def test_corners_guaranteed_profit_all_scenarios(self):
+        """Cross-threshold corners bet should win in all scenarios."""
+        ev_a = _make_event("polymarket", "p1", "Will Team A have 7 or more total corners?", yes=0.25, no=0.75)
+        ev_b = _make_event("limitless", "l1", "Will Team A have 9 or more total corners?", yes=0.80, no=0.20)
+        matched = _make_matched([ev_a, ev_b], "Team A corners")
+        opps = find_arbitrage([matched])
+        assert len(opps) == 1
+        opp = opps[0]
+        scenarios = opp.synthetic_info.get("scenarios", {})
+        # Every scenario should have positive net
+        for name, s in scenarios.items():
+            assert s["net"] > 0, f"Scenario {name} has negative net: {s['net']}"
+
+    def test_approval_rating_different_thresholds(self):
+        """43.5% or higher vs 45% or higher should create a synthetic."""
+        ev_a = _make_event("kalshi", "k1", "Approval rating 43.5% or higher", yes=0.09, no=0.89)
+        ev_b = _make_event("predictit", "pi1", "Approval rating 45% or higher", yes=0.80, no=0.21)
+        matched = _make_matched([ev_a, ev_b], "Approval rating")
+        opps = find_arbitrage([matched])
+        assert len(opps) == 1
+        assert opps[0].is_synthetic
+
+    def test_same_threshold_not_synthetic(self):
+        """Same threshold should be pure arb, not synthetic."""
+        ev_a = _make_event("polymarket", "p1", "Will Team A have 7 or more corners?", yes=0.40, no=0.65)
+        ev_b = _make_event("kalshi", "k1", "Will Team A have 7 or more corners?", yes=0.50, no=0.55)
+        matched = _make_matched([ev_a, ev_b], "Team A 7 corners")
+        opps = find_arbitrage([matched])
+        assert len(opps) == 1
+        assert not opps[0].is_synthetic
+
+
 class TestDeduplication:
     """Tests for opportunity deduplication."""
 
