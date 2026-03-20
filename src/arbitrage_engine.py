@@ -556,6 +556,10 @@ def find_arbitrage(matched: list[MatchedEvent],
 
             confidence = _match_confidence(effective_profit_pct)
 
+            # Drop very_low confidence — almost certainly false matches
+            if confidence == "very_low":
+                continue
+
             opportunities.append(ArbitrageOpportunity(
                 matched_event=match,
                 buy_yes_platform=best_yes_market.platform,
@@ -590,6 +594,10 @@ def find_arbitrage(matched: list[MatchedEvent],
                 continue
 
             confidence = _match_confidence(profit_pct)
+
+            # Drop very_low confidence — almost certainly false matches
+            if confidence == "very_low":
+                continue
 
             opportunities.append(ArbitrageOpportunity(
                 matched_event=match,

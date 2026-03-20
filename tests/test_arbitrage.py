@@ -265,17 +265,14 @@ class TestFeeAdjustedProfit:
 
     def test_predictit_profit_tax_modeled(self):
         """PredictIt 10% profit tax + 5% withdrawal should reduce net payout."""
-        # Buy YES on PI at 1c, NO on Kalshi at 9c = 90% gross spread
-        # PI payout: (1.0 - 0.10*0.99) * 0.95 = 0.901 * 0.95 ≈ 0.856
-        ev_a = _make_event("predictit", "pi1", "CA Gov: Padilla", yes=0.01, no=0.99)
-        ev_b = _make_event("kalshi", "k1", "CA Gov: Padilla", yes=0.90, no=0.09)
+        # Use 15% gross spread (PI YES=0.30 + Kalshi NO=0.55 = 0.85)
+        ev_a = _make_event("predictit", "pi1", "Event X", yes=0.30, no=0.70)
+        ev_b = _make_event("kalshi", "k1", "Event X", yes=0.60, no=0.55)
         matched = _make_matched([ev_a, ev_b])
         opps = find_arbitrage([matched])
         # Should exist but net < gross due to PI profit tax + withdrawal fee
         assert len(opps) >= 1
         assert opps[0].net_profit_pct < opps[0].profit_pct
-        # PI payout ≈ 0.856, total cost ≈ 0.101, net ≈ 0.755 = 75.5%
-        assert opps[0].net_profit_pct < 80  # significantly reduced from 90%
 
     def test_kalshi_1pct_spread_with_predictit_filtered(self):
         """1% spread Kalshi+PredictIt should be negative after fees."""
@@ -298,14 +295,13 @@ class TestFeeAdjustedProfit:
 class TestConfidenceScoring:
     """Tests for match confidence scoring."""
 
-    def test_huge_spread_gets_very_low_confidence(self):
-        """91% spread = almost certainly a false match."""
+    def test_huge_spread_filtered_as_false_match(self):
+        """91% spread = almost certainly a false match, should be dropped entirely."""
         ev_a = _make_event("polymarket", "p1", "WV Senate: Republican", yes=0.015, no=0.985)
         ev_b = _make_event("predictit", "pi1", "WV Senate: Republican", yes=0.95, no=0.07)
         matched = _make_matched([ev_a, ev_b])
         opps = find_arbitrage([matched])
-        for opp in opps:
-            assert opp.confidence == "very_low"
+        assert len(opps) == 0  # Filtered out as very_low confidence
 
     def test_moderate_spread_gets_medium_confidence(self):
         """16% spread gets medium confidence."""
