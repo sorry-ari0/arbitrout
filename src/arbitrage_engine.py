@@ -7,6 +7,7 @@ Supports two types of opportunities:
 """
 import json
 import logging
+import re
 import time
 from pathlib import Path
 import asyncio
@@ -91,34 +92,83 @@ def _match_confidence(profit_pct: float) -> str:
 
 
 # ============================================================
+# GENERAL THRESHOLD EXTRACTION
+# ============================================================
+_THRESHOLD_PATTERNS = [
+    # "7 or more corners", "43.5% or higher", "10 or more touchdowns"
+    (r'(\d+(?:\.\d+)?)\s*%?\s*(?:or\s+(?:more|higher|greater|above))', "above"),
+    # "fewer than 7", "under 43.5%", "less than 10"
+    (r'(?:fewer|less|under)\s+(?:than\s+)?(\d+(?:\.\d+)?)\s*%?', "below"),
+    # "at least 7", "minimum 7"
+    (r'(?:at\s+least|minimum)\s+(\d+(?:\.\d+)?)\s*%?', "above"),
+    # "over 7.5", "above 43.5%"
+    (r'(?:over|above)\s+(\d+(?:\.\d+)?)\s*%?', "above"),
+    # "below 7.5", "under 43.5%"
+    (r'(?:below|under)\s+(\d+(?:\.\d+)?)\s*%?', "below"),
+]
+
+
+def _extract_threshold(title: str) -> dict:
+    """Extract a numeric threshold from any market title.
+
+    Handles sports ("7 or more corners"), ratings ("43.5% or higher"),
+    and other threshold-based markets. Crypto targets are handled by
+    _extract_crypto() and take priority.
+
+    Returns {"value": float|None, "direction": "above"|"below"|None}
+    """
+    lower = title.lower()
+    for pattern, direction in _THRESHOLD_PATTERNS:
+        m = re.search(pattern, lower)
+        if m:
+            try:
+                return {"value": float(m.group(1)), "direction": direction}
+            except (ValueError, IndexError):
+                pass
+    return {"value": None, "direction": None}
+
+
+# ============================================================
 # ARBITRAGE CALCULATOR
 # ============================================================
 def _markets_have_same_target(markets: list[NormalizedEvent]) -> bool:
-    """Check if all markets in a group target the same crypto price and type.
+    """Check if all markets in a group target the same threshold.
 
     Returns False (= synthetic) when:
-    - Price targets differ by >2%
+    - Crypto price targets differ by >2%
     - Market types differ (e.g., "between $74K-$76K" vs "above $74K")
+    - Non-crypto numeric thresholds differ (e.g., "7+ corners" vs "9+ corners")
     """
+    # --- Check crypto targets first ---
     cryptos = []
     for m in markets:
         crypto = _extract_crypto(m.title)
         if crypto["price"]:
             cryptos.append(crypto)
-    if len(cryptos) < 2:
-        return True  # Can't tell, assume same
-
-    # Check if any markets are range ("between") vs directional ("above"/"below")
-    directions = set(c.get("direction") for c in cryptos if c.get("direction"))
-    if "between" in directions and directions - {"between"}:
-        return False  # Mix of range and directional = synthetic
-
-    # All prices within 2% of each other = same target
-    prices = [c["price"] for c in cryptos]
-    lo, hi = min(prices), max(prices)
-    if hi == 0:
+    if len(cryptos) >= 2:
+        directions = set(c.get("direction") for c in cryptos if c.get("direction"))
+        if "between" in directions and directions - {"between"}:
+            return False
+        prices = [c["price"] for c in cryptos]
+        lo, hi = min(prices), max(prices)
+        if hi > 0 and (lo / hi) < 0.98:
+            return False
         return True
-    return (lo / hi) >= 0.98
+
+    # --- Check general numeric thresholds ---
+    thresholds = []
+    for m in markets:
+        t = _extract_threshold(m.title)
+        if t["value"] is not None:
+            thresholds.append(t)
+    if len(thresholds) >= 2:
+        values = [t["value"] for t in thresholds]
+        lo, hi = min(values), max(values)
+        if hi > 0 and lo != hi:
+            # Different thresholds detected (e.g., 7 vs 9 corners)
+            return False
+
+    return True  # Can't detect difference, assume same
 
 
 def _build_range_synthetic_info(yes_market: NormalizedEvent,
@@ -485,6 +535,146 @@ def _build_synthetic_info(yes_market: NormalizedEvent,
     }
 
 
+def _build_threshold_synthetic_info(yes_market: NormalizedEvent,
+                                     no_market: NormalizedEvent) -> dict | None:
+    """Build synthetic info for non-crypto threshold-based markets.
+
+    Handles cases like:
+    - BUY YES "7+ corners" + BUY NO "9+ corners"
+    - BUY YES "43.5% approval or higher" + BUY NO "45% approval or higher"
+
+    For nested "above" thresholds (YES_threshold <= NO_threshold):
+      All scenarios are profitable — at least one leg always wins.
+      This is a guaranteed cross-threshold arbitrage with a bonus zone.
+
+    Scenarios:
+      value >= high_threshold: YES wins, NO loses → $1 payout
+      low_threshold <= value < high_threshold: BOTH win → $2 payout (bonus!)
+      value < low_threshold: YES loses, NO wins → $1 payout
+    """
+    yes_t = _extract_threshold(yes_market.title)
+    no_t = _extract_threshold(no_market.title)
+
+    if yes_t["value"] is None or no_t["value"] is None:
+        return None
+    if yes_t["value"] == no_t["value"]:
+        return None  # Same threshold, not a synthetic
+
+    yes_val = yes_t["value"]
+    no_val = no_t["value"]
+    yes_dir = yes_t["direction"] or "above"
+    no_dir = no_t["direction"] or "above"
+
+    yes_cost = yes_market.yes_price
+    no_cost = no_market.no_price
+    total_cost = yes_cost + no_cost
+
+    if total_cost >= 1.0:
+        return None
+
+    # Determine high and low thresholds
+    # BUY YES on lower threshold + BUY NO on higher threshold = guaranteed
+    # because at least one leg always covers the outcome
+    if yes_dir == "above" and no_dir == "above":
+        low_strike = min(yes_val, no_val)
+        high_strike = max(yes_val, no_val)
+
+        # Verify we're buying YES on lower and NO on higher
+        # YES "7+" wins when >= 7; NO "9+" wins when < 9
+        if yes_val <= no_val:
+            # Correct: YES covers low, NO covers high
+            pass
+        else:
+            # Reversed: YES is higher threshold than NO
+            # YES "9+" wins when >= 9; NO "7+" wins when < 7
+            # Gap between 7 and 9 where both lose!
+            # This is a synthetic with loss zone
+            pass
+
+        win_return_pct = round((1.0 - total_cost) / total_cost * 100, 1) if total_cost > 0 else 0
+        bonus_return_pct = round((2.0 - total_cost) / total_cost * 100, 1) if total_cost > 0 else 0
+
+        if yes_val <= no_val:
+            # Guaranteed: all scenarios win
+            scenarios = {
+                "above_high": {
+                    "condition": f"Value >= {high_strike}",
+                    "yes_pays": 1.0, "no_pays": 0.0,
+                    "net": round(1.0 - total_cost, 4),
+                    "return_pct": win_return_pct,
+                },
+                "between": {
+                    "condition": f"{low_strike} <= Value < {high_strike}",
+                    "yes_pays": 1.0, "no_pays": 1.0,
+                    "net": round(2.0 - total_cost, 4),
+                    "return_pct": bonus_return_pct,
+                },
+                "below_low": {
+                    "condition": f"Value < {low_strike}",
+                    "yes_pays": 0.0, "no_pays": 1.0,
+                    "net": round(1.0 - total_cost, 4),
+                    "return_pct": win_return_pct,
+                },
+            }
+            win_count = 3
+            loss_count = 0
+            loss_prob = 0.0
+        else:
+            # Gap zone: YES needs >= high, NO needs < low
+            scenarios = {
+                "above_high": {
+                    "condition": f"Value >= {high_strike}",
+                    "yes_pays": 1.0, "no_pays": 0.0,
+                    "net": round(1.0 - total_cost, 4),
+                    "return_pct": win_return_pct,
+                },
+                "in_gap": {
+                    "condition": f"{low_strike} <= Value < {high_strike}",
+                    "yes_pays": 0.0, "no_pays": 0.0,
+                    "net": round(-total_cost, 4),
+                    "return_pct": -100.0,
+                },
+                "below_low": {
+                    "condition": f"Value < {low_strike}",
+                    "yes_pays": 0.0, "no_pays": 1.0,
+                    "net": round(1.0 - total_cost, 4),
+                    "return_pct": win_return_pct,
+                },
+            }
+            win_count = 2
+            loss_count = 1
+            loss_prob = max(0, 1.0 - yes_cost - no_cost)
+            if loss_prob > 0.60:
+                return None
+    else:
+        # Mixed directions or "below" — use general scenario analysis
+        return None
+
+    gap = abs(high_strike - low_strike)
+    avg = (high_strike + low_strike) / 2
+    gap_pct = gap / avg if avg > 0 else 0
+
+    return {
+        "type": "cross_threshold",
+        "high_strike": high_strike,
+        "low_strike": low_strike,
+        "yes_target": yes_val,
+        "no_target": no_val,
+        "yes_direction": yes_dir,
+        "no_direction": no_dir,
+        "yes_market_type": "threshold",
+        "no_market_type": "threshold",
+        "total_cost": round(total_cost, 4),
+        "scenarios": scenarios,
+        "win_conditions": win_count,
+        "loss_conditions": loss_count,
+        "loss_probability": round(loss_prob, 3),
+        "gap_pct": round(gap_pct * 100, 1),
+        "yes_price_range": None,
+        "no_price_range": None,
+    }
+
+
 def find_arbitrage(matched: list[MatchedEvent],
                    min_spread: float = 0.0,
                    min_volume: int = 0) -> list[ArbitrageOpportunity]:
@@ -530,15 +720,34 @@ def find_arbitrage(matched: list[MatchedEvent],
         total_cost = best_yes_market.yes_price + best_no_market.no_price
 
         if is_synthetic:
-            # Validate the synthetic — returns None if bad pairing
+            # Try crypto-based synthetic first, then general threshold-based
             synthetic_info = _build_synthetic_info(best_yes_market, best_no_market)
             if synthetic_info is None:
-                continue  # Invalid synthetic (same-direction, high loss prob, etc.)
+                synthetic_info = _build_threshold_synthetic_info(best_yes_market, best_no_market)
+            if synthetic_info is None:
+                # Try all cross-platform pairs to find a valid combination
+                found = False
+                for ym in markets:
+                    for nm in markets:
+                        if ym.platform == nm.platform:
+                            continue
+                        si = _build_synthetic_info(ym, nm)
+                        if si is None:
+                            si = _build_threshold_synthetic_info(ym, nm)
+                        if si is not None:
+                            best_yes_market = ym
+                            best_no_market = nm
+                            synthetic_info = si
+                            total_cost = ym.yes_price + nm.no_price
+                            found = True
+                            break
+                    if found:
+                        break
+                if not found:
+                    continue
 
             spread = 1.0 - total_cost
-            # Discount by win probability (win_conditions / 3 scenarios)
-            win_ratio = synthetic_info.get("win_conditions", 2) / 3.0
-            # Further discount by loss probability
+            # Discount by win probability
             loss_prob = synthetic_info.get("loss_probability", 0.33)
             effective_profit_pct = spread * 100.0 * (1.0 - loss_prob)
             if effective_profit_pct < min_spread * 100:
@@ -549,16 +758,13 @@ def find_arbitrage(matched: list[MatchedEvent],
                 best_yes_market.yes_price, best_no_market.no_price,
                 best_yes_market.platform, best_no_market.platform,
             )
-            # Apply same loss probability discount to net profit
             net_effective = net_pct * (1.0 - loss_prob) if net_pct > 0 else net_pct
             if net_effective <= 0:
                 continue
 
+            # Synthetics use their own rejection criteria (loss prob, scenarios),
+            # so don't apply the confidence filter here
             confidence = _match_confidence(effective_profit_pct)
-
-            # Drop very_low confidence — almost certainly false matches
-            if confidence == "very_low":
-                continue
 
             opportunities.append(ArbitrageOpportunity(
                 matched_event=match,
