@@ -247,6 +247,19 @@ class AutoTrader:
             except Exception as e:
                 logger.warning("Auto trader: multi-outcome scan failed: %s", e)
 
+        # Merge portfolio NO opportunities
+        if self.scanner:
+            try:
+                pno_opps = await self.scanner.scan_portfolio_no()
+                for pno in pno_opps:
+                    # Portfolio NO is near-guaranteed profit — high priority
+                    pno["_score"] = pno.get("profit_pct", 0) * 4.0  # 4x premium
+                    opportunities.append(pno)
+                if pno_opps:
+                    logger.info("Auto trader: merged %d portfolio NO opportunities", len(pno_opps))
+            except Exception as e:
+                logger.warning("Auto trader: portfolio NO scan failed: %s", e)
+
         # Merge political synthetic opportunities
         if self._political_analyzer:
             political_opps = self._political_analyzer.get_opportunities()
@@ -586,6 +599,76 @@ class AutoTrader:
                                 days_to_expiry=days_to_expiry, volume=opp.get("volume", 0))
                 except Exception as e:
                     logger.warning("Auto trader: multi-outcome trade failed: %s", e)
+                    if self.dlog:
+                        self.dlog.log_trade_failed(opp_title, str(e))
+                continue
+
+            # Portfolio NO: buy NO on all non-favorites in multi-outcome events
+            if opp.get("opportunity_type") == "portfolio_no":
+                try:
+                    pkg = create_package(f"Auto: {trade_title[:60]}", "portfolio_no")
+                except ValueError:
+                    continue
+
+                no_targets = opp.get("no_targets", [])
+                if not no_targets:
+                    continue
+
+                # Allocate proportionally to each NO price
+                total_no_cost = sum(o.get("no_price", 0) for o in no_targets)
+                if total_no_cost <= 0:
+                    continue
+
+                for target in no_targets:
+                    no_price = target.get("no_price", 0)
+                    if no_price <= 0:
+                        continue
+                    leg_cost = round(trade_size * (no_price / total_no_cost), 2)
+                    leg_cost = max(MIN_TRADE_SIZE, leg_cost)
+
+                    pkg["legs"].append(create_leg(
+                        platform="polymarket",
+                        leg_type="prediction_no",
+                        asset_id=f"{target['condition_id']}:NO",
+                        asset_label=f"NO: {target.get('title', '?')[:40]}",
+                        entry_price=no_price,
+                        cost=leg_cost,
+                        expiry=opp.get("expiry", "2026-12-31")[:10],
+                    ))
+
+                # Near-guaranteed profit — only exit on safety or if overround collapses
+                pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -10}))
+                pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 15}))
+
+                if not pkg["legs"]:
+                    self._trades_skipped += 1
+                    continue
+
+                pkg["_use_limit_orders"] = True
+                pkg_name = pkg.get("name", opp_title)
+                try:
+                    result = await self.pm.execute_package(pkg)
+                    if result.get("success"):
+                        trades_this_cycle += 1
+                        self._trades_opened += 1
+                        self._daily_trade_count += 1
+                        remaining_budget -= trade_size
+                        for leg in pkg.get("legs", []):
+                            cid = leg.get("asset_id", "").split(":")[0]
+                            if cid:
+                                open_market_ids.add(cid)
+                        logger.info("Auto trader OPENED portfolio NO: %s (%d NOs, profit=%.2f%%)",
+                                    pkg_name, len(no_targets), opp.get("profit_pct", 0))
+                        if self.dlog:
+                            self.dlog.log_trade_opened(
+                                pkg_id=pkg.get("id", ""), title=pkg_name,
+                                strategy="portfolio_no",
+                                side="ALL_NO", price=round(total_no_cost, 4),
+                                size=trade_size, score=score, spread_pct=spread_pct,
+                                conviction=0.95,  # Near-guaranteed
+                                days_to_expiry=days_to_expiry, volume=opp.get("volume", 0))
+                except Exception as e:
+                    logger.warning("Auto trader: portfolio NO trade failed: %s", e)
                     if self.dlog:
                         self.dlog.log_trade_failed(opp_title, str(e))
                 continue
