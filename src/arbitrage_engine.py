@@ -22,6 +22,75 @@ DATA_DIR = Path(__file__).parent / "data" / "arbitrage"
 
 
 # ============================================================
+# PLATFORM FEE RATES (for opportunity filtering)
+# ============================================================
+# Taker fees (market orders) applied at entry
+_TAKER_FEES = {
+    "polymarket": 0.02,
+    "kalshi": 0.01,
+    "predictit": 0.0,       # No entry fee; profit taxed at resolution
+    "limitless": 0.01,
+    "robinhood": 0.0,
+    "coinbase_spot": 0.006,
+    "kraken": 0.0026,
+}
+_DEFAULT_TAKER_FEE = 0.02
+_PREDICTIT_PROFIT_TAX = 0.10  # 10% of profits at contract resolution
+_PREDICTIT_WITHDRAWAL_FEE = 0.05  # 5% of withdrawal amount
+
+
+def _compute_fee_adjusted_profit(yes_price: float, no_price: float,
+                                  yes_platform: str, no_platform: str) -> tuple[float, float]:
+    """Compute guaranteed profit after all platform fees.
+
+    Returns (net_profit_pct, total_cost_with_fees).
+
+    net_profit_pct uses the same basis as profit_pct (= net_spread * 100),
+    so 15.4 means 15.4 cents net profit per $1 payout.
+
+    For PredictIt: 10% tax on profits + 5% withdrawal fee.
+    For others: taker_fee_rate * price at entry.
+    """
+    yes_fee = yes_price * _TAKER_FEES.get(yes_platform, _DEFAULT_TAKER_FEE)
+    no_fee = no_price * _TAKER_FEES.get(no_platform, _DEFAULT_TAKER_FEE)
+    total_cost = yes_price + no_price + yes_fee + no_fee
+
+    # Resolution payouts — PredictIt takes 10% of profits + 5% of withdrawal
+    yes_payout = 1.0
+    if yes_platform == "predictit":
+        after_tax = 1.0 - _PREDICTIT_PROFIT_TAX * (1.0 - yes_price)
+        yes_payout = after_tax * (1.0 - _PREDICTIT_WITHDRAWAL_FEE)
+    no_payout = 1.0
+    if no_platform == "predictit":
+        after_tax = 1.0 - _PREDICTIT_PROFIT_TAX * (1.0 - no_price)
+        no_payout = after_tax * (1.0 - _PREDICTIT_WITHDRAWAL_FEE)
+
+    # Guaranteed profit = worst-case scenario
+    worst_payout = min(yes_payout, no_payout)
+    worst_profit = worst_payout - total_cost
+    # Use spread basis (same as profit_pct): net profit per $1 payout * 100
+    net_pct = worst_profit * 100
+
+    return net_pct, total_cost
+
+
+def _match_confidence(profit_pct: float) -> str:
+    """Estimate confidence that a detected spread is a real arbitrage.
+
+    Huge spreads (>30%) on prediction markets almost always indicate
+    a false match (different contracts matched as the same event),
+    not a genuine arbitrage opportunity.
+    """
+    if profit_pct > 50:
+        return "very_low"
+    if profit_pct > 30:
+        return "low"
+    if profit_pct > 15:
+        return "medium"
+    return "high"
+
+
+# ============================================================
 # ARBITRAGE CALCULATOR
 # ============================================================
 def _markets_have_same_target(markets: list[NormalizedEvent]) -> bool:
@@ -475,6 +544,18 @@ def find_arbitrage(matched: list[MatchedEvent],
             if effective_profit_pct < min_spread * 100:
                 continue
 
+            # Fee-adjusted profit for synthetics
+            net_pct, _ = _compute_fee_adjusted_profit(
+                best_yes_market.yes_price, best_no_market.no_price,
+                best_yes_market.platform, best_no_market.platform,
+            )
+            # Apply same loss probability discount to net profit
+            net_effective = net_pct * (1.0 - loss_prob) if net_pct > 0 else net_pct
+            if net_effective <= 0:
+                continue
+
+            confidence = _match_confidence(effective_profit_pct)
+
             opportunities.append(ArbitrageOpportunity(
                 matched_event=match,
                 buy_yes_platform=best_yes_market.platform,
@@ -488,6 +569,8 @@ def find_arbitrage(matched: list[MatchedEvent],
                 combined_volume=combined_vol,
                 is_synthetic=True,
                 synthetic_info=synthetic_info,
+                net_profit_pct=round(net_effective, 2),
+                confidence=confidence,
             ))
         else:
             # Pure arb: guaranteed profit if spread > 0
@@ -496,6 +579,17 @@ def find_arbitrage(matched: list[MatchedEvent],
 
             if spread < min_spread:
                 continue
+
+            # Fee-adjusted profit (guaranteed after all platform fees)
+            net_pct, _ = _compute_fee_adjusted_profit(
+                best_yes_market.yes_price, best_no_market.no_price,
+                best_yes_market.platform, best_no_market.platform,
+            )
+            # Skip if guaranteed loss after fees
+            if net_pct <= 0:
+                continue
+
+            confidence = _match_confidence(profit_pct)
 
             opportunities.append(ArbitrageOpportunity(
                 matched_event=match,
@@ -509,7 +603,19 @@ def find_arbitrage(matched: list[MatchedEvent],
                 profit_pct=profit_pct,
                 combined_volume=combined_vol,
                 is_synthetic=False,
+                net_profit_pct=round(net_pct, 2),
+                confidence=confidence,
             ))
+
+    # Deduplicate by (yes_event_id, no_event_id) pair
+    seen: set[tuple[str, str]] = set()
+    deduped: list[ArbitrageOpportunity] = []
+    for opp in opportunities:
+        key = (opp.buy_yes_event_id, opp.buy_no_event_id)
+        if key not in seen:
+            seen.add(key)
+            deduped.append(opp)
+    opportunities = deduped
 
     opportunities.sort(key=lambda o: o.profit_pct, reverse=True)
     return opportunities

@@ -78,6 +78,8 @@ class ArbitrageOpportunity:
     buy_no_event_id: str = ""   # event_id of the NO market
     is_synthetic: bool = False          # True if markets have different price targets
     synthetic_info: dict = field(default_factory=dict)  # price targets, scenarios, etc.
+    net_profit_pct: float = 0.0       # Guaranteed profit % after all platform fees
+    confidence: str = "medium"         # "high", "medium", "low", "very_low"
 
     @property
     def yes_allocation_pct(self) -> float:
@@ -106,6 +108,8 @@ class ArbitrageOpportunity:
             "yes_allocation_pct": self.yes_allocation_pct,
             "no_allocation_pct": self.no_allocation_pct,
             "is_synthetic": self.is_synthetic,
+            "net_profit_pct": round(self.net_profit_pct, 2),
+            "confidence": self.confidence,
         }
         if self.synthetic_info:
             d["synthetic_info"] = self.synthetic_info

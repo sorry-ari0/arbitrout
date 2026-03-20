@@ -226,3 +226,116 @@ class TestArbitrageOpportunity:
         assert "profit_pct" in d
         assert "yes_allocation_pct" in d
         assert "no_allocation_pct" in d
+        assert "net_profit_pct" in d
+        assert "confidence" in d
+
+    def test_to_dict_confidence_is_valid(self):
+        """confidence should be one of the valid levels."""
+        ev_a = _make_event("polymarket", "p1", "BTC > 100k", yes=0.40, no=0.65)
+        ev_b = _make_event("kalshi", "k1", "BTC > 100k", yes=0.50, no=0.55)
+        matched = _make_matched([ev_a, ev_b])
+        opps = find_arbitrage([matched])
+        d = opps[0].to_dict()
+        assert d["confidence"] in ("high", "medium", "low", "very_low")
+
+
+class TestFeeAdjustedProfit:
+    """Tests for fee-aware arbitrage filtering."""
+
+    def test_small_spread_with_predictit_filtered_out(self):
+        """0.6% spread with PredictIt NO at 99c should be filtered (fees > profit)."""
+        ev_a = _make_event("polymarket", "p1", "Peru Election: Forsyth", yes=0.004, no=0.996)
+        ev_b = _make_event("predictit", "pi1", "Peru Election: Forsyth", yes=0.01, no=0.99)
+        matched = _make_matched([ev_a, ev_b])
+        opps = find_arbitrage([matched])
+        # After PM 2% taker + PI 10% profit tax, this is a loss
+        assert len(opps) == 0
+
+    def test_large_spread_survives_fees(self):
+        """16.8% spread with Polymarket+Limitless should survive after fees."""
+        ev_a = _make_event("polymarket", "p1", "Corners 7+", yes=0.536, no=0.464)
+        ev_b = _make_event("limitless", "l1", "Corners 7+", yes=0.704, no=0.296)
+        matched = _make_matched([ev_a, ev_b])
+        opps = find_arbitrage([matched])
+        assert len(opps) == 1
+        opp = opps[0]
+        # Net profit should be less than gross but still positive
+        assert opp.net_profit_pct > 0
+        assert opp.net_profit_pct < opp.profit_pct
+
+    def test_predictit_profit_tax_modeled(self):
+        """PredictIt 10% profit tax + 5% withdrawal should reduce net payout."""
+        # Buy YES on PI at 1c, NO on Kalshi at 9c = 90% gross spread
+        # PI payout: (1.0 - 0.10*0.99) * 0.95 = 0.901 * 0.95 ≈ 0.856
+        ev_a = _make_event("predictit", "pi1", "CA Gov: Padilla", yes=0.01, no=0.99)
+        ev_b = _make_event("kalshi", "k1", "CA Gov: Padilla", yes=0.90, no=0.09)
+        matched = _make_matched([ev_a, ev_b])
+        opps = find_arbitrage([matched])
+        # Should exist but net < gross due to PI profit tax + withdrawal fee
+        assert len(opps) >= 1
+        assert opps[0].net_profit_pct < opps[0].profit_pct
+        # PI payout ≈ 0.856, total cost ≈ 0.101, net ≈ 0.755 = 75.5%
+        assert opps[0].net_profit_pct < 80  # significantly reduced from 90%
+
+    def test_kalshi_1pct_spread_with_predictit_filtered(self):
+        """1% spread Kalshi+PredictIt should be negative after fees."""
+        ev_a = _make_event("predictit", "pi1", "Cabinet: Loeffler", yes=0.01, no=0.99)
+        ev_b = _make_event("kalshi", "k1", "Cabinet: Loeffler", yes=0.99, no=0.98)
+        matched = _make_matched([ev_a, ev_b])
+        opps = find_arbitrage([matched])
+        assert len(opps) == 0  # Filtered out
+
+    def test_2pct_spread_with_predictit_no_filtered(self):
+        """2.3% spread with PredictIt NO at 95c should be filtered."""
+        ev_a = _make_event("polymarket", "p1", "2028 Dem: Pritzker", yes=0.027, no=0.973)
+        ev_b = _make_event("predictit", "pi1", "2028 Dem: Pritzker", yes=0.06, no=0.95)
+        matched = _make_matched([ev_a, ev_b])
+        opps = find_arbitrage([matched])
+        # 2.3% gross - PI profit tax on 95c NO = loss
+        assert len(opps) == 0
+
+
+class TestConfidenceScoring:
+    """Tests for match confidence scoring."""
+
+    def test_huge_spread_gets_very_low_confidence(self):
+        """91% spread = almost certainly a false match."""
+        ev_a = _make_event("polymarket", "p1", "WV Senate: Republican", yes=0.015, no=0.985)
+        ev_b = _make_event("predictit", "pi1", "WV Senate: Republican", yes=0.95, no=0.07)
+        matched = _make_matched([ev_a, ev_b])
+        opps = find_arbitrage([matched])
+        for opp in opps:
+            assert opp.confidence == "very_low"
+
+    def test_moderate_spread_gets_medium_confidence(self):
+        """16% spread gets medium confidence."""
+        ev_a = _make_event("polymarket", "p1", "Corners 7+", yes=0.536, no=0.464)
+        ev_b = _make_event("limitless", "l1", "Corners 7+", yes=0.704, no=0.296)
+        matched = _make_matched([ev_a, ev_b])
+        opps = find_arbitrage([matched])
+        assert len(opps) == 1
+        assert opps[0].confidence == "medium"
+
+    def test_small_spread_gets_high_confidence(self):
+        """5% spread between two agreeing platforms = high confidence."""
+        ev_a = _make_event("polymarket", "p1", "BTC > 100k", yes=0.40, no=0.65)
+        ev_b = _make_event("kalshi", "k1", "BTC > 100k", yes=0.50, no=0.55)
+        matched = _make_matched([ev_a, ev_b])
+        opps = find_arbitrage([matched])
+        assert len(opps) == 1
+        assert opps[0].confidence == "high"
+
+
+class TestDeduplication:
+    """Tests for opportunity deduplication."""
+
+    def test_duplicate_event_ids_deduped(self):
+        """Same event_id pair should only appear once."""
+        ev_a = _make_event("polymarket", "p1", "Event X", yes=0.40, no=0.65)
+        ev_b = _make_event("kalshi", "k1", "Event X", yes=0.50, no=0.55)
+        match1 = _make_matched([ev_a, ev_b], "Event X")
+        match1.match_id = "m1"
+        match2 = _make_matched([ev_a, ev_b], "Event X duplicate")
+        match2.match_id = "m2"
+        opps = find_arbitrage([match1, match2])
+        assert len(opps) == 1
