@@ -495,6 +495,7 @@ class AutoTrader:
                     self._trades_skipped += 1
                     continue
 
+                pkg["_use_limit_orders"] = True
                 pkg_name = pkg.get("name", opp_title)
                 try:
                     result = await self.pm.execute_package(pkg)
@@ -556,6 +557,7 @@ class AutoTrader:
                     self._trades_skipped += 1
                     continue
 
+                pkg["_use_limit_orders"] = True
                 pkg_name = pkg.get("name", opp_title)
                 bet_side = "POLITICAL"
                 bet_conviction = 0.0

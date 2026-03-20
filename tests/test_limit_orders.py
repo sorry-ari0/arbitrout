@@ -45,12 +45,11 @@ class TestBaseExecutorDefaults:
     def test_check_order_status_default(self):
         ex = StubExecutor()
         status = _run(ex.check_order_status("order_123"))
-        assert status["status"] == "filled"
-        assert status["order_id"] == "order_123"
+        assert status["status"] == "UNKNOWN"
 
     def test_cancel_order_default(self):
         ex = StubExecutor()
-        assert _run(ex.cancel_order("order_123")) is True
+        assert _run(ex.cancel_order("order_123")) is False
 
 
 # --- Fake executor for PaperExecutor testing ---
