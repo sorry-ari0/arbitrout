@@ -6,6 +6,13 @@ Strategy:
 - Maker orders: 0% fee + daily USDC rebates from Polymarket's maker program
 - Profit from bid-ask spread + rebate income
 
+Arbigab-inspired improvements:
+- Preemptive cancel: on every Binance tick, cancel exposed orders BEFORE adverse
+  price moves cause toxic fills (event-driven, not polled)
+- On-chain token merging: when both YES+NO fill, merge matched tokens back to
+  $1.00 USDC via ProxyWallet instead of waiting for market resolution
+- Multi-asset: works with BTC, ETH, SOL, XRP price feeds
+
 Eligible markets (maker rebates active as of Mar 2026):
 - 5-min crypto, 15-min crypto, 1H/4H/Daily/Weekly crypto
 - NCAAB, Serie A sports
@@ -14,6 +21,7 @@ Risk controls:
 - Inventory imbalance limits (max 70/30)
 - Auto-withdraw before resolution
 - Price circuit breaker on external feed divergence
+- Preemptive cancel on adverse tick moves
 """
 import asyncio
 import logging
@@ -33,6 +41,8 @@ MAX_CAPITAL_PER_MARKET = 500.0  # $500 max per market
 RESOLUTION_BUFFER_SECONDS = 7200  # Withdraw 2 hours before resolution
 PRICE_DIVERGENCE_HALT = 0.05    # Halt if external price diverges >5% from Polymarket
 STALE_QUOTE_SECONDS = 10.0     # Cancel quotes older than 10 seconds
+ADVERSE_MOVE_THRESHOLD = 0.003  # 0.3% adverse move triggers preemptive cancel
+MERGE_MIN_MATCHED_SHARES = 1.0  # Minimum matched shares to attempt on-chain merge
 
 
 @dataclass
@@ -42,6 +52,7 @@ class MarketState:
     slug: str
     title: str
     expiry: str
+    asset: str = "BTC"      # Which crypto asset this market tracks
     # Inventory
     yes_shares: float = 0.0
     no_shares: float = 0.0
@@ -52,10 +63,14 @@ class MarketState:
     no_order_id: str | None = None
     yes_order_price: float = 0.0
     no_order_price: float = 0.0
+    # Price at time of last quote — used for preemptive cancel
+    quote_ref_price: float = 0.0
     # Stats
     fills: int = 0
     total_spread_captured: float = 0.0
+    total_merged_profit: float = 0.0
     realized_pnl: float = 0.0
+    preemptive_cancels: int = 0
     # Timing
     last_quote_time: float = 0.0
     created_at: float = field(default_factory=time.time)
@@ -66,10 +81,13 @@ class MMStats:
     """Aggregate market maker statistics."""
     total_fills: int = 0
     total_spread_captured: float = 0.0
+    total_merged_profit: float = 0.0
     total_rebates: float = 0.0
     total_pnl: float = 0.0
     markets_active: int = 0
     quote_updates: int = 0
+    preemptive_cancels: int = 0
+    merges_completed: int = 0
     halts: int = 0
 
 
@@ -79,7 +97,13 @@ class MarketMaker:
     Runs as an independent async loop. Places maker limit orders on both
     YES and NO sides, profiting from the spread when both fill.
 
-    Uses BinancePriceFeed for fair price calculation on crypto markets.
+    Arbigab-inspired features:
+    - Preemptive cancel: registers on_tick callback with price feed and
+      instantly cancels exposed orders when Binance price moves adversely
+      (before toxic fills can happen)
+    - On-chain token merging: when matched YES+NO positions exist, merges
+      them back to $1.00 USDC instead of waiting for resolution
+    - Multi-asset: discovers and trades markets for all tracked assets
     """
 
     def __init__(self, price_feed: BinancePriceFeed, position_manager=None,
@@ -92,30 +116,101 @@ class MarketMaker:
         self._task: asyncio.Task | None = None
         self._markets: dict[str, MarketState] = {}  # condition_id -> MarketState
         self._halted = False
+        self._tick_callback_registered = False
+        # Pending cancel queue — populated by on_tick callback, drained by async loop
+        self._pending_cancels: list[tuple[str, str]] = []  # (condition_id, side)
 
     def start(self):
         if self._running:
             return
         self._running = True
+        # Register preemptive cancel callback
+        if not self._tick_callback_registered:
+            self.feed.on_tick(self._preemptive_cancel_check)
+            self._tick_callback_registered = True
         self._task = asyncio.ensure_future(self._loop())
         logger.info("Market maker started (capital=$%.2f)", self.total_capital)
 
     def stop(self):
         self._running = False
+        if self._tick_callback_registered:
+            self.feed.remove_on_tick(self._preemptive_cancel_check)
+            self._tick_callback_registered = False
         if self._task and not self._task.done():
             self._task.cancel()
-        logger.info("Market maker stopped — stats: %d fills, $%.2f spread captured, $%.2f P&L",
-                     self.stats.total_fills, self.stats.total_spread_captured, self.stats.total_pnl)
+        logger.info("Market maker stopped — stats: %d fills, $%.2f spread, %d preemptive cancels, $%.2f P&L",
+                     self.stats.total_fills, self.stats.total_spread_captured,
+                     self.stats.preemptive_cancels, self.stats.total_pnl)
+
+    # ============================================================
+    # PREEMPTIVE CANCEL (Arbigab-inspired)
+    # ============================================================
+
+    def _preemptive_cancel_check(self, asset: str, price: float, timestamp: float):
+        """Called on every Binance trade tick — checks if any exposed orders
+        need immediate cancellation due to adverse price movement.
+
+        This runs synchronously inline with the WebSocket handler for
+        minimum latency. Queues cancels for the async loop to execute.
+
+        Logic: If price moves >0.3% against an exposed order since it was
+        placed, queue it for immediate cancellation. An "exposed" order is
+        one where only one side (YES or NO) is active — the other hasn't
+        filled yet, leaving directional risk.
+        """
+        for condition_id, market in self._markets.items():
+            if market.asset != asset:
+                continue
+            if market.quote_ref_price <= 0:
+                continue
+
+            price_change_pct = (price - market.quote_ref_price) / market.quote_ref_price
+
+            # YES order exposed (NO not filled) — adverse = price dropping
+            if market.yes_order_id and not market.no_order_id:
+                if price_change_pct < -ADVERSE_MOVE_THRESHOLD:
+                    self._pending_cancels.append((condition_id, "YES"))
+                    market.preemptive_cancels += 1
+                    self.stats.preemptive_cancels += 1
+
+            # NO order exposed (YES not filled) — adverse = price rising
+            if market.no_order_id and not market.yes_order_id:
+                if price_change_pct > ADVERSE_MOVE_THRESHOLD:
+                    self._pending_cancels.append((condition_id, "NO"))
+                    market.preemptive_cancels += 1
+                    self.stats.preemptive_cancels += 1
+
+    async def _drain_pending_cancels(self):
+        """Execute any preemptive cancels queued by the tick callback."""
+        while self._pending_cancels:
+            condition_id, side = self._pending_cancels.pop(0)
+            market = self._markets.get(condition_id)
+            if not market:
+                continue
+
+            order_id = market.yes_order_id if side == "YES" else market.no_order_id
+            if order_id:
+                await self._cancel_order(order_id)
+                if side == "YES":
+                    market.yes_order_id = None
+                else:
+                    market.no_order_id = None
+                logger.info("MM preemptive cancel: %s %s order on %s (adverse move)",
+                            side, order_id[:12] if not order_id.startswith("paper_") else "paper",
+                            market.title[:30])
 
     def get_stats(self) -> dict:
         return {
             "total_capital": self.total_capital,
             "total_fills": self.stats.total_fills,
             "total_spread_captured": round(self.stats.total_spread_captured, 4),
+            "total_merged_profit": round(self.stats.total_merged_profit, 4),
             "total_rebates": round(self.stats.total_rebates, 4),
             "total_pnl": round(self.stats.total_pnl, 2),
             "markets_active": len(self._markets),
             "quote_updates": self.stats.quote_updates,
+            "preemptive_cancels": self.stats.preemptive_cancels,
+            "merges_completed": self.stats.merges_completed,
             "halted": self._halted,
             "markets": {cid: self._market_stats(m) for cid, m in self._markets.items()},
         }
@@ -123,10 +218,13 @@ class MarketMaker:
     def _market_stats(self, m: MarketState) -> dict:
         return {
             "title": m.title,
+            "asset": m.asset,
             "yes_shares": m.yes_shares,
             "no_shares": m.no_shares,
             "fills": m.fills,
             "spread_captured": round(m.total_spread_captured, 4),
+            "merged_profit": round(m.total_merged_profit, 4),
+            "preemptive_cancels": m.preemptive_cancels,
             "pnl": round(m.realized_pnl, 2),
             "inventory_ratio": round(m.yes_shares / max(1, m.yes_shares + m.no_shares), 2)
                 if (m.yes_shares + m.no_shares) > 0 else 0.5,
@@ -134,18 +232,21 @@ class MarketMaker:
 
     async def _loop(self):
         """Main market making loop."""
-        # Wait for price feed
+        # Wait for price feed to have data for any asset
         for _ in range(30):
-            if self.feed.price > 0:
+            if any(self.feed.get_price(a) > 0 for a in self.feed.active_assets):
                 break
             await asyncio.sleep(1)
 
-        if self.feed.price <= 0:
+        if not any(self.feed.get_price(a) > 0 for a in self.feed.active_assets):
             logger.error("Market maker: price feed has no data — aborting")
             return
 
         while self._running:
             try:
+                # Drain any preemptive cancels queued by tick callback
+                await self._drain_pending_cancels()
+
                 # Discover eligible markets if none configured
                 if not self._markets:
                     await self._discover_markets()
@@ -179,7 +280,7 @@ class MarketMaker:
 
                     await self._update_quotes(market)
 
-                # Check for fills
+                # Check for fills and attempt token merges
                 await self._check_fills()
 
                 self.stats.quote_updates += 1
@@ -194,15 +295,30 @@ class MarketMaker:
         # Clean shutdown: cancel all orders
         await self._cancel_all_orders()
 
+    def _detect_asset_from_title(self, title: str) -> str | None:
+        """Detect which crypto asset a market title refers to."""
+        t = title.lower()
+        asset_keywords = {
+            "BTC": ["btc", "bitcoin"],
+            "ETH": ["eth", "ethereum"],
+            "SOL": ["sol", "solana"],
+            "XRP": ["xrp", "ripple"],
+        }
+        for asset, keywords in asset_keywords.items():
+            if asset in [a.upper() for a in self.feed.active_assets]:
+                if any(kw in t for kw in keywords):
+                    return asset
+        return None
+
     async def _discover_markets(self):
         """Find eligible markets for market making.
 
         Targets: high-volume crypto markets with maker rebates.
+        Discovers markets for all assets tracked by the price feed.
         """
         try:
             import httpx
             async with httpx.AsyncClient(timeout=15) as client:
-                # Fetch active crypto markets sorted by volume
                 resp = await client.get(
                     "https://gamma-api.polymarket.com/markets",
                     params={
@@ -231,19 +347,16 @@ class MarketMaker:
                     slug = m.get("slug", "")
                     expiry = m.get("endDate", m.get("end_date_iso", ""))
 
-                    # Filter: only high-volume crypto markets
-                    if volume < 10000:
-                        continue
-                    if not condition_id:
+                    if volume < 10000 or not condition_id:
                         continue
 
                     # Skip 5-min markets (sniper handles those)
                     if "5m" in slug or "5-min" in title.lower():
                         continue
 
-                    # Check for BTC-related markets (our price feed is BTC)
-                    title_lower = title.lower()
-                    if not any(kw in title_lower for kw in ["btc", "bitcoin"]):
+                    # Match to an asset we have a price feed for
+                    asset = self._detect_asset_from_title(title)
+                    if not asset:
                         continue
 
                     self._markets[condition_id] = MarketState(
@@ -251,10 +364,11 @@ class MarketMaker:
                         slug=slug,
                         title=title,
                         expiry=expiry or "",
+                        asset=asset,
                     )
                     capital_allocated += MAX_CAPITAL_PER_MARKET
 
-                    if len(self._markets) >= 4:  # Max 4 markets
+                    if len(self._markets) >= 4:
                         break
 
                 logger.info("Market maker: discovered %d eligible markets", len(self._markets))
@@ -266,12 +380,13 @@ class MarketMaker:
         """Update maker limit orders for a market.
 
         Places YES bid and NO bid such that combined cost < $1.00.
+        Records reference price for preemptive cancel detection.
         """
-        if self.feed.is_stale:
+        if self.feed.is_asset_stale(market.asset):
             return
 
-        btc_price = self.feed.price
-        if btc_price <= 0:
+        asset_price = self.feed.get_price(market.asset)
+        if asset_price <= 0:
             return
 
         # Get current Polymarket price for this market
@@ -354,6 +469,8 @@ class MarketMaker:
             market.no_order_price = no_bid
 
         market.last_quote_time = time.time()
+        # Record reference price for preemptive cancel detection
+        market.quote_ref_price = asset_price
         logger.debug("MM quotes updated: %s YES@%.4f NO@%.4f (spread=%.2f%%)",
                       market.title[:30], yes_bid, no_bid, (1.0 - yes_bid - no_bid) * 100)
 
@@ -432,9 +549,12 @@ class MarketMaker:
             logger.debug("MM cancel order %s failed: %s", order_id[:12], e)
 
     async def _check_fills(self):
-        """Check if any maker orders have been filled."""
-        # In production, this would use CLOB WebSocket for fill notifications
-        # For now, we check order status via REST
+        """Check if any maker orders have been filled.
+
+        When matched YES+NO fills are detected, attempts on-chain token
+        merge to reclaim $1.00 USDC per matched pair immediately instead
+        of waiting for market resolution.
+        """
         for market in self._markets.values():
             for side, order_id in [("YES", market.yes_order_id), ("NO", market.no_order_id)]:
                 if not order_id or order_id.startswith("paper_"):
@@ -460,13 +580,18 @@ class MarketMaker:
                     # Check if we have matched fills (both sides filled)
                     if market.yes_shares > 0 and market.no_shares > 0:
                         matched = min(market.yes_shares, market.no_shares)
-                        spread = 1.0 - (market.yes_cost / market.yes_shares +
-                                        market.no_cost / market.no_shares)
+                        avg_yes = market.yes_cost / market.yes_shares if market.yes_shares > 0 else 0
+                        avg_no = market.no_cost / market.no_shares if market.no_shares > 0 else 0
+                        spread = 1.0 - (avg_yes + avg_no)
                         captured = matched * spread
                         market.total_spread_captured += captured
                         self.stats.total_spread_captured += captured
                         logger.info("MM fill matched: %s, %.2f shares, spread=%.4f, captured=$%.4f",
                                     market.title[:30], matched, spread, captured)
+
+                        # Attempt on-chain token merge for instant profit realization
+                        if matched >= MERGE_MIN_MATCHED_SHARES:
+                            await self._merge_matched_tokens(market, matched)
 
     async def _check_order_filled(self, order_id: str) -> dict | None:
         """Check if an order has been filled. Returns fill details or None."""
@@ -488,6 +613,89 @@ class MarketMaker:
             pass
         return None
 
+    # ============================================================
+    # ON-CHAIN TOKEN MERGING (Arbigab-inspired)
+    # ============================================================
+
+    async def _merge_matched_tokens(self, market: MarketState, matched_shares: float):
+        """Merge matched YES+NO tokens back to $1.00 USDC on-chain.
+
+        Instead of waiting for market resolution, we can merge complementary
+        tokens (YES + NO = $1.00) instantly via the CTF contract's
+        mergePositions function. This:
+        - Frees up capital immediately for the next trade
+        - Eliminates resolution risk (what if resolution is delayed?)
+        - Realizes profit in USDC instead of holding binary tokens
+
+        The merge is done via Polymarket's CTF (Conditional Token Framework)
+        contract. Each YES+NO pair merges back to the collateral (USDC).
+        """
+        if not self.pm:
+            # Paper mode — simulate the merge
+            avg_yes = market.yes_cost / market.yes_shares if market.yes_shares > 0 else 0
+            avg_no = market.no_cost / market.no_shares if market.no_shares > 0 else 0
+            merge_profit = matched_shares * (1.0 - avg_yes - avg_no)
+
+            market.yes_shares -= matched_shares
+            market.no_shares -= matched_shares
+            market.yes_cost -= matched_shares * avg_yes
+            market.no_cost -= matched_shares * avg_no
+            market.total_merged_profit += merge_profit
+            market.realized_pnl += merge_profit
+            self.stats.total_merged_profit += merge_profit
+            self.stats.total_pnl += merge_profit
+            self.stats.merges_completed += 1
+            self.total_capital += merge_profit  # Capital freed back
+            logger.info("MM merge (paper): %s, %.2f shares, profit=$%.4f",
+                        market.title[:30], matched_shares, merge_profit)
+            return
+
+        try:
+            from execution.polymarket_executor import PolymarketExecutor
+            executor = self.pm.executors.get("polymarket")
+            if not isinstance(executor, PolymarketExecutor) or not executor.is_configured():
+                return
+
+            # Resolve both token IDs
+            yes_token = await executor._resolve_token_id(market.condition_id, "YES")
+            no_token = await executor._resolve_token_id(market.condition_id, "NO")
+
+            if not yes_token or not no_token:
+                logger.warning("MM merge: cannot resolve tokens for %s", market.condition_id[:12])
+                return
+
+            # Call CTF mergePositions via the CLOB client
+            # The py_clob_client exposes merge_positions for this purpose
+            clob = executor._get_clob()
+            amount_wei = int(matched_shares * 1e6)  # USDC has 6 decimals
+
+            merge_result = await executor._run_sync(
+                clob.merge_positions, market.condition_id, amount_wei
+            )
+
+            if merge_result:
+                avg_yes = market.yes_cost / market.yes_shares if market.yes_shares > 0 else 0
+                avg_no = market.no_cost / market.no_shares if market.no_shares > 0 else 0
+                merge_profit = matched_shares * (1.0 - avg_yes - avg_no)
+
+                market.yes_shares -= matched_shares
+                market.no_shares -= matched_shares
+                market.yes_cost -= matched_shares * avg_yes
+                market.no_cost -= matched_shares * avg_no
+                market.total_merged_profit += merge_profit
+                market.realized_pnl += merge_profit
+                self.stats.total_merged_profit += merge_profit
+                self.stats.total_pnl += merge_profit
+                self.stats.merges_completed += 1
+                self.total_capital += matched_shares  # Full $1.00/share returned
+                logger.info("MM merge: %s, %.2f shares merged on-chain, profit=$%.4f",
+                            market.title[:30], matched_shares, merge_profit)
+
+        except Exception as e:
+            # Merge failed — tokens remain as inventory, will resolve at expiry
+            logger.warning("MM merge failed for %s: %s (will wait for resolution)",
+                          market.condition_id[:12], e)
+
     async def _get_market_price(self, condition_id: str) -> float:
         """Get current YES price for a market."""
         if self.pm:
@@ -500,9 +708,17 @@ class MarketMaker:
         return 0.0
 
     def _check_circuit_breaker(self) -> bool:
-        """Check if external price diverges too much from Polymarket."""
-        # For now, just check price feed health
-        return self.feed.is_stale
+        """Check if external price diverges too much from Polymarket.
+
+        Checks all active assets — trips if ANY feed is stale.
+        """
+        for market in self._markets.values():
+            if self.feed.is_asset_stale(market.asset):
+                return True
+        # Also trip if we have no markets but the primary feed is stale
+        if not self._markets:
+            return any(self.feed.is_asset_stale(a) for a in self.feed.active_assets)
+        return False
 
     def _is_near_resolution(self, market: MarketState) -> bool:
         """Check if market is within the resolution buffer."""
