@@ -371,6 +371,140 @@ class PolymarketExecutor(BaseExecutor):
             logger.warning("Polymarket price failed for %s: %s", asset_id, e)
         return 0.0
 
+    async def buy_limit(self, asset_id: str, amount_usd: float, price: float) -> ExecutionResult:
+        """Place a GTC limit buy order for 0% maker fees.
+
+        Fire-and-forget: returns success when the order is placed on the book,
+        NOT when it's filled. The CLOB will match it when a taker crosses.
+        Uses OrderArgs (not MarketOrderArgs) with OrderType.GTC.
+        """
+        try:
+            from py_clob_client.clob_types import OrderArgs, OrderType, PartialCreateOrderOptions
+
+            condition_id, side = self._parse_asset_id(asset_id)
+            token_id = await self._resolve_token_id(condition_id, side)
+            clob = self._get_clob()
+
+            # Calculate shares from dollar amount and limit price
+            shares = round(amount_usd / price, 2)
+
+            order_args = OrderArgs(
+                token_id=token_id,
+                price=price,
+                size=shares,
+                side="BUY",
+            )
+
+            neg_risk = await self._run_sync(clob.get_neg_risk, token_id)
+            options = PartialCreateOrderOptions(neg_risk=neg_risk)
+
+            logger.info("Placing BUY limit order (GTC): %s %.2f shares @ $%.4f ($%.2f) (neg_risk=%s)",
+                        asset_id, shares, price, amount_usd, neg_risk)
+
+            signed_order = await self._run_sync(clob.create_order, order_args, options)
+            result = await self._run_sync(clob.post_order, signed_order, OrderType.GTC)
+
+            order_id = result.get("orderID", result.get("id", ""))
+            if not order_id:
+                return ExecutionResult(False, None, 0, 0, 0, f"Limit order rejected: {result}")
+
+            # GTC order placed — fees are 0% for maker
+            return ExecutionResult(True, order_id, price, shares, 0.0, None)
+
+        except Exception as e:
+            logger.error("Polymarket buy_limit failed for %s: %s", asset_id, e)
+            return ExecutionResult(False, None, 0, 0, 0, str(e))
+
+    async def sell_limit(self, asset_id: str, quantity: float, price: float) -> ExecutionResult:
+        """Place a GTC limit sell order for 0% maker fees.
+
+        Fire-and-forget: returns success when the order is placed on the book.
+        """
+        try:
+            from py_clob_client.clob_types import OrderArgs, OrderType, PartialCreateOrderOptions
+
+            condition_id, side = self._parse_asset_id(asset_id)
+            token_id = await self._resolve_token_id(condition_id, side)
+            clob = self._get_clob()
+
+            order_args = OrderArgs(
+                token_id=token_id,
+                price=price,
+                size=round(quantity, 2),
+                side="SELL",
+            )
+
+            neg_risk = await self._run_sync(clob.get_neg_risk, token_id)
+            options = PartialCreateOrderOptions(neg_risk=neg_risk)
+
+            logger.info("Placing SELL limit order (GTC): %s %.2f shares @ $%.4f (neg_risk=%s)",
+                        asset_id, quantity, price, neg_risk)
+
+            signed_order = await self._run_sync(clob.create_order, order_args, options)
+            result = await self._run_sync(clob.post_order, signed_order, OrderType.GTC)
+
+            order_id = result.get("orderID", result.get("id", ""))
+            if not order_id:
+                return ExecutionResult(False, None, 0, 0, 0, f"Sell limit order rejected: {result}")
+
+            return ExecutionResult(True, order_id, price, quantity, 0.0, None)
+
+        except Exception as e:
+            logger.error("Polymarket sell_limit failed for %s: %s", asset_id, e)
+            return ExecutionResult(False, None, 0, 0, 0, str(e))
+
+    async def check_order_status(self, order_id: str) -> dict:
+        """Check status of a GTC limit order on Polymarket CLOB.
+
+        Returns dict with 'status' key: 'open', 'filled', 'partially_filled', 'cancelled', 'unknown'.
+        Also includes fill details when available.
+        """
+        try:
+            clob = self._get_clob()
+            order = await self._run_sync(clob.get_order, order_id)
+            if not order:
+                return {"status": "unknown", "order_id": order_id}
+
+            # Map CLOB status to our standard statuses
+            clob_status = order.get("status", "").upper()
+            size = float(order.get("original_size", order.get("size", 0)))
+            matched = float(order.get("size_matched", 0))
+
+            if clob_status == "MATCHED" or (size > 0 and matched >= size * 0.999):
+                status = "filled"
+            elif matched > 0:
+                status = "partially_filled"
+            elif clob_status in ("CANCELLED", "CANCELED"):
+                status = "cancelled"
+            elif clob_status in ("LIVE", "OPEN"):
+                status = "open"
+            else:
+                status = "unknown"
+
+            return {
+                "status": status,
+                "order_id": order_id,
+                "price": float(order.get("price", 0)),
+                "size": size,
+                "size_matched": matched,
+                "fee": float(order.get("fee", 0)),
+            }
+
+        except Exception as e:
+            logger.warning("check_order_status failed for %s: %s", order_id, e)
+            return {"status": "unknown", "order_id": order_id, "error": str(e)}
+
+    async def cancel_order(self, order_id: str) -> bool:
+        """Cancel an open GTC limit order on Polymarket CLOB."""
+        try:
+            clob = self._get_clob()
+            await self._run_sync(clob.cancel, order_id)
+            logger.info("Cancelled order %s", order_id)
+            return True
+        except Exception as e:
+            logger.warning("cancel_order failed for %s: %s", order_id, e)
+            return False
+
     async def close(self):
         if self._http and not self._http.is_closed:
             await self._http.aclose()

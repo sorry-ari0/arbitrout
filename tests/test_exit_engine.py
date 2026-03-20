@@ -47,3 +47,57 @@ class TestHeuristics:
         assert len(time_triggers) >= 1
         assert time_triggers[0]["safety_override"] is False
         assert time_triggers[0]["action"] == "review"
+
+    # ── Minimum hold period tests ──────────────────────────────────────────
+
+    def test_min_hold_suppresses_trailing_stop(self):
+        """During hold period, trailing_stop should be suppressed."""
+        import time
+        pkg = _make_pkg(strategy="pure_prediction")
+        pkg["_min_hold_until"] = time.time() + 86400
+        pkg["peak_value"] = 20.0
+        pkg["current_value"] = 5.0  # massive drawdown
+        triggers = evaluate_heuristics(pkg)
+        assert not any(t["name"] == "trailing_stop" for t in triggers)
+
+    def test_min_hold_allows_stop_loss(self):
+        """During hold period, stop_loss should still fire."""
+        import time
+        pkg = _make_pkg()
+        pkg["_min_hold_until"] = time.time() + 86400
+        pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -40}))
+        pkg["total_cost"] = 10.0
+        pkg["current_value"] = 3.0  # -70% loss
+        triggers = evaluate_heuristics(pkg)
+        assert any(t["name"] == "stop_loss" for t in triggers)
+
+    def test_min_hold_allows_safety_override(self):
+        """During hold period, spread_inversion (safety) should still fire."""
+        import time
+        pkg = _make_pkg()
+        pkg["_min_hold_until"] = time.time() + 86400
+        pkg["legs"][0]["current_price"] = 0.80
+        pkg["legs"][1]["current_price"] = 0.30  # combined 1.10 > 1.05
+        triggers = evaluate_heuristics(pkg)
+        assert any(t.get("safety_override") for t in triggers)
+
+    def test_min_hold_allows_target_hit(self):
+        """During hold period, target_hit should still fire."""
+        import time
+        pkg = _make_pkg()
+        pkg["_min_hold_until"] = time.time() + 86400
+        pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 20}))
+        pkg["total_cost"] = 10.0
+        pkg["current_value"] = 15.0  # +50%
+        triggers = evaluate_heuristics(pkg)
+        assert any(t["name"] == "target_hit" for t in triggers)
+
+    def test_expired_hold_allows_all_triggers(self):
+        """After hold period expires, all triggers fire normally."""
+        import time
+        pkg = _make_pkg(strategy="pure_prediction")
+        pkg["_min_hold_until"] = time.time() - 1  # already expired
+        pkg["peak_value"] = 20.0
+        pkg["current_value"] = 5.0
+        triggers = evaluate_heuristics(pkg)
+        assert any(t["name"] == "trailing_stop" for t in triggers)
