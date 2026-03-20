@@ -135,7 +135,7 @@ def _markets_have_same_target(markets: list[NormalizedEvent]) -> bool:
     """Check if all markets in a group target the same threshold.
 
     Returns False (= synthetic) when:
-    - Crypto price targets differ by >2%
+    - Crypto price targets differ by >0.5%
     - Market types differ (e.g., "between $74K-$76K" vs "above $74K")
     - Non-crypto numeric thresholds differ (e.g., "7+ corners" vs "9+ corners")
     """
@@ -151,7 +151,7 @@ def _markets_have_same_target(markets: list[NormalizedEvent]) -> bool:
             return False
         prices = [c["price"] for c in cryptos]
         lo, hi = min(prices), max(prices)
-        if hi > 0 and (lo / hi) < 0.98:
+        if hi > 0 and (lo / hi) < 0.995:
             return False
         return True
 
@@ -438,22 +438,25 @@ def _build_synthetic_info(yes_market: NormalizedEvent,
 
     # Build direction-aware scenarios
     if yes_wins_above and no_wins_below:
-        # Classic straddle: YES wins high, NO wins low, gap in middle
-        high_strike = yes_wins_above
-        low_strike = no_wins_below
-        if high_strike <= low_strike:
-            # Overlapping — always one leg wins = near-guaranteed
-            high_strike, low_strike = max(yes_wins_above, no_wins_below), min(yes_wins_above, no_wins_below)
+        # YES wins when price > yes_target, NO wins when price < no_target
+        # If yes_target < no_target: zones overlap → guaranteed profit (both win in middle)
+        # If yes_target > no_target: gap in middle → loss zone
+        is_overlapping = yes_wins_above < no_wins_below
+        high_strike = max(yes_wins_above, no_wins_below)
+        low_strike = min(yes_wins_above, no_wins_below)
 
-        # Loss probability ≈ gap size relative to strikes
         gap = abs(high_strike - low_strike)
         avg_strike = (high_strike + low_strike) / 2
         gap_pct = gap / avg_strike if avg_strike > 0 else 1.0
 
-        # Use market prices as probability proxies
-        # YES price ≈ P(price > yes_target), NO price ≈ P(price < no_target)
-        # Loss prob ≈ 1 - P(YES wins) - P(NO wins)
-        loss_prob = max(0, 1.0 - yes_cost - no_cost)
+        if is_overlapping:
+            # Guaranteed: all scenarios win, middle zone is a bonus
+            loss_prob = 0.0
+        else:
+            # Use market prices as probability proxies
+            # YES price ≈ P(price > yes_target), NO price ≈ P(price < no_target)
+            # Loss prob ≈ 1 - P(YES wins) - P(NO wins)
+            loss_prob = max(0, 1.0 - yes_cost - no_cost)
 
     elif yes_wins_below and no_wins_above:
         # Inverse straddle: YES wins low, NO wins high
@@ -471,35 +474,68 @@ def _build_synthetic_info(yes_market: NormalizedEvent,
         loss_prob = 0.5  # Unknown, assume risky
 
     # Reject if loss probability is too high (>40%) or gap is too wide (>10%)
+    # (Skip gap check for overlapping scenarios — they're guaranteed)
     if loss_prob > 0.40:
         return None
-    if gap_pct > 0.10:
-        return None
+    if not (yes_wins_above and no_wins_below and yes_wins_above < no_wins_below):
+        if gap_pct > 0.10:
+            return None
 
     win_return_pct = round((1.0 - total_cost) / total_cost * 100, 1) if total_cost > 0 else 0
 
-    scenarios = {
-        "above_high": {
-            "condition": f"Price > ${high_strike:,.0f}",
-            "yes_pays": 1.0 if yes_wins_above else 0.0,
-            "no_pays": 1.0 if no_wins_above else 0.0,
-            "net": round((1.0 if (yes_wins_above or no_wins_above) else 0.0) - total_cost, 4),
-            "return_pct": win_return_pct if (yes_wins_above or no_wins_above) else -100.0,
-        },
-        "in_gap": {
-            "condition": f"${low_strike:,.0f} < Price < ${high_strike:,.0f}",
-            "yes_pays": 0.0, "no_pays": 0.0,
-            "net": round(-total_cost, 4),
-            "return_pct": -100.0,
-        },
-        "below_low": {
-            "condition": f"Price < ${low_strike:,.0f}",
-            "yes_pays": 1.0 if yes_wins_below else 0.0,
-            "no_pays": 1.0 if no_wins_below else 0.0,
-            "net": round((1.0 if (yes_wins_below or no_wins_below) else 0.0) - total_cost, 4),
-            "return_pct": win_return_pct if (yes_wins_below or no_wins_below) else -100.0,
-        },
-    }
+    # Check if this is an overlapping scenario (guaranteed profit)
+    is_overlap = (yes_wins_above and no_wins_below
+                  and yes_wins_above < no_wins_below)
+
+    if is_overlap:
+        # Guaranteed: YES wins above low_strike, NO wins below high_strike
+        # Middle zone where both win = bonus payout
+        bonus_return_pct = round((2.0 - total_cost) / total_cost * 100, 1) if total_cost > 0 else 0
+        scenarios = {
+            "above_high": {
+                "condition": f"Price > ${high_strike:,.0f}",
+                "yes_pays": 1.0, "no_pays": 0.0,
+                "net": round(1.0 - total_cost, 4),
+                "return_pct": win_return_pct,
+            },
+            "between": {
+                "condition": f"${low_strike:,.0f} < Price < ${high_strike:,.0f}",
+                "yes_pays": 1.0, "no_pays": 1.0,
+                "net": round(2.0 - total_cost, 4),
+                "return_pct": bonus_return_pct,
+            },
+            "below_low": {
+                "condition": f"Price < ${low_strike:,.0f}",
+                "yes_pays": 0.0, "no_pays": 1.0,
+                "net": round(1.0 - total_cost, 4),
+                "return_pct": win_return_pct,
+            },
+        }
+        win_count = 3
+        loss_count = 0
+    else:
+        scenarios = {
+            "above_high": {
+                "condition": f"Price > ${high_strike:,.0f}",
+                "yes_pays": 1.0 if yes_wins_above else 0.0,
+                "no_pays": 1.0 if no_wins_above else 0.0,
+                "net": round((1.0 if (yes_wins_above or no_wins_above) else 0.0) - total_cost, 4),
+                "return_pct": win_return_pct if (yes_wins_above or no_wins_above) else -100.0,
+            },
+            "in_gap": {
+                "condition": f"${low_strike:,.0f} < Price < ${high_strike:,.0f}",
+                "yes_pays": 0.0, "no_pays": 0.0,
+                "net": round(-total_cost, 4),
+                "return_pct": -100.0,
+            },
+            "below_low": {
+                "condition": f"Price < ${low_strike:,.0f}",
+                "yes_pays": 1.0 if yes_wins_below else 0.0,
+                "no_pays": 1.0 if no_wins_below else 0.0,
+                "net": round((1.0 if (yes_wins_below or no_wins_below) else 0.0) - total_cost, 4),
+                "return_pct": win_return_pct if (yes_wins_below or no_wins_below) else -100.0,
+            },
+        }
 
     # Count actual winning scenarios
     win_count = sum(1 for s in scenarios.values() if s["return_pct"] > 0)
