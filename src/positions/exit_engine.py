@@ -323,7 +323,7 @@ class ExitEngine:
     }
     # No cooldown: target_hit, stop_loss, trailing_stop, safety overrides
 
-    def __init__(self, position_manager, ai_advisor=None, interval: float = 60.0, decision_logger=None):
+    def __init__(self, position_manager, ai_advisor=None, interval: float = 60.0, decision_logger=None, news_scanner=None):
         self.pm = position_manager
         self.ai = ai_advisor
         self.interval = interval
@@ -332,6 +332,7 @@ class ExitEngine:
         self._running = False
         # Cooldown tracker: {(pkg_id, trigger_name): last_fire_timestamp}
         self._trigger_cooldowns: dict[tuple[str, str], float] = {}
+        self._news_scanner = news_scanner
 
     def start(self):
         """Start the exit engine scan loop."""
@@ -357,6 +358,23 @@ class ExitEngine:
                 logger.error("Exit engine tick error: %s", e)
             await asyncio.sleep(self.interval)
 
+    async def _resolve_pending_limit_orders(self):
+        """Check all pending limit orders and finalize or FOK-fallback."""
+        for pkg in self.pm.list_packages("open"):
+            pending = pkg.get("_pending_limit_orders", {})
+            if not pending:
+                continue
+            for leg_id in list(pending.keys()):
+                result = await self.pm.resolve_pending_order(pkg["id"], leg_id)
+                if result.get("success"):
+                    etype = result.get("exit_order_type", "unknown")
+                    logger.info("Resolved pending limit order for %s/%s: %s", pkg["id"], leg_id, etype)
+                elif result.get("pending"):
+                    pass  # Still waiting — check next tick
+                else:
+                    logger.warning("Failed to resolve pending order %s/%s: %s",
+                                   pkg["id"], leg_id, result.get("error", "?"))
+
     async def _tick(self):
         """Process one scan cycle — evaluate all open packages.
 
@@ -364,6 +382,8 @@ class ExitEngine:
         sends them in a single LLM call, then applies verdicts. This avoids
         Groq/Gemini 429 rate limiting from multiple calls per tick.
         """
+        # Resolve any pending limit orders from previous tick
+        await self._resolve_pending_limit_orders()
         open_pkgs = self.pm.list_packages("open")
         # Collect triggers per package and handle safety overrides immediately
         batched_ai_work: list[tuple[dict, list[dict]]] = []  # (pkg, ai_triggers)
@@ -378,8 +398,8 @@ class ExitEngine:
             else:
                 pkg["_neg_streak"] = 0
 
-            # C5 fix: skip packages currently being exited by another trigger
-            if pkg.get("_exiting"):
+            # Skip packages currently being exited or with pending limit orders
+            if pkg.get("_exiting") or pkg.get("_pending_limit_orders"):
                 continue
 
             triggers = evaluate_heuristics(pkg)
@@ -410,6 +430,15 @@ class ExitEngine:
             # Execute safety overrides immediately (no AI needed)
             safety_triggers = [t for t in filtered if t.get("safety_override")]
             ai_triggers = [t for t in filtered if not t.get("safety_override")]
+
+            # Cancel any pending limit orders before executing safety override
+            for pending_leg_id in list(pkg.get("_pending_limit_orders", {}).keys()):
+                pending_info = pkg["_pending_limit_orders"][pending_leg_id]
+                executor = self.pm.executors.get(pending_info["platform"])
+                if executor:
+                    await executor.cancel_order(pending_info["order_id"])
+                    logger.warning("Cancelled pending limit order %s for safety override", pending_info["order_id"])
+            pkg.pop("_pending_limit_orders", None)
 
             for trigger in safety_triggers:
                 logger.warning("SAFETY OVERRIDE [%s] on %s: %s", trigger["name"], pkg["id"], trigger["details"])
@@ -586,14 +615,18 @@ class ExitEngine:
                     # "review" triggers approved by AI → execute as full exit
                     for leg in pkg["legs"]:
                         if leg["status"] == "open":
+                            is_stop = trigger["name"] == "stop_loss"
                             await self.pm.exit_leg(pkg["id"], leg["leg_id"],
-                                trigger=f"ai_approved:{trigger['name']}")
+                                trigger=f"ai_approved:{trigger['name']}",
+                                use_limit=not is_stop)
                 elif trig_action == "partial_exit":
                     # Exit first open leg as partial
                     for leg in pkg["legs"]:
                         if leg["status"] == "open":
+                            is_stop = trigger["name"] == "stop_loss"
                             await self.pm.exit_leg(pkg["id"], leg["leg_id"],
-                                trigger=f"ai_partial:{trigger['name']}")
+                                trigger=f"ai_partial:{trigger['name']}",
+                                use_limit=not is_stop)
                             break
                 elif trig_action == "tighten_trail":
                     # new_ath: tighten trailing stop by 2% on approval
