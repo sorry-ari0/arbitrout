@@ -249,8 +249,8 @@ var currentSort = localStorage.getItem('arbCurrentSort') || 'profit-high';
 function sortOpportunities(opps) {
     var sorted = opps.slice();
     switch (currentSort) {
-        case 'profit-high': sorted.sort(function(a, b) { return (b.profit_pct || 0) - (a.profit_pct || 0); }); break;
-        case 'profit-low': sorted.sort(function(a, b) { return (a.profit_pct || 0) - (b.profit_pct || 0); }); break;
+        case 'profit-high': sorted.sort(function(a, b) { return (b.net_profit_pct || b.profit_pct || 0) - (a.net_profit_pct || a.profit_pct || 0); }); break;
+        case 'profit-low': sorted.sort(function(a, b) { return (a.net_profit_pct || a.profit_pct || 0) - (b.net_profit_pct || b.profit_pct || 0); }); break;
         case 'platform-az': sorted.sort(function(a, b) { return (a.buy_yes_platform || '').localeCompare(b.buy_yes_platform || ''); }); break;
         case 'newest': sorted.sort(function(a, b) { return (b.last_updated || 0) - (a.last_updated || 0); }); break;
         case 'volume-high': sorted.sort(function(a, b) { return (b.volume || 0) - (a.volume || 0); }); break;
@@ -324,12 +324,42 @@ function renderOpportunities(opps) {
 
         var spreadEl = document.createElement('div');
         spreadEl.className = 'opp-spread positive';
-        var pctText = '+' + (opp.profit_pct || opp.spread * 100).toFixed(1) + '%';
+        spreadEl.style.display = 'flex';
+        spreadEl.style.alignItems = 'center';
+        spreadEl.style.gap = '4px';
+        // Show net profit (after fees) as primary, gross in parentheses
+        var netPct = opp.net_profit_pct != null ? opp.net_profit_pct : (opp.profit_pct || opp.spread * 100);
+        var grossPct = opp.profit_pct || opp.spread * 100;
+        var pctText = '+' + netPct.toFixed(1) + '%';
+        if (Math.abs(netPct - grossPct) > 0.5) {
+            pctText += ' (gross ' + grossPct.toFixed(1) + '%)';
+        }
         if (opp.is_synthetic) {
             spreadEl.style.color = '#e040fb';
             pctText += ' \u2726';  // synthetic indicator
         }
-        spreadEl.textContent = pctText;
+        var pctSpan = document.createElement('span');
+        pctSpan.textContent = pctText;
+        spreadEl.appendChild(pctSpan);
+        // Confidence badge
+        if (opp.confidence && opp.confidence !== 'high') {
+            var badge = document.createElement('span');
+            badge.style.cssText = 'font-size:9px;padding:1px 4px;border-radius:3px;font-weight:700;';
+            if (opp.confidence === 'very_low') {
+                badge.style.background = '#d32f2f';
+                badge.style.color = '#fff';
+                badge.textContent = 'LIKELY FALSE';
+            } else if (opp.confidence === 'low') {
+                badge.style.background = '#f57c00';
+                badge.style.color = '#fff';
+                badge.textContent = 'LOW CONF';
+            } else {
+                badge.style.background = '#ffd54f';
+                badge.style.color = '#333';
+                badge.textContent = 'MED';
+            }
+            spreadEl.appendChild(badge);
+        }
         row.appendChild(spreadEl);
 
         // Quick buy signal line
@@ -523,17 +553,46 @@ function showEventDetail(opp) {
         var isSynthetic = opp.is_synthetic || false;
         var synthInfo = opp.synthetic_info || {};
 
-        // Profit header
+        // Profit header — show net (after fees) as primary
+        var netPctDetail = opp.net_profit_pct != null ? opp.net_profit_pct : profitPct;
         var profitLine = document.createElement('div');
         profitLine.style.cssText = 'font-weight:700;margin-top:6px;font-size:12px;';
         if (isSynthetic) {
             profitLine.style.color = '#e040fb';
-            profitLine.textContent = 'SYNTHETIC DERIVATIVE: +' + profitPct.toFixed(1) + '% (wins 2/3 scenarios)';
+            profitLine.textContent = 'SYNTHETIC DERIVATIVE: +' + netPctDetail.toFixed(1) + '% net (wins 2/3 scenarios)';
         } else {
             profitLine.style.color = 'var(--arb-green)';
-            profitLine.textContent = 'GUARANTEED PROFIT: ' + profitPct.toFixed(1) + '%';
+            profitLine.textContent = 'GUARANTEED PROFIT: ' + netPctDetail.toFixed(1) + '% (after fees)';
         }
         tradeEl.appendChild(profitLine);
+
+        // Fee breakdown line
+        if (Math.abs(netPctDetail - profitPct) > 0.5) {
+            var feeLine = document.createElement('div');
+            feeLine.style.cssText = 'font-size:10px;color:var(--arb-muted);margin-top:2px;';
+            feeLine.textContent = 'Gross spread: ' + profitPct.toFixed(1) + '% | Fee drag: -' + (profitPct - netPctDetail).toFixed(1) + '%';
+            tradeEl.appendChild(feeLine);
+        }
+
+        // Confidence warning
+        if (opp.confidence && opp.confidence !== 'high') {
+            var warnEl = document.createElement('div');
+            warnEl.style.cssText = 'margin-top:4px;padding:4px 6px;border-radius:3px;font-size:10px;font-weight:700;';
+            if (opp.confidence === 'very_low') {
+                warnEl.style.background = 'rgba(211,47,47,0.15)';
+                warnEl.style.color = '#ef5350';
+                warnEl.textContent = '\u26A0 LIKELY FALSE MATCH \u2014 platforms disagree by >50% on implied probability. Verify markets are the same event before trading.';
+            } else if (opp.confidence === 'low') {
+                warnEl.style.background = 'rgba(245,124,0,0.15)';
+                warnEl.style.color = '#ff9800';
+                warnEl.textContent = '\u26A0 LOW CONFIDENCE \u2014 large price discrepancy suggests possible market mismatch or stale data.';
+            } else {
+                warnEl.style.background = 'rgba(255,213,79,0.1)';
+                warnEl.style.color = '#ffd54f';
+                warnEl.textContent = '\u26A0 MEDIUM CONFIDENCE \u2014 verify liquidity and market matching before trading.';
+            }
+            tradeEl.appendChild(warnEl);
+        }
 
         // Synthetic scenario breakdown
         if (isSynthetic && synthInfo.scenarios) {
@@ -574,8 +633,8 @@ function showEventDetail(opp) {
         exLine.style.cssText = 'color:var(--arb-muted);margin-top:4px;font-size:10px;';
         var yesSpend = (100 * yesAlloc / 100);
         var noSpend = (100 * noAlloc / 100);
-        var profit = (100 * profitPct / 100);
-        exLine.textContent = '$100 invested = $' + yesSpend.toFixed(0) + ' YES + $' + noSpend.toFixed(0) + ' NO = $' + profit.toFixed(2) + (isSynthetic ? ' expected' : ' profit');
+        var netProfit = (100 * netPctDetail / 100);
+        exLine.textContent = '$100 invested = $' + yesSpend.toFixed(0) + ' YES + $' + noSpend.toFixed(0) + ' NO = $' + netProfit.toFixed(2) + ' net' + (isSynthetic ? ' expected' : ' profit');
         tradeEl.appendChild(exLine);
 
         // Cost per $1 payout
