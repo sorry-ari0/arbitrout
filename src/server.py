@@ -60,6 +60,7 @@ try:
     from positions.position_router import router as position_router, init_position_system
     from positions.position_manager import PositionManager
     from positions.exit_engine import ExitEngine
+    from positions.bracket_manager import BracketManager
     from positions.ai_advisor import AIAdvisor
     from positions.wallet_config import is_paper_mode, get_paper_balance, get_configured_platforms
     from execution.base_executor import BaseExecutor
@@ -280,8 +281,9 @@ async def lifespan(app: FastAPI):
                 executors = paper_executors
                 logger.info("Position system running in PAPER TRADING mode (balance=$%.2f)", get_paper_balance())
 
+            bracket_manager = BracketManager(executors)
             journal = TradeJournal(data_dir=DATA_DIR / "positions")
-            pm = PositionManager(data_dir=DATA_DIR / "positions", executors=executors, trade_journal=journal)
+            pm = PositionManager(data_dir=DATA_DIR / "positions", executors=executors, trade_journal=journal, bracket_manager=bracket_manager)
 
             # Rebuild PaperExecutor position state from loaded packages
             # (PaperExecutor tracks positions in memory, lost on restart)
@@ -320,7 +322,7 @@ async def lifespan(app: FastAPI):
             ai = AIAdvisor(paper_mode=is_paper_mode())
             if decision_log is None:
                 decision_log = DecisionLogger()
-            exit_engine = ExitEngine(pm, ai_advisor=ai, decision_logger=decision_log)
+            exit_engine = ExitEngine(pm, ai_advisor=ai, decision_logger=decision_log, bracket_manager=bracket_manager)
             exit_engine.start()
             # Start auto trader (works with or without arbitrage scanner)
             arb_scanner = get_scanner() if _ARBITRAGE_AVAILABLE else None
