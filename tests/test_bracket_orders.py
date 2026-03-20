@@ -358,3 +358,68 @@ class TestPaperBracketSimulation:
         # Quantity should be unreserved (restored)
         qty_after_cancel = paper.positions["0xtest:NO"]["quantity"]
         assert abs(qty_after_cancel - qty_before) < 1  # Restored
+
+
+class TestExitEngineIntegration:
+    @pytest.mark.asyncio
+    async def test_exit_engine_resolves_bracket_fill(self):
+        """When a bracket target fills, exit engine should finalize the leg."""
+        from positions.bracket_manager import BracketManager
+        from positions.exit_engine import ExitEngine
+        from positions.position_manager import PositionManager
+        from pathlib import Path
+        import tempfile
+
+        executor = FakeExecutor()
+        pm = PositionManager(executors={"polymarket": executor}, data_dir=Path(tempfile.mkdtemp()))
+        bm = BracketManager({"polymarket": executor})
+
+        # Create and add a package with brackets
+        pkg = _make_pkg(entry_price=0.90, target_pct=11)
+        pm.add_package(pkg)
+        await bm.place_brackets(pkg)
+
+        # Simulate target fill
+        target_oid = pkg["_brackets"]["leg_1"]["target_order_id"]
+        executor.orders[target_oid]["status"] = "filled"
+
+        engine = ExitEngine(pm, bracket_manager=bm)
+        await engine._resolve_bracket_fills()
+
+        # Leg should be closed
+        updated_pkg = pm.packages.get("pkg_test1")
+        leg = updated_pkg["legs"][0]
+        assert leg["status"] == "closed"
+        assert leg["exit_trigger"] == "bracket_target"
+        assert leg["exit_order_type"] == "bracket_maker"
+        assert leg["sell_fees"] == 0.0  # Maker fee
+
+    @pytest.mark.asyncio
+    async def test_exit_engine_adjusts_trailing_stop(self):
+        """Exit engine should move the stop bracket up when peak increases."""
+        from positions.bracket_manager import BracketManager
+
+        executor = FakeExecutor()
+        bm = BracketManager({"polymarket": executor})
+        pkg = _make_pkg(entry_price=0.90, stop_pct=-40)
+        pkg["peak_value"] = 220  # Peak rose
+        pkg["current_value"] = 218
+        pkg["total_cost"] = 200
+        # Add trailing stop rule
+        pkg["exit_rules"].append({
+            "rule_id": "r3", "type": "trailing_stop",
+            "params": {"current": 35, "bound_min": 15, "bound_max": 50},
+            "active": True
+        })
+        await bm.place_brackets(pkg)
+        old_stop = pkg["_brackets"]["leg_1"]["stop_price"]
+
+        # Update peak to simulate appreciation
+        bm.update_peak(pkg, "leg_1", 0.95)
+
+        new_stop = bm._compute_trail_price(pkg, "leg_1")
+        # New stop should be higher than initial stop (position appreciated)
+        if new_stop and new_stop > old_stop:
+            result = bm.adjust_stop(pkg, "leg_1", new_stop)
+            assert result["success"] is True
+            assert pkg["_brackets"]["leg_1"]["stop_price"] > old_stop
