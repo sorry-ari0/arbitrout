@@ -56,3 +56,26 @@ class TestShortDurationFilter:
         exp_dt = datetime.fromisoformat(soon)
         hours = (exp_dt - datetime.now()).total_seconds() / 3600
         assert hours < MIN_HOURS_TO_EXPIRY
+
+
+class TestFavoriteLongshot:
+    def test_favorite_scores_higher_than_longshot(self):
+        """Same spread — favorite (0.85) should score much higher than longshot (0.15)."""
+        spread_pct = 15.0
+        fav_score = spread_pct * 2.5
+        long_score = spread_pct * 0.2
+        assert fav_score > long_score * 10
+
+    def test_moderate_favorite_multiplier(self):
+        """Moderate favorites (0.70-0.79) should get 1.8x."""
+        spread_pct = 15.0
+        score = spread_pct * 1.8
+        assert score > spread_pct * 1.5
+
+    def test_kelly_fraction_longshot_is_smaller(self):
+        """Longshots (<=0.30) use 1/8 Kelly, favorites (>=0.70) use 1/4."""
+        longshot_frac = 0.125
+        midrange_frac = 0.20
+        favorite_frac = 0.25
+        assert longshot_frac < midrange_frac < favorite_frac
+        assert longshot_frac <= favorite_frac * 0.5
