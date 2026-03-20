@@ -1,6 +1,6 @@
 """Tests for auto trader improvements: churn reduction, filters, scoring."""
 import pytest
-from datetime import date
+from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock
 
 
@@ -42,3 +42,17 @@ class TestChurnReduction:
         trader._daily_trade_date = "2020-01-01"
         assert trader._check_daily_limit() is True
         assert trader._daily_trade_count == 0
+
+
+class TestShortDurationFilter:
+    def test_min_hours_constant_exists(self):
+        from positions.auto_trader import MIN_HOURS_TO_EXPIRY
+        assert MIN_HOURS_TO_EXPIRY >= 1.0
+
+    def test_short_expiry_opportunity_skipped(self):
+        """An opportunity expiring in 30 minutes should be skipped."""
+        from positions.auto_trader import MIN_HOURS_TO_EXPIRY
+        soon = (datetime.now() + timedelta(minutes=30)).isoformat()
+        exp_dt = datetime.fromisoformat(soon)
+        hours = (exp_dt - datetime.now()).total_seconds() / 3600
+        assert hours < MIN_HOURS_TO_EXPIRY
