@@ -75,6 +75,7 @@ try:
     from execution.kraken_cli import KrakenCLIExecutor
     from positions.trade_journal import TradeJournal
     from positions.auto_trader import AutoTrader
+    from positions.probability_model import ProbabilityModel
     from positions.insider_tracker import InsiderTracker
     from positions.decision_log import DecisionLogger
     from positions.news_scanner import NewsScanner
@@ -150,6 +151,7 @@ CACHE_TTL = 15  # seconds
 
 
 _auto_trader_ref = None  # Module-level ref so scan loop can notify trader
+_probability_model = None  # Module-level ref for consensus probability model
 
 
 async def _auto_scan_loop():
@@ -177,6 +179,12 @@ async def _auto_scan_loop():
                 "opportunities": scanner.get_opportunities(),
                 "feed": scanner.get_feed(),
             })
+            # Update probability model with matched events
+            if _probability_model and hasattr(scanner, 'get_matched_events'):
+                matched = scanner.get_matched_events()
+                if matched:
+                    _probability_model.update_from_matched_events(
+                        [e.to_dict() if hasattr(e, 'to_dict') else e for e in matched])
             # Wake the auto trader immediately — trade execution takes priority
             if _auto_trader_ref is not None:
                 await _auto_trader_ref.notify_scan_complete()
@@ -306,9 +314,12 @@ async def lifespan(app: FastAPI):
             arb_scanner = get_scanner() if _ARBITRAGE_AVAILABLE else None
             insider = InsiderTracker(data_dir=DATA_DIR / "positions")
             insider.start()
-            _auto_trader = AutoTrader(pm, scanner=arb_scanner, insider_tracker=insider, decision_logger=decision_log)
+            global _auto_trader_ref, _probability_model
+            _probability_model = ProbabilityModel()
+            _auto_trader = AutoTrader(pm, scanner=arb_scanner, insider_tracker=insider,
+                                       decision_logger=decision_log,
+                                       probability_model=_probability_model)
             _auto_trader.start()
-            global _auto_trader_ref
             _auto_trader_ref = _auto_trader
             logger.info("Auto trader started — reacts to arb scanner within seconds, 5min safety-net fallback")
             # News scanner — AI-powered RSS headline analysis + Scrapling deep dive
@@ -320,6 +331,7 @@ async def lifespan(app: FastAPI):
                 decision_logger=decision_log,
             )
             _news_scanner.start()
+            exit_engine._news_scanner = _news_scanner
             logger.info("News scanner started — will scan RSS feeds every 2.5 min")
             init_position_system(pm, exit_engine, ai, trade_journal=journal, auto_trader=_auto_trader, insider_tracker=insider)
             _exit_task = True
@@ -411,6 +423,22 @@ async def lifespan(app: FastAPI):
                     logger.warning("Eval backfill error: %s", e)
         _backfill_task = asyncio.create_task(_backfill_loop())
         logger.info("Eval logger initialized with hourly backfill")
+
+    from positions.calibration import CalibrationEngine
+    _calibration_engine = CalibrationEngine(_eval_log, journal if _POSITIONS_AVAILABLE else None)
+
+    async def _calibration_loop():
+        """Run calibration report every 24 hours."""
+        while True:
+            await asyncio.sleep(86400)  # 24 hours
+            try:
+                path = _calibration_engine.save_report()
+                logger.info("Calibration report generated: %s", path)
+            except Exception as e:
+                logger.error("Calibration report failed: %s", e)
+
+    asyncio.create_task(_calibration_loop())
+    app.state.calibration_engine = _calibration_engine
 
     logger.info("Lobsterminal started on port 8500")
     yield

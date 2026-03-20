@@ -2,7 +2,7 @@
 import asyncio
 import json
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Security, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Request, Security, WebSocket, WebSocketDisconnect
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from typing import Optional
@@ -384,3 +384,17 @@ async def get_insider_accuracy():
         key=lambda a: a["accuracy"], reverse=True
     )
     return {"wallets": proven[:20], "total_tracked": len(_insider_tracker._wallet_accuracy)}
+
+
+# ── Calibration ───────────────────────────────────────────────────────────────
+
+@router.get("/calibration")
+async def get_calibration(request: Request):
+    """Return latest calibration report."""
+    ce = getattr(request.app.state, "calibration_engine", None)
+    if not ce:
+        return {"error": "Calibration engine not initialized"}
+    try:
+        return ce.generate_report()
+    except Exception as e:
+        return {"error": str(e)}

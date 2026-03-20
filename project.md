@@ -3,7 +3,7 @@ Status: ACTIVE
 Phase: BUILD
 Last Updated: 2026-03-19
 Repo: https://github.com/sorry-ari0/arbitrout.git
-Branch: feat/political-synthetic-analysis
+Branch: main (feature/trading-perf-overhaul pending merge)
 
 ## Overview
 Arbitrout is a prediction market trading system with eight core capabilities:
@@ -44,11 +44,16 @@ server.py creates all subsystems and injects dependencies:
                                                |──────> InsiderTracker (15m loop)
                                                |──────> NewsScanner (150s loop)
 
-  TradeJournal <─── PositionManager        (records on close)
-  AIAdvisor    <─── ExitEngine             (reviews non-safety triggers)
+  TradeJournal <─── PositionManager        (records on close, tracks exit_order_type)
+  AIAdvisor    <─── ExitEngine             (reviews non-safety triggers, receives news context)
   NewsAI       <─── NewsScanner            (headline scan + deep article analysis)
+  NewsScanner  ──> ExitEngine              (headline cache for news-validated exits)
   InsiderTracker ──> AutoTrader            (signal boost for scoring)
   NewsScanner  ──> AutoTrader              (queued opportunities via asyncio.Lock)
+  CalibrationEngine <── EvalLogger + TradeJournal  (24h reports, /api/derivatives/calibration)
+
+  ProbabilityModel <── ArbitrageScanner    (matched events → consensus prices)
+  ProbabilityModel ──> AutoTrader          (1.3x boost on cross-platform disagreement)
 
   PoliticalAnalyzer ──> AutoTrader         (political synthetic opportunities)
   PoliticalAnalyzer <── ArbitrageScanner   (event feed for political filtering)
@@ -103,12 +108,12 @@ server.py creates all subsystems and injects dependencies:
 |       |  2. Fallback: scan Polymarket Gamma API for crypto markets   |
 |       |  3. Query InsiderTracker for whale signal boost              |
 |       |  4. Score: profit * crypto * expiry * volume * insider       |
-|       |  5. Filter: net profit > 3% after 2% round-trip fees        |
+|       |  5. Filter: net profit > 12% after 2% round-trip fees       |
 |       |                                                              |
 |       +---> PositionManager.execute_package()                        |
 |                  |                                                   |
-|                  +---> PaperExecutor.buy() per leg                   |
-|                  |         (real price lookup, simulated money)       |
+|                  +---> PaperExecutor.buy_limit() per leg              |
+|                  |         (0% maker fee, real price, simulated $)    |
 |                  +---> positions.json (atomic write)                 |
 |                                                                      |
 |  ExitEngine (every 60s)                                              |
@@ -286,6 +291,11 @@ POLITICAL (21):          political event resolved* (leg price <=0.01 or >=0.99)
 NOTE: time_24h (#10) and time_6h (#11) are NO LONGER safety overrides.
 Prediction markets move most in final hours — early exits destroyed value
 ($38.88 in losses from premature time-based exits). Now soft review triggers.
+
+HOLD PERIOD: All packages have _min_hold_until (24h from entry). During hold,
+only safety overrides + target_hit + stop_loss + political_event_resolved fire.
+All other soft triggers (trailing_stop, negative_drift, etc.) are suppressed.
+Research: <24h holds underperform by 18%.
 ```
 
 The AI advisor (Claude) reviews non-safety triggers with full context:
@@ -303,6 +313,7 @@ For each crypto market opportunity:
 
   SKIP if: yes_price > 0.92 or < 0.08  (near-resolved, no edge)
   SKIP if: 0.42 < yes_price < 0.58     (near-50/50, no conviction)
+  SKIP if: hours_to_expiry < 1           (short-duration, bot-dominated)
   SKIP if: days_to_expiry <= 2          (time_24h safety would close immediately)
 
   score = net_profit
@@ -317,10 +328,20 @@ For each crypto market opportunity:
     score *= (1.0 + signal_strength * 2.0)
     if suspicious insiders:       score *= 1.5
 
-  ENTER if: score >= 8.0 AND net_profit >= 8% (MIN_SPREAD_PCT)
+  # Favorite-longshot bias (research: longshots lose ~40%, favorites ~5%)
+  if favored >= 0.80:     score *= 2.5   # strong favorite
+  elif favored >= 0.70:   score *= 1.8   # moderate favorite
+  elif favored <= 0.20:   score *= 0.2   # severe longshot penalty
+  elif favored <= 0.30:   score *= 0.5   # longshot penalty
+
+  # Cross-platform disagreement boost (probability model)
+  if platforms disagree >10%:  score *= 1.3
+
+  ENTER if: score >= 12.0 AND net_profit >= 12% (MIN_SPREAD_PCT)
   STRATEGY: directional bet (one side) on same-platform, arb (both sides) on cross-platform
-  SIZE: min($200, remaining_budget/2), floor $25
-  LIMITS: 10 concurrent, $2000 total exposure
+  SIZE: variable Kelly — 1/4 for favorites (>=0.70), 1/5 mid-range, 1/8 for longshots (<=0.30)
+  LIMITS: 7 concurrent, $1400 auto exposure, 3 trades/day cap
+  ORDERS: limit orders (GTC) for entries = 0% maker fee on Polymarket
 ```
 
 ### Insider Signal Strength Formula
@@ -461,12 +482,14 @@ ArbitrageOpportunity:
 |------|---------|
 | `src/positions/position_manager.py` | CRUD, persistence, execution, rollback for derivative packages |
 | `src/positions/position_router.py` | FastAPI router at `/api/derivatives/` — all position endpoints + WebSocket |
-| `src/positions/exit_engine.py` | 60s scan loop, 21 heuristic triggers, safety overrides, AI routing |
-| `src/positions/auto_trader.py` | Autonomous paper trader — scans Polymarket Gamma API for crypto markets |
-| `src/positions/trade_journal.py` | Records completed trades with P&L, fees, exit triggers, performance analytics |
+| `src/positions/exit_engine.py` | 60s scan loop, 21 heuristic triggers, safety overrides, AI routing, limit order exits, news-validated decisions |
+| `src/positions/auto_trader.py` | Autonomous paper trader — scans all platforms, limit orders, 3/day cap, 24h hold, variable Kelly, favorite-longshot bias |
+| `src/positions/probability_model.py` | Consensus probability aggregator — volume-weighted prices across platforms, deviation detection |
+| `src/positions/trade_journal.py` | Records completed trades with P&L, fees, exit triggers, exit_order_type, performance analytics, hold duration analysis |
+| `src/positions/calibration.py` | CalibrationEngine — 24h reports on entry/exit thresholds, hold duration, fee analysis, limit fill rates |
 | `src/positions/insider_tracker.py` | Whale/insider monitor — leaderboard, positions, accuracy tracking, movement alerts |
 | `src/positions/ai_advisor.py` | Multi-provider AI advisor for exit decisions (Groq/Gemini/OpenRouter/Anthropic) |
-| `src/positions/news_scanner.py` | AI news scanner — RSS feed monitor, two-pass AI pipeline, trade execution |
+| `src/positions/news_scanner.py` | AI news scanner — RSS feed monitor, two-pass AI pipeline, trade execution, headline cache for exit engine |
 | `src/positions/news_ai.py` | Multi-provider LLM analysis for headline scanning and deep article review |
 | `src/positions/decision_log.py` | JSONL decision logger — records buys, skips, triggers, AI verdicts, exits, news signals |
 | `src/positions/wallet_config.py` | Paper/live mode config, .env loading, key validation, safe config API |
@@ -514,11 +537,15 @@ ArbitrageOpportunity:
 The exit engine runs a 60-second scan loop evaluating all open packages.
 
 **Each tick:**
-1. Fetch current prices for all open legs via platform executors
-2. Recalculate P&L (fee-aware)
-3. Track negative streak counter
-4. Evaluate all 18 heuristic triggers
-5. Route fired triggers: safety overrides execute immediately, others go to AI advisor
+1. Resolve any pending limit orders from previous tick (check status → finalize or FOK-fallback after 60s timeout)
+2. Fetch current prices for all open legs via platform executors
+3. Recalculate P&L (fee-aware)
+4. Track negative streak counter
+5. Skip packages with pending limit orders (treated as "exiting")
+6. Evaluate all 18 heuristic triggers
+7. Route fired triggers: safety overrides execute immediately (cancel pending limit orders first), others go to AI advisor
+8. AI-approved exits use limit orders (0% maker fee) except stop_loss which always uses FOK
+9. AI prompt includes recent news headlines from news_scanner — no negative news → strong REJECT bias for trailing_stop, negative_drift, time_decay
 
 **18 Heuristic Triggers:**
 
@@ -591,17 +618,23 @@ The exit engine runs a 60-second scan loop evaluating all open packages.
    - Political synthetic derivatives: from PoliticalAnalyzer, scored by `EV * confidence * cross_platform_boost(1.5x)`
 3. Fallback: direct Polymarket Gamma API scan if scanner fails entirely
 4. **ITM/OTM filter:** skips entries with side price > $0.85 (tiny upside) or < $0.15 (lottery tickets)
-5. **Filters:** skips near-resolved (>0.92 or <0.08), near-50/50 (0.42-0.58), and <2 day expiry
+5. **Filters:** skips near-resolved (>0.92 or <0.08), near-50/50 (0.42-0.58), <2 day expiry, AND <1 hour expiry (short-duration markets with dynamic fees up to 3.15%, dominated by sub-100ms bots)
 6. Calculates profit potential AFTER estimated round-trip fees: `raw_profit = ((1.0 - favored_price) / favored_price) * 100`, then `net_profit = raw_profit - 2%` round-trip fees
-7. Scores each market: `profit_pct * crypto_boost(2x) * expiry_boost(2x if 3-14d, 1.5x if 14-30d) * volume_boost(1.5x if >100K, 1.2x if >10K) * conviction_boost(1.5x if >0.3) * insider_boost`
-8. Insider signal boost: if insiders have positions, `score *= (1 + strength * 2)`. Suspicious insiders add extra 1.5x
-9. Requires minimum 8% gross spread to enter (ensures ~6% net margin after 2% round-trip fees — raised from 5% after data showed fees eating 65% of losses)
-10. **Directional bets (same platform):** picks ONE side based on conviction — cheaper side = higher upside. Buying both YES and NO on the same platform locks in the spread minus fees = guaranteed loss
-11. **Cross-platform arb:** buys both sides on different platforms (spread capture)
-12. **Cooldown:** 24-hour re-entry cooldown after exiting a market (raised from 4h — NCAA entered 5x, Crude Oil 3x)
-13. Exit rules tuned from 31-trade paper data: target profit (50%), stop loss (-40%), trailing stop (35%, bounds 15-50%)
-14. Position limits: $200 max per trade, $5 min, 7 concurrent positions (3 reserved for news), $1400 auto exposure + $600 news
-15. **Market loss limit:** Block re-entry after 2 losses on the same market (prevents churning)
+7. Scores each market: `profit_pct * crypto_boost(2x) * expiry_boost(2x if 3-14d, 1.5x if 14-30d) * volume_boost(1.5x if >100K, 1.2x if >10K) * conviction_boost(1.5x if >0.3) * insider_boost * favorite_longshot_bias * cross_platform_disagreement_boost(1.3x if >10% deviation)`
+8. **Favorite-longshot bias (research-validated):** Strong favorites (>=0.80) get 2.5x boost, moderate (>=0.70) 1.8x. Severe longshots (<=0.20) get 0.2x penalty, mild (<=0.30) 0.5x. Longshots lose ~40%, favorites ~5%.
+9. Insider signal boost: if insiders have positions, `score *= (1 + strength * 2)`. Suspicious insiders add extra 1.5x
+10. **Probability model:** Volume-weighted consensus across platforms. Boosts score 1.3x when platforms disagree >10% (informational edge).
+11. Requires minimum 12% gross spread to enter (ensures ~10% net margin after 2% round-trip fees — raised from 8% to reduce churn)
+12. **Limit orders for entry:** All entries use GTC limit orders (0% maker fee on Polymarket) instead of FOK market orders (2% taker fee). Saves ~$108 per $5.7K deployed.
+13. **Directional bets (same platform):** picks ONE side based on conviction — cheaper side = higher upside. Buying both YES and NO on the same platform locks in the spread minus fees = guaranteed loss
+14. **Cross-platform arb:** buys both sides on different platforms (spread capture)
+15. **Cooldown:** 48-hour re-entry cooldown after exiting a market (raised from 24h)
+16. **Daily trade cap:** Max 3 new trades per calendar day (counter resets at midnight)
+17. Exit rules tuned from 31-trade paper data: target profit (50%), stop loss (-40%), trailing stop (35%, bounds 15-50%)
+18. **Variable Kelly sizing:** 1/4 Kelly for favorites (>=0.70), 1/5 for mid-range, 1/8 for longshots (<=0.30). Reduces risk on uncertain positions.
+19. **24h minimum hold period:** All new packages get `_min_hold_until` timestamp. During hold, soft triggers (trailing_stop, negative_drift, time_decay, stale_position) are suppressed. Safety overrides (spread_inversion) and mechanical exits (target_hit, stop_loss) still fire. Research: <24h holds underperform by 18%.
+20. Position limits: $200 max per trade, $5 min, 7 concurrent positions (3 reserved for news), $1400 auto exposure + $600 news
+21. **Market loss limit:** Block re-entry after 2 losses on the same market (prevents churning)
 16. **Decision logging:** all buys, skips (with reason), and failures logged to `decision_log.jsonl`
 
 ### How the Insider Tracker Works
@@ -647,6 +680,7 @@ The exit engine runs a 60-second scan loop evaluating all open packages.
 | GET | `/insiders/signals` | Insider signals for markets (`?condition_id=`) |
 | GET | `/insiders/alerts` | Recent movement alerts (last 20) |
 | GET | `/insiders/accuracy` | Per-wallet accuracy (min 3 resolved, sorted by accuracy) |
+| GET | `/calibration` | Calibration report (entry/exit thresholds, hold duration, fee analysis, limit fill rate) |
 | WS | `/ws` | Real-time WebSocket for position updates |
 
 ---
@@ -693,8 +727,11 @@ is_configured() → bool
   - Robinhood: 0% / 0% (commission-free)
   - Crypto Spot: 0% / 0% (synthetic, no real fees)
   - Kraken: 0.16% maker / 0.26% taker
-- **Buys use maker rate** (limit orders, 0% for Polymarket), **sells always use taker rate** (2% for Polymarket)
-- `sell(asset_id, quantity, last_known_price=0)` — tries real price first, falls back to `last_known_price` (from exit engine's last scan), then entry price
+- **Buys use maker rate** (limit orders, 0% for Polymarket), **sells use maker rate for limit exits** (0% for Polymarket) **or taker rate for FOK exits** (2% for Polymarket)
+- `sell_limit(asset_id, quantity, price)` — limit sell at specified price using maker fee (0% for Polymarket). Used by exit engine for non-emergency exits.
+- `sell(asset_id, quantity, last_known_price=0)` — FOK market sell, tries real price first, falls back to `last_known_price` (from exit engine's last scan), then entry price
+- `check_order_status(order_id)` — returns order fill status (paper mode: always "filled" immediately)
+- `cancel_order(order_id)` — cancels a pending limit order (paper mode: no-op returns True)
 - `get_current_price(asset_id)` — returns real price or 0 (does NOT fall back to entry price, so stale prices don't mask failures)
 - Tracks positions, fills at real market prices
 
@@ -944,7 +981,7 @@ python -m uvicorn server:app --host 127.0.0.1 --port 8500 --log-level info
 - Root cause of losses: AI advisor was blanket-approving time_decay/negative_drift exits → all 7 time_decay exits lost money. Fixed with nuanced AI prompt.
 - AI advisor active via Groq (Llama 3.3 70B), batched reviews (~1 call per tick instead of 8)
 - Insider tracker: 100 traders monitored, 139 markets with signals
-- Auto trader: event-driven, MIN_SPREAD_PCT raised 3%→5% (ensures 3% net margin after 2% fees), $2K exposure limit, $5 min trade size
+- Auto trader: event-driven, MIN_SPREAD_PCT raised to 12% (ensures 10% net margin), limit orders (0% maker fee), 3/day cap, 48h cooldown, 24h hold period, variable Kelly sizing, favorite-longshot bias (2.5x/0.2x), probability model (1.3x cross-platform disagreement boost)
 - Exit engine: 60s interval, 21 heuristic triggers, batched AI reviews (single LLM call for all packages per tick)
 - News scanner: 150s interval, 14 RSS feeds, two-pass AI pipeline (headline scan → deep analysis), breaking trades execute immediately
 - Decision logging: all buys, skips, trigger fires, AI verdicts, news signals logged to `decision_log.jsonl`
@@ -953,7 +990,23 @@ python -m uvicorn server:app --host 127.0.0.1 --port 8500 --log-level info
 - **Universal eval logger:** JSONL logging of all opportunities (entered + skipped), hourly backfill loop, missed opportunity analysis, calibration tracking
 - Spec: `docs/specs/2026-03-19-political-synthetic-analysis-design.md`
 - Plan: `docs/plans/2026-03-19-political-synthetic-analysis.md`
-- **Recent changes (2026-03-19):**
+- **Recent changes (2026-03-20) — Exit Optimization (limit exits, news-validated exits, calibration loop):**
+  - **Limit order exits:** `sell_limit()` rewritten in PaperExecutor to use 0% maker fee (was delegating to `sell()` with 2% taker). Added `check_order_status()` and `cancel_order()` stubs. Position manager gains `use_limit=True` param on `exit_leg()`, async pending order pattern (place limit → release lock → resolve next tick → FOK fallback after 60s). Two-phase locking: status check outside lock, finalization inside lock. Safety overrides cancel pending orders. stop_loss always FOK.
+  - **News-validated exits:** News scanner caches all matched headlines in `_matched_headlines` dict (before confidence gate, 500-entry cap, 48h prune). Exit engine collects headlines per package, injects into AI advisor prompt as `RECENT NEWS` section. No negative news → strong REJECT bias for trailing_stop, negative_drift, time_decay.
+  - **Calibration loop:** New `CalibrationEngine` reads eval_logger + trade_journal. Generates reports with entry calibration (correct_skip_rate per reason), exit calibration (win_rate per trigger), hold duration analysis (5 time buckets), fee analysis (limit fill rate, fee drag). 24h background task saves to `data/calibration/`. API: `GET /api/derivatives/calibration`.
+  - **Trade journal:** Records `exit_order_type` ("limit_filled", "fok_direct", etc.) per trade. New `get_performance_by_hold_duration()` method.
+  - **Test coverage:** 284 total tests (was 271).
+  - Spec: `docs/superpowers/specs/2026-03-19-exit-optimization-design.md`
+  - Plan: `docs/superpowers/plans/2026-03-19-exit-optimization.md`
+- **Previous changes (2026-03-19) — Trading Performance Overhaul (branch: feature/trading-perf-overhaul):**
+  - **Limit orders (Task 1):** Added `buy_limit`/`sell_limit`/`check_order_status`/`cancel_order` to BaseExecutor (defaults), PolymarketExecutor (GTC orders via OrderArgs + OrderType.GTC), and PaperExecutor (0% maker fee simulation). Position manager routes to `buy_limit` when `pkg["_use_limit_orders"]` is set. All auto-trader entries now use limit orders. Saves ~$108 per $5.7K deployed.
+  - **Churn reduction (Task 2):** `MIN_SPREAD_PCT` 8%→12%, `MAX_NEW_TRADES_PER_DAY=3` (daily counter resets on date change), `MARKET_COOLDOWN_SECONDS` 24h→48h (172800s). `get_stats()` now reports `trades_today` and `max_trades_per_day`.
+  - **24h hold period (Task 3):** All packages get `_min_hold_until = time.time() + 86400`. Exit engine suppresses soft triggers (trailing_stop, negative_drift, time_decay, stale_position, longshot_decay, spread_compression, vol_spike, correlation_break, platform_error) during hold. Safety overrides + target_hit + stop_loss + political_event_resolved still fire.
+  - **Short-duration filter (Task 4):** `MIN_HOURS_TO_EXPIRY=1.0`. Upgraded expiry parsing to `datetime.fromisoformat()` with hour precision (fallback to date-only). Filter applied in all 3 scoring pipelines (_scan_and_trade, _events_to_opportunities, _scan_polymarket).
+  - **Favorite-longshot scoring (Task 5):** Multipliers strengthened: favorites 1.8x→2.5x (>=0.80), 1.4x→1.8x (>=0.70); longshots 0.4x→0.2x (<=0.20), 0.7x→0.5x (<=0.30). Variable Kelly: 1/4 favorites, 1/5 mid-range, 1/8 longshots. Applied consistently across all 3 scoring pipelines.
+  - **Probability model (Task 6):** New `probability_model.py` — volume-weighted consensus across platforms. Flags >10% deviations. Auto-trader scores 1.3x boost when platforms disagree. Updated in `_auto_scan_loop` from matched events. Wired into server.py.
+  - **Test coverage:** 32 new tests (271 total), covering limit orders, churn reduction, hold period, short-duration filter, scoring, probability model.
+- **Previous changes (2026-03-19):**
   - **Kalshi adapter rewrite:** Public API now uses events→markets→orderbook pipeline (no auth needed). Returns ~54 properly-priced events. Old approach returned 600 useless multi-leg parlays.
   - **Coinbase dedup:** Coinbase prediction markets ARE Kalshi markets. `_fetch_via_kalshi()` returns empty when no `COINBASE_ADV_API_KEY` to avoid duplicate events.
   - **Opinion Labs disabled:** US-restricted platform. Adapter only registered when `OPINION_LABS_API_KEY` is set.

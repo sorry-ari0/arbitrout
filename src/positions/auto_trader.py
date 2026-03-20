@@ -27,32 +27,39 @@ MAX_TOTAL_EXPOSURE = 1400.0  # Max $1400 for auto trader (reserve $600 for news)
 PORTFOLIO_EXPOSURE_CAP = 0.40  # Kelly portfolio rule: never exceed 40% of total bankroll
 TOTAL_BANKROLL = 2000.0      # Total bankroll (auto_trader $1400 + news $600)
 SCAN_INTERVAL = 300          # 5 minutes between self-initiated scans (safety net)
-MIN_SPREAD_PCT = 8.0         # Minimum 8% spread to ensure profit after fees
+MIN_SPREAD_PCT = 12.0        # Minimum 12% spread to ensure profit after fees
 # Polymarket: 0% maker fee on limit orders. Use limit orders (maker) to enter,
 # taker to exit in worst case = ~2% one-way exit fee.
 # Conservative estimate: 0% entry + 2% exit = 2% round-trip
-# With 8% min spread - 2% fees = 6% net margin minimum
-# Raised from 5%: $4 fee on $200 trade means 2% minimum loss even on flat trades.
-# Data shows 65% of losses were fee drag — need wider margin to overcome.
+# With 12% min spread - 2% fees = 10% net margin minimum
+# Raised from 8%: 21 trades in 12h was excessive churn. 12% min spread
+# provides 10% net margin after fees, reducing low-quality entries.
 ROUND_TRIP_FEE_PCT = 2.0     # Estimated round-trip fees with limit order entry
 MAX_LOSSES_PER_MARKET = 2    # Block market after 2 losses (prevents BTC-top-performer pattern: 6 entries, $24 lost)
+MAX_NEW_TRADES_PER_DAY = 3          # Max new positions per calendar day
+MARKET_COOLDOWN_SECONDS = 172800    # 48h cooldown per market (was 86400)
+MIN_HOURS_TO_EXPIRY = 1.0  # Skip markets expiring within 1 hour (dynamic fees, bot dominance)
 
 
 class AutoTrader:
     """Autonomous paper trader that creates packages from scanner opportunities."""
 
     def __init__(self, position_manager, scanner=None, insider_tracker=None,
-                 interval: float = SCAN_INTERVAL, decision_logger=None):
+                 interval: float = SCAN_INTERVAL, decision_logger=None,
+                 probability_model=None):
         self.pm = position_manager
         self.scanner = scanner
         self.insider_tracker = insider_tracker
         self.interval = interval
         self.dlog = decision_logger
+        self.probability_model = probability_model
         self._task = None
         self._running = False
         self._trades_opened = 0
         self._trades_skipped = 0
         self._last_trade_time = 0.0
+        self._daily_trade_count = 0
+        self._daily_trade_date = ""
         self._scan_event = asyncio.Event()  # Fired by arb scanner after each scan
         # News scanner integration — thread-safe queue
         self._news_lock = asyncio.Lock()
@@ -122,6 +129,23 @@ class AutoTrader:
                         ids.add(condition_id)
         return ids
 
+    def _check_daily_limit(self) -> bool:
+        """Returns True if we can still open trades today.
+
+        Counts from actual packages (survives server restarts) and merges
+        with in-memory counter to catch trades opened this session.
+        """
+        today = date.today().isoformat()
+        if self._daily_trade_date != today:
+            # Reset in-memory counter and recount from persisted packages
+            self._daily_trade_count = 0
+            self._daily_trade_date = today
+            today_start = datetime.combine(date.today(), datetime.min.time()).timestamp()
+            for p in self.pm.list_packages():
+                if p.get("created_at", 0) >= today_start and p.get("name", "").startswith("Auto:"):
+                    self._daily_trade_count += 1
+        return self._daily_trade_count < MAX_NEW_TRADES_PER_DAY
+
     async def _scan_and_trade(self):
         """One scan cycle: find opportunities, filter, create packages."""
         open_pkgs = self.pm.list_packages("open")
@@ -148,6 +172,13 @@ class AutoTrader:
                         total_exposure, kelly_cap)
             if self.dlog:
                 self.dlog.log_scan_skip("kelly_portfolio_cap", exposure=round(total_exposure, 2))
+            return
+
+        if not self._check_daily_limit():
+            logger.info("Auto trader: daily trade limit (%d/%d), skipping",
+                        self._daily_trade_count, MAX_NEW_TRADES_PER_DAY)
+            if self.dlog:
+                self.dlog.log_scan_skip("daily_limit", trades_today=self._daily_trade_count)
             return
 
         remaining_budget = min(MAX_TOTAL_EXPOSURE - total_exposure, kelly_cap - total_exposure)
@@ -274,20 +305,35 @@ class AutoTrader:
             title = (opp.get("title") or opp.get("canonical_title") or "").lower()
             is_crypto = any(kw in title for kw in ["btc", "bitcoin", "eth", "ethereum", "crypto", "solana", "sol", "xrp"])
 
-            # Check expiry
+            # Check expiry — parse with time precision when available
             expiry = opp.get("expiry") or opp.get("end_date") or ""
             is_near_expiry = False
             days_to_expiry = 999
+            hours_to_expiry = float('inf')
             if expiry:
                 try:
-                    exp_date = datetime.strptime(expiry[:10], "%Y-%m-%d").date()
-                    days_to_expiry = (exp_date - date.today()).days
-                    is_near_expiry = 2 < days_to_expiry <= 30
+                    exp_dt = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
+                    hours_to_expiry = max(0, (exp_dt - datetime.now(exp_dt.tzinfo)).total_seconds() / 3600)
+                    days_to_expiry = hours_to_expiry / 24
                 except (ValueError, TypeError):
-                    pass
+                    try:
+                        exp_date = datetime.strptime(expiry[:10], "%Y-%m-%d").date()
+                        days_to_expiry = (exp_date - date.today()).days
+                        hours_to_expiry = days_to_expiry * 24
+                    except (ValueError, TypeError):
+                        pass
+                is_near_expiry = 2 < days_to_expiry <= 30
 
-            # Skip markets expiring within 2 days — exit engine's time_24h safety
-            # would immediately close them, resulting in $0 P&L
+            # Skip short-duration markets (15-min, 1-hour crypto)
+            # Research: dynamic fees up to 3.15%, 73% of arb captured by sub-100ms bots
+            if hours_to_expiry < MIN_HOURS_TO_EXPIRY:
+                self._trades_skipped += 1
+                if self.dlog:
+                    self.dlog.log_opportunity_skip(opp_title, "short_duration",
+                                                   hours=round(hours_to_expiry, 1))
+                continue
+
+            # Skip markets expiring within 2 days
             if days_to_expiry <= 2:
                 self._trades_skipped += 1
                 if self.dlog:
@@ -301,19 +347,18 @@ class AutoTrader:
             if is_near_expiry:
                 score *= 1.5
 
-            # Favorite-longshot bias (research-validated edge):
-            # - Contracts >$0.80: favorites win MORE than implied → boost
-            # - Contracts $0.15-$0.30: longshots lose MORE than implied → penalize
-            # - On Kalshi, buyers of contracts <$0.10 lose >60% of their money
+            # Favorite-longshot bias (research-validated):
+            # Research: longshots lose ~40%, favorites lose ~5%
+            # Kalshi: contracts <$0.10 lose >60% of buyer's money
             favored = min(buy_yes_price, buy_no_price) if buy_no_price > 0 else buy_yes_price
             if favored >= 0.80:
-                score *= 1.8  # Strong favorite — historically wins more than price implies
+                score *= 2.5  # Strong favorite (was 1.8x)
             elif favored >= 0.70:
-                score *= 1.4  # Moderate favorite
+                score *= 1.8  # Moderate favorite (was 1.4x)
             elif favored <= 0.20:
-                score *= 0.4  # Longshot penalty — these lose far more than implied
+                score *= 0.2  # Severe longshot penalty (was 0.4x)
             elif favored <= 0.30:
-                score *= 0.7  # Mild longshot penalty
+                score *= 0.5  # Longshot penalty (was 0.7x)
 
             # Insider signal boost: if whales/insiders have positions, boost score
             insider_signal = None
@@ -327,6 +372,13 @@ class AutoTrader:
                     if insider_signal.get("suspicious_count", 0) > 0:
                         score *= 1.5  # Extra boost for suspicious insiders
                     opp["insider_signal"] = insider_signal
+
+            # Cross-platform disagreement boost: if platforms disagree >10%,
+            # there may be an informational edge worth capturing
+            if self.probability_model:
+                consensus = self.probability_model.get_consensus(opp_title)
+                if consensus and consensus.get("max_deviation", 0) > 0.10:
+                    score *= 1.3
 
             # Skip low-score opportunities
             if score < MIN_SPREAD_PCT:
@@ -398,7 +450,7 @@ class AutoTrader:
                         if leg.get("current_price", 0) > 0:
                             market_exit_prices[ptitle] = leg["current_price"]
                 # 24-hour cooldown window (was 4 hours — too short, NCAA entered 5 times)
-                if time.time() - p.get("updated_at", 0) < 86400:  # 24 hours
+                if time.time() - p.get("updated_at", 0) < MARKET_COOLDOWN_SECONDS:  # 48 hours
                     for leg in p.get("legs", []):
                         cid = leg.get("asset_id", "").split(":")[0]
                         if cid:
@@ -495,12 +547,14 @@ class AutoTrader:
                     self._trades_skipped += 1
                     continue
 
+                pkg["_use_limit_orders"] = True
                 pkg_name = pkg.get("name", opp_title)
                 try:
                     result = await self.pm.execute_package(pkg)
                     if result.get("success"):
                         trades_this_cycle += 1
                         self._trades_opened += 1
+                        self._daily_trade_count += 1
                         remaining_budget -= trade_size
                         logger.info("Auto trader OPENED multi-outcome arb: %s (%d outcomes, spread=%.2f%%)",
                                     pkg_name, len(outcomes), spread_pct)
@@ -556,6 +610,7 @@ class AutoTrader:
                     self._trades_skipped += 1
                     continue
 
+                pkg["_use_limit_orders"] = True
                 pkg_name = pkg.get("name", opp_title)
                 bet_side = "POLITICAL"
                 bet_conviction = 0.0
@@ -565,6 +620,7 @@ class AutoTrader:
                     if result.get("success"):
                         trades_this_cycle += 1
                         self._trades_opened += 1
+                        self._daily_trade_count += 1
                         remaining_budget -= trade_size
                         logger.info("Auto trader OPENED political: %s (ev=%.1f%%, size=$%.2f)",
                                     pkg_name, spread_pct, trade_size)
@@ -734,7 +790,14 @@ class AutoTrader:
                 p_true = min(0.95, side_price + edge_bonus)
                 net_odds = (1.0 - side_price) / side_price if side_price > 0 else 1.0
                 kelly_full = (net_odds * p_true - (1.0 - p_true)) / net_odds if net_odds > 0 else 0
-                kelly_quarter = max(0.0, kelly_full * 0.25)
+                # Variable Kelly fraction: conservative on longshots, standard on favorites
+                if side_price <= 0.30:
+                    kelly_frac = 0.125  # 1/8 Kelly for longshots (high uncertainty)
+                elif side_price >= 0.70:
+                    kelly_frac = 0.25   # 1/4 Kelly for favorites (more confident)
+                else:
+                    kelly_frac = 0.20   # 1/5 Kelly for mid-range
+                kelly_quarter = max(0.0, kelly_full * kelly_frac)
 
                 # Apply Kelly fraction to remaining budget, capped at MAX_TRADE_SIZE
                 sized_trade = round(min(MAX_TRADE_SIZE, remaining_budget * kelly_quarter), 2)
@@ -769,6 +832,7 @@ class AutoTrader:
                 # No trailing stop, no time decay — these resolve at $0 or $1
                 # Flag as hold-to-resolution so exit engine skips soft triggers
                 pkg["_hold_to_resolution"] = True
+                pkg["_min_hold_until"] = time.time() + 86400
             elif strategy == "synthetic_derivative":
                 # Synthetics: structural edge from different strike prices — HOLD TO RESOLUTION
                 # The payoff depends on where the underlying lands relative to strikes
@@ -777,6 +841,7 @@ class AutoTrader:
                 pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -50}))
                 # No trailing stop — synthetics need room to breathe
                 pkg["_hold_to_resolution"] = True
+                pkg["_min_hold_until"] = time.time() + 86400
             else:
                 # Pure prediction: directional bet
                 # Differentiate by entry price level:
@@ -795,11 +860,16 @@ class AutoTrader:
                     pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -60}))
                     # No trailing stop — these should resolve, not be scalped
                     pkg["_hold_to_resolution"] = True
+                    pkg["_min_hold_until"] = time.time() + 86400
                 else:
                     # Standard prediction — tuned from 31-trade analysis
                     pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 50}))
                     pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -40}))
                     pkg["exit_rules"].append(create_exit_rule("trailing_stop", {"current": 35, "bound_min": 15, "bound_max": 50}))
+                    pkg["_min_hold_until"] = time.time() + 86400
+
+            # Use limit orders for 0% maker fees on entry
+            pkg["_use_limit_orders"] = True
 
             # Execute
             pkg_name = pkg.get("name", opp_title)
@@ -811,6 +881,7 @@ class AutoTrader:
                 if result.get("success"):
                     trades_this_cycle += 1
                     self._trades_opened += 1
+                    self._daily_trade_count += 1
                     remaining_budget -= trade_size
                     if market_id:
                         open_market_ids.add(market_id)
@@ -992,6 +1063,10 @@ class AutoTrader:
                         except (ValueError, TypeError):
                             pass
 
+                hours_to_expiry = days_to_expiry * 24
+                if hours_to_expiry < MIN_HOURS_TO_EXPIRY:
+                    continue
+
                 # Profit potential
                 favored_price = min(yes_price, no_price) if no_price > 0 else yes_price
                 raw_profit_pct = ((1.0 - favored_price) / favored_price) * 100 if favored_price > 0 else 0
@@ -1011,6 +1086,16 @@ class AutoTrader:
                     score *= 1.5
                 elif conviction > 0.2:
                     score *= 1.2
+
+                # Favorite-longshot bias (consistent with main scoring)
+                if favored_price >= 0.80:
+                    score *= 2.5
+                elif favored_price >= 0.70:
+                    score *= 1.8
+                elif favored_price <= 0.20:
+                    score *= 0.2
+                elif favored_price <= 0.30:
+                    score *= 0.5
 
                 opp = {
                     "title": title or market.get("title", ""),
@@ -1128,6 +1213,10 @@ class AutoTrader:
                         except (ValueError, TypeError):
                             pass
 
+                    hours_to_expiry = days_to_expiry * 24
+                    if hours_to_expiry < MIN_HOURS_TO_EXPIRY:
+                        continue
+
                     # Score based on conviction (distance from 0.5)
                     conviction = abs(yes_price - 0.5)
                     volume = float(market.get("volumeNum", 0) or market.get("volume", 0) or 0)
@@ -1187,6 +1276,17 @@ class AutoTrader:
             elif conv > 0.2:
                 score *= 1.2
 
+            # Favorite-longshot bias
+            favored_price = min(opp["buy_yes_price"], opp["buy_no_price"])
+            if favored_price >= 0.80:
+                score *= 2.5
+            elif favored_price >= 0.70:
+                score *= 1.8
+            elif favored_price <= 0.20:
+                score *= 0.2
+            elif favored_price <= 0.30:
+                score *= 0.5
+
             opp["_score"] = score
 
         opportunities.sort(key=lambda o: o.get("_score", 0), reverse=True)
@@ -1204,4 +1304,6 @@ class AutoTrader:
             "total_exposure": round(sum(p.get("total_cost", 0) for p in open_pkgs), 2),
             "max_exposure": MAX_TOTAL_EXPOSURE,
             "scan_interval_sec": self.interval,
+            "trades_today": self._daily_trade_count,
+            "max_trades_per_day": MAX_NEW_TRADES_PER_DAY,
         }
