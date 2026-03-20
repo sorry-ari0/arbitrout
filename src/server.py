@@ -331,6 +331,7 @@ async def lifespan(app: FastAPI):
                 decision_logger=decision_log,
             )
             _news_scanner.start()
+            exit_engine._news_scanner = _news_scanner
             logger.info("News scanner started — will scan RSS feeds every 2.5 min")
             init_position_system(pm, exit_engine, ai, trade_journal=journal, auto_trader=_auto_trader, insider_tracker=insider)
             _exit_task = True
