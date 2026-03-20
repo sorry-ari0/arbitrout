@@ -1,7 +1,7 @@
-"""Exit engine — 30s scan loop with 18 heuristic triggers and safety overrides.
+"""Exit engine — 60s scan loop with 21 heuristic triggers and safety overrides.
 
 Evaluates open packages, fires triggers, routes to AI advisor or immediate exit.
-Safety overrides (spread inversion, <24h expiry, <6h expiry) bypass LLM entirely.
+Safety overrides (spread inversion, political event resolved) bypass LLM entirely.
 """
 import asyncio
 import logging
@@ -50,7 +50,7 @@ T_POLITICAL_EVENT_RESOLVED = 21  # Contract in cluster settled → evaluate all 
 
 
 def evaluate_heuristics(pkg: dict) -> list[dict]:
-    """Evaluate all 18 heuristic triggers against a package. Returns list of fired triggers."""
+    """Evaluate all 21 heuristic triggers against a package. Returns list of fired triggers."""
     triggers: list[dict] = []
     strategy = pkg.get("strategy_type", "")
     legs = pkg.get("legs", [])
