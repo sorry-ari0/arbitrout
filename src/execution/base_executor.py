@@ -52,9 +52,10 @@ class BaseExecutor(ABC):
     async def check_order_status(self, order_id: str) -> dict:
         """Check status of a limit order. Returns dict with 'status' key.
         Possible statuses: 'open', 'filled', 'partially_filled', 'cancelled', 'unknown'.
-        Default: assumes filled (for executors that only do market orders)."""
-        return {"status": "filled", "order_id": order_id}
+        Default: returns UNKNOWN (executors that support GTC orders should override)."""
+        return {"status": "UNKNOWN"}
 
     async def cancel_order(self, order_id: str) -> bool:
-        """Cancel an open limit order. Returns True if cancelled. Default: no-op."""
-        return True
+        """Cancel an open limit order. Returns True if cancelled.
+        Default: returns False (no order to cancel)."""
+        return False
