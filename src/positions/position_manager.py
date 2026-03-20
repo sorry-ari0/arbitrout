@@ -216,10 +216,19 @@ class PositionManager:
                 await self._rollback(pkg, executed)
                 return {"success": False, "error": f"No executor for platform: {platform}"}
 
-            buy_kwargs = {"asset_id": leg["asset_id"], "amount_usd": leg["cost"]}
-            if hasattr(executor, 'real'):
-                buy_kwargs["fallback_price"] = leg["entry_price"]
-            result = await executor.buy(**buy_kwargs)
+            # Route to limit orders when flag is set (0% maker fees)
+            use_limit = pkg.get("_use_limit_orders", False)
+            if use_limit and hasattr(executor, 'buy_limit'):
+                result = await executor.buy_limit(
+                    asset_id=leg["asset_id"],
+                    amount_usd=leg["cost"],
+                    price=leg["entry_price"],
+                )
+            else:
+                buy_kwargs = {"asset_id": leg["asset_id"], "amount_usd": leg["cost"]}
+                if hasattr(executor, 'real'):
+                    buy_kwargs["fallback_price"] = leg["entry_price"]
+                result = await executor.buy(**buy_kwargs)
             if result.success:
                 leg["tx_id"] = result.tx_id
                 leg["entry_price"] = result.filled_price if result.filled_price > 0 else leg["entry_price"]

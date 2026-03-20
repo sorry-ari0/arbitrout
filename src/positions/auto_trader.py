@@ -801,6 +801,9 @@ class AutoTrader:
                     pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -40}))
                     pkg["exit_rules"].append(create_exit_rule("trailing_stop", {"current": 35, "bound_min": 15, "bound_max": 50}))
 
+            # Use limit orders for 0% maker fees on entry
+            pkg["_use_limit_orders"] = True
+
             # Execute
             pkg_name = pkg.get("name", opp_title)
             bet_side = pkg.get("_bet_side", "SYNTHETIC" if is_synthetic else ("BOTH" if is_cross_platform else "?"))

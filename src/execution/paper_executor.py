@@ -113,6 +113,49 @@ class PaperExecutor:
         self.trade_history.append({"action":"sell","asset_id":asset_id,"price":price,"quantity":quantity,"proceeds_usd":net_proceeds,"fee":fee,"tx_id":tx_id})
         return ExecutionResult(True, tx_id, price, quantity, fee, None)
 
+    async def buy_limit(self, asset_id: str, amount_usd: float, price: float) -> ExecutionResult:
+        """Simulate a limit buy using maker fee rate (0% for Polymarket).
+
+        Uses the provided limit price instead of fetching current price.
+        Computes fee inline using MAKER_FEE_RATES — does NOT mutate self.buy_fee_rate.
+        """
+        if amount_usd > self.balance:
+            return ExecutionResult(False, None, 0, 0, 0, f"Insufficient paper balance: {self.balance:.2f} < {amount_usd:.2f}")
+        if price <= 0:
+            return ExecutionResult(False, None, 0, 0, 0, f"Invalid limit price for {asset_id}")
+
+        # Look up maker fee rate for this platform
+        platform = getattr(self.real, '__class__', type(self.real)).__name__.lower()
+        maker_rate = DEFAULT_FEE_RATE
+        for name, rate in MAKER_FEE_RATES.items():
+            if name in platform:
+                maker_rate = rate
+                break
+
+        fee = round(amount_usd * maker_rate, 4)
+        total_cost = amount_usd + fee
+        if total_cost > self.balance:
+            return ExecutionResult(False, None, 0, 0, 0, f"Insufficient paper balance after fees: {self.balance:.2f} < {total_cost:.2f}")
+
+        qty = amount_usd / price
+        self.balance -= total_cost
+        self.total_fees_paid += fee
+        pos = self.positions.get(asset_id)
+        if pos:
+            total = pos["quantity"] + qty
+            pos["avg_entry_price"] = (pos["avg_entry_price"] * pos["quantity"] + price * qty) / total
+            pos["quantity"] = total
+        else:
+            self.positions[asset_id] = {"quantity": qty, "avg_entry_price": price}
+        tx_id = f"paper_{uuid.uuid4().hex[:12]}"
+        self.trade_history.append({"action": "buy_limit", "asset_id": asset_id, "price": price,
+                                   "quantity": qty, "amount_usd": amount_usd, "fee": fee, "tx_id": tx_id})
+        return ExecutionResult(True, tx_id, price, qty, fee, None)
+
+    async def sell_limit(self, asset_id: str, quantity: float, price: float) -> ExecutionResult:
+        """Sell limit — delegates to market sell since exits use taker rate anyway."""
+        return await self.sell(asset_id, quantity)
+
     async def get_balance(self) -> BalanceResult:
         pos_val = 0.0
         for aid, pos in self.positions.items():
