@@ -365,18 +365,24 @@ class AutoTrader:
             elif favored <= 0.30:
                 score *= 0.5  # Longshot penalty (was 0.7x)
 
-            # Insider signal boost: if whales/insiders have positions, boost score
+            # Insider signal boost: conviction traders get massive boost, market makers ignored
             insider_signal = None
             market_id = opp.get("buy_yes_market_id", "")
             if self.insider_tracker and market_id:
                 insider_signal = self.insider_tracker.get_insider_signal(market_id)
                 if insider_signal and insider_signal.get("has_signal"):
                     strength = insider_signal.get("signal_strength", 0)
-                    # Strong insider signal = 2-3x score boost
-                    score *= (1.0 + strength * 2.0)
-                    if insider_signal.get("suspicious_count", 0) > 0:
-                        score *= 1.5  # Extra boost for suspicious insiders
+                    conviction_count = insider_signal.get("conviction_count", 0)
+                    if conviction_count > 0:
+                        # Conviction traders (Theo4, Fredi9999, etc.) = strong directional signal
+                        score *= (1.0 + strength * 3.0)  # Up to 4x base boost
+                        if conviction_count >= 2:
+                            score *= 1.5  # Multiple conviction traders agree = very high signal
+                    else:
+                        # Unknown wallets only — weaker signal
+                        score *= (1.0 + strength * 1.5)
                     opp["insider_signal"] = insider_signal
+                    opp["_insider_driven"] = conviction_count > 0
 
             # Cross-platform disagreement boost: if platforms disagree >10%,
             # there may be an informational edge worth capturing

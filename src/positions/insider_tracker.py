@@ -32,6 +32,33 @@ LEADERBOARD_SIZE = 50        # Top 50 traders to monitor
 SCAN_INTERVAL = 900          # 15 minutes between full scans
 CACHE_TTL = 600              # Cache insider data for 10 minutes
 
+# Wallet classification thresholds
+ROI_CONVICTION_MIN = 0.20    # >20% ROI = conviction trader (directional, informed)
+ROI_MARKET_MAKER_MAX = 0.05  # <5% ROI = market maker (spread capture, noise)
+VOL_MARKET_MAKER_MIN = 100_000_000  # >$100M volume + low ROI = market maker
+
+# High-conviction watchlist: known profitable directional traders
+# These get 5x signal weight and bypass normal ROI thresholds
+# Source: Polymarket leaderboard analysis (2026-03-20)
+HIGH_CONVICTION_WATCHLIST = {
+    "0x56687bf447db6ffa42ffe2204a05edaa20f55839": "Theo4",        # $22M PNL, 51% ROI
+    "0x1f2dd6d473f3e824cd2f8a89d9c69fb96f6ad0cf": "Fredi9999",    # $16.6M PNL, 22% ROI
+    "0x863134d00841b2e200492805a01e1e2f5defaa53": "RepTrump",     # $7.5M PNL, 54% ROI
+    "0x78b9ac44a6d7d7a076c14e0ad518b301b63c6b76": "Len9311238",   # $8.7M PNL, 53% ROI
+    "0x885783a5e42d297c3532081ebf5c14ba0e9b0a44": "BetTom42",     # $5.6M PNL, 50% ROI
+    "0x23786fdd7bf5a6fa7c249a3b tried1ff4c6b2f01": "mikatrade77",  # $5.2M PNL, 47% ROI
+    "0xd0c042f8ac8f16a957f75de8c2e1e64e30e625c1": "alexmulti",    # $4.8M PNL, 48% ROI
+    "0x16f91d4d0c17c5de07d2f01bceac542c4e4a05a8": "Jenzigo",      # $4.1M PNL, 43% ROI
+}
+
+# Known market makers (high volume, low ROI — exclude from directional signals)
+KNOWN_MARKET_MAKERS = {
+    "0x204f72f35326db932158cba6adff0b9a1da95e14": "swisstony",    # $5.4M PNL, 0.96% ROI, $562M vol
+    "0x2005d16a84ceefa912d4e380cd32e7ff827875ea": "RN1",          # $5.8M PNL, 2.1% ROI, $283M vol
+    "0xe90bec87d9ef430f27f9dcfe72c34b76967d5da2": "gmanas",       # $5.0M PNL, 0.94% ROI, $529M vol
+    "0x507e52ef684ca2dd91f90a9d26d149dd3288beae": "GamblingIsAllYouNeed",  # $4.4M, 1.6%, $268M
+}
+
 
 class InsiderTracker:
     """Tracks whale/insider activity on Polymarket for trading signals."""
@@ -170,6 +197,7 @@ class InsiderTracker:
         self._top_traders = unique_traders[:LEADERBOARD_SIZE * 2]  # Keep top 100
 
         # Flag wallets with high PNL or suspicious patterns
+        # Classify into conviction traders vs market makers
         for t in self._top_traders:
             wallet = t.get("proxyWallet", "")
             pnl = float(t.get("pnl", 0) or 0)
@@ -182,6 +210,23 @@ class InsiderTracker:
             roi = pnl / volume if volume > 0 else 0
             is_suspicious = roi > 0.15  # >15% ROI is noteworthy
 
+            # Classify wallet type
+            if wallet.lower() in {k.lower() for k in HIGH_CONVICTION_WATCHLIST}:
+                wallet_type = "conviction"
+                signal_weight = 5.0  # Watchlist wallets get 5x weight
+            elif wallet.lower() in {k.lower() for k in KNOWN_MARKET_MAKERS}:
+                wallet_type = "market_maker"
+                signal_weight = 0.0  # Market makers excluded from directional signals
+            elif roi >= ROI_CONVICTION_MIN and volume < 50_000_000:
+                wallet_type = "conviction"
+                signal_weight = 3.0  # High ROI, low volume = informed directional
+            elif roi <= ROI_MARKET_MAKER_MAX and volume >= VOL_MARKET_MAKER_MIN:
+                wallet_type = "market_maker"
+                signal_weight = 0.0  # Low ROI, high volume = spread capture
+            else:
+                wallet_type = "unknown"
+                signal_weight = 1.0
+
             self._flagged_wallets[wallet] = {
                 "wallet": wallet,
                 "username": t.get("userName", ""),
@@ -190,6 +235,8 @@ class InsiderTracker:
                 "roi_pct": round(roi * 100, 2),
                 "rank": t.get("rank", "?"),
                 "suspicious": is_suspicious,
+                "wallet_type": wallet_type,
+                "signal_weight": signal_weight,
                 "flagged_at": time.time(),
                 "x_username": t.get("xUsername", ""),
                 "verified": t.get("verifiedBadge", False),
@@ -419,14 +466,35 @@ class InsiderTracker:
 
         yes_value = 0
         no_value = 0
+        conviction_yes = 0
+        conviction_no = 0
         suspicious_count = 0
+        conviction_count = 0
+        market_maker_count = 0
         for p in positions:
             val = abs(p.get("current_value", 0))
             outcome = (p.get("outcome", "") or p.get("asset", "")).upper()
+            wallet = p.get("wallet", "")
+            trader = self._flagged_wallets.get(wallet, {})
+            w_type = trader.get("wallet_type", "unknown")
+            weight = trader.get("signal_weight", 1.0)
+
+            if w_type == "market_maker":
+                market_maker_count += 1
+                continue  # Exclude market makers from directional signal
+
+            if w_type == "conviction":
+                conviction_count += 1
+
+            weighted_val = val * weight
             if "YES" in outcome or outcome == "0":
-                yes_value += val
+                yes_value += weighted_val
+                if w_type == "conviction":
+                    conviction_yes += weighted_val
             else:
-                no_value += val
+                no_value += weighted_val
+                if w_type == "conviction":
+                    conviction_no += weighted_val
             if p.get("suspicious"):
                 suspicious_count += 1
 
@@ -442,29 +510,38 @@ class InsiderTracker:
         avg_accuracy = 0
         accuracy_count = 0
         for p in positions:
+            if self._flagged_wallets.get(p["wallet"], {}).get("wallet_type") == "market_maker":
+                continue  # Don't count market maker accuracy
             acc = self._wallet_accuracy.get(p["wallet"])
             if acc and acc["total"] >= 3:  # Need at least 3 resolved markets
                 avg_accuracy += acc["accuracy"]
                 accuracy_count += 1
         avg_accuracy = avg_accuracy / accuracy_count if accuracy_count > 0 else 0.5  # Default 50%
 
-        # Signal strength: insiders + $ + suspicious + accuracy
-        count_score = min(len(positions) / 5, 1.0)  # Cap at 5 insiders
-        value_score = min(total_value / 50000, 1.0)  # Cap at $50K
-        suspicious_score = min(suspicious_count / 3, 1.0)  # Cap at 3 suspicious
-        accuracy_score = avg_accuracy  # 0-1 based on track record
-        strength = (count_score * 0.2 + value_score * 0.3 + suspicious_score * 0.2 + accuracy_score * 0.3)
+        # Signal strength: conviction-weighted
+        # Conviction traders drive the signal; market makers are excluded
+        non_mm_count = len(positions) - market_maker_count
+        count_score = min(non_mm_count / 5, 1.0)
+        value_score = min(total_value / 50000, 1.0)
+        conviction_score = min(conviction_count / 2, 1.0)  # Cap at 2 conviction traders
+        accuracy_score = avg_accuracy
+
+        strength = (count_score * 0.15 + value_score * 0.25 +
+                    conviction_score * 0.35 + accuracy_score * 0.25)
 
         return {
-            "has_signal": True,
-            "insider_count": len(positions),
+            "has_signal": non_mm_count > 0,
+            "insider_count": non_mm_count,
+            "conviction_count": conviction_count,
+            "market_maker_count": market_maker_count,
             "suspicious_count": suspicious_count,
             "net_direction": direction,
             "yes_value": round(yes_value, 2),
             "no_value": round(no_value, 2),
             "total_insider_value": round(total_value, 2),
             "signal_strength": round(strength, 3),
-            "insiders": positions,
+            "insiders": [p for p in positions
+                         if self._flagged_wallets.get(p.get("wallet", ""), {}).get("wallet_type") != "market_maker"],
         }
 
     def get_stats(self) -> dict:
