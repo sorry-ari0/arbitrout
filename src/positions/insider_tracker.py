@@ -33,7 +33,8 @@ SCAN_INTERVAL = 900          # 15 minutes between full scans
 CACHE_TTL = 600              # Cache insider data for 10 minutes
 
 # Wallet classification thresholds
-ROI_CONVICTION_MIN = 0.20    # >20% ROI = conviction trader (directional, informed)
+# Conviction = consistently winning at high rates, regardless of volume
+ROI_CONVICTION_MIN = 0.15    # >15% ROI = conviction trader (consistent winners)
 ROI_MARKET_MAKER_MAX = 0.05  # <5% ROI = market maker (spread capture, noise)
 VOL_MARKET_MAKER_MIN = 100_000_000  # >$100M volume + low ROI = market maker
 
@@ -208,18 +209,21 @@ class InsiderTracker:
 
             # Estimate win rate from PNL/volume ratio
             roi = pnl / volume if volume > 0 else 0
-            is_suspicious = roi > 0.15  # >15% ROI is noteworthy
+            is_suspicious = roi > 0.12  # >12% ROI is noteworthy (consistent winners)
 
             # Classify wallet type
+            # Priority: watchlist > known MM > ROI-based classification
+            # Conviction = consistently winning at high rates (ROI), regardless of volume
             if wallet.lower() in {k.lower() for k in HIGH_CONVICTION_WATCHLIST}:
                 wallet_type = "conviction"
                 signal_weight = 5.0  # Watchlist wallets get 5x weight
             elif wallet.lower() in {k.lower() for k in KNOWN_MARKET_MAKERS}:
                 wallet_type = "market_maker"
                 signal_weight = 0.0  # Market makers excluded from directional signals
-            elif roi >= ROI_CONVICTION_MIN and volume < 50_000_000:
+            elif roi >= ROI_CONVICTION_MIN:
+                # High win rate = conviction, no volume gate
                 wallet_type = "conviction"
-                signal_weight = 3.0  # High ROI, low volume = informed directional
+                signal_weight = 3.0 + min(roi * 5, 2.0)  # 3-5x weight, scales with ROI
             elif roi <= ROI_MARKET_MAKER_MAX and volume >= VOL_MARKET_MAKER_MIN:
                 wallet_type = "market_maker"
                 signal_weight = 0.0  # Low ROI, high volume = spread capture
