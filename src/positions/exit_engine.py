@@ -75,32 +75,30 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
                     "action": "full_exit", "safety_override": False})
 
     # ── 2: Trailing Stop (adaptive, price-level-aware) ───────────────────────
-    # Research: fixed trailing stops fail on prediction markets because a $0.20
-    # contract swinging 15% is only $0.03 (noise), while a $0.80 contract
-    # swinging 15% is a genuine $0.12 move. Scale trail by entry price level:
-    #   Longshots ($0.10-0.30): 2.0x wider (high volatility, low absolute moves)
-    #   Uncertain ($0.30-0.60): 1.0x standard
-    #   Favorites ($0.60-0.85): 0.7x tighter (upside capped at $1.00, protect gains)
-    for rule in rules:
-        if rule.get("type") == "trailing_stop" and rule.get("active"):
-            trail_pct = rule["params"].get("current", 35)
-            # Adapt trail by average entry price across legs
-            avg_entry = 0.5
-            open_legs = [l for l in legs if l.get("status") == "open"]
-            if open_legs:
-                entries = [l.get("entry_price", 0.5) for l in open_legs]
-                avg_entry = sum(entries) / len(entries)
-            if avg_entry <= 0.30:
-                trail_pct *= 2.0  # Longshots: very wide trail
-            elif avg_entry >= 0.60:
-                trail_pct *= 0.7  # Favorites: tighter trail to protect gains
-            # else: standard trail for uncertain zone
-            if peak_value > 0:
-                drawdown = (peak_value - current_value) / peak_value * 100
-                if drawdown >= trail_pct:
-                    triggers.append({"trigger_id": T_TRAILING_STOP, "name": "trailing_stop",
-                        "details": f"Drawdown {drawdown:.1f}% >= adaptive trail {trail_pct:.1f}% (entry={avg_entry:.2f})",
-                        "action": "full_exit", "safety_override": False})
+    # Skip trailing stop entirely for hold-to-resolution positions (arb, synthetics,
+    # high-probability predictions). These resolve at $0 or $1 — trailing stops
+    # just cut winners early on normal prediction market noise.
+    if not pkg.get("_hold_to_resolution"):
+        for rule in rules:
+            if rule.get("type") == "trailing_stop" and rule.get("active"):
+                trail_pct = rule["params"].get("current", 35)
+                # Adapt trail by average entry price across legs
+                avg_entry = 0.5
+                open_legs = [l for l in legs if l.get("status") == "open"]
+                if open_legs:
+                    entries = [l.get("entry_price", 0.5) for l in open_legs]
+                    avg_entry = sum(entries) / len(entries)
+                if avg_entry <= 0.30:
+                    trail_pct *= 2.0  # Longshots: very wide trail
+                # Favorites in standard mode: tighter trail to protect gains
+                elif avg_entry >= 0.60:
+                    trail_pct *= 0.7
+                if peak_value > 0:
+                    drawdown = (peak_value - current_value) / peak_value * 100
+                    if drawdown >= trail_pct:
+                        triggers.append({"trigger_id": T_TRAILING_STOP, "name": "trailing_stop",
+                            "details": f"Drawdown {drawdown:.1f}% >= adaptive trail {trail_pct:.1f}% (entry={avg_entry:.2f})",
+                            "action": "full_exit", "safety_override": False})
 
     # ── 3: Partial Profit ───────────────────────────────────────────────────
     for rule in rules:
@@ -140,13 +138,20 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
                     "action": "review", "safety_override": False})
 
     # ── 7: Spread Inversion (SAFETY) ────────────────────────────────────────
+    # For arb/synthetic positions: only trigger if combined price exceeds 1.0 + fees
+    # buffer. Minor inversions are noise — the positions resolve at $0 or $1,
+    # so temporary inversion doesn't mean the arb is broken.
     if strategy in ("cross_platform_arb", "synthetic_derivative", "political_synthetic") and len(legs) >= 2:
         yes_price = sum(l.get("current_price", 0) for l in legs if "yes" in l.get("type", "").lower())
         no_price = sum(l.get("current_price", 0) for l in legs if "no" in l.get("type", "").lower())
         combined = yes_price + no_price
-        if combined > 1.0:
+        # Fee buffer: entry fees already paid (~2-3%), so only invert when
+        # the current spread is worse than what we'd lose by exiting now
+        # (exit costs ~1-2% in market impact + fees). Use 1.05 threshold.
+        inversion_threshold = 1.05
+        if combined > inversion_threshold:
             triggers.append({"trigger_id": T_SPREAD_INVERSION, "name": "spread_inversion",
-                "details": f"Combined price {combined:.4f} > 1.0 — spread inverted",
+                "details": f"Combined price {combined:.4f} > {inversion_threshold} — spread deeply inverted",
                 "action": "immediate_exit", "safety_override": True})
 
     # ── 8: Spread Compression ───────────────────────────────────────────────
@@ -197,11 +202,14 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
     # ── 15: Negative Drift ──────────────────────────────────────────────────
     # Hardened: was -2% + 3 ticks (normal noise). Data showed 4 AI-approved
     # negative_drift exits, 0 wins, -$55. Now requires genuine deterioration.
-    neg_streak = pkg.get("_neg_streak", 0)
-    if pnl_pct < -8 and neg_streak >= 5:
-        triggers.append({"trigger_id": T_NEGATIVE_DRIFT, "name": "negative_drift",
-            "details": f"Sustained negative P&L ({pnl_pct:.1f}%) for {neg_streak} ticks",
-            "action": "review", "safety_override": False})
+    # Skip for hold-to-resolution: arbs/synthetics/high-prob resolve at $0 or $1,
+    # cumulative negative drift is just noise until resolution.
+    if not pkg.get("_hold_to_resolution"):
+        neg_streak = pkg.get("_neg_streak", 0)
+        if pnl_pct < -8 and neg_streak >= 5:
+            triggers.append({"trigger_id": T_NEGATIVE_DRIFT, "name": "negative_drift",
+                "details": f"Sustained negative P&L ({pnl_pct:.1f}%) for {neg_streak} ticks",
+                "action": "review", "safety_override": False})
 
     # ── 16: Platform Error ──────────────────────────────────────────────────
     platform_errors = pkg.get("_platform_errors", 0)
@@ -221,13 +229,15 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
     # ── 19: Stale Position (Triple Barrier time barrier) ──────────────────
     # Research: exit after 7 days if position hasn't moved significantly.
     # Prevents capital from being tied up in dead markets.
-    created_at = pkg.get("created_at", 0)
-    if created_at:
-        days_open = (time.time() - created_at) / 86400
-        if days_open >= 7 and abs(pnl_pct) < 5:
-            triggers.append({"trigger_id": T_STALE_POSITION, "name": "stale_position",
-                "details": f"Position open {days_open:.1f} days with only {pnl_pct:+.1f}% P&L — capital not working",
-                "action": "review", "safety_override": False})
+    # Skip for hold-to-resolution: these are MEANT to be held until the event resolves.
+    if not pkg.get("_hold_to_resolution"):
+        created_at = pkg.get("created_at", 0)
+        if created_at:
+            days_open = (time.time() - created_at) / 86400
+            if days_open >= 7 and abs(pnl_pct) < 5:
+                triggers.append({"trigger_id": T_STALE_POSITION, "name": "stale_position",
+                    "details": f"Position open {days_open:.1f} days with only {pnl_pct:+.1f}% P&L — capital not working",
+                    "action": "review", "safety_override": False})
 
     # ── 20: Longshot Decay ────────────────────────────────────────────────
     # Research (favorite-longshot bias): contracts bought <$0.30 decay faster
