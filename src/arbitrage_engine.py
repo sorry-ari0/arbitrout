@@ -857,13 +857,16 @@ def find_arbitrage(matched: list[MatchedEvent],
                 confidence=confidence,
             ))
 
-    # Deduplicate by (yes_event_id, no_event_id) pair
-    seen: set[tuple[str, str]] = set()
+    # Deduplicate by market pair (order-independent) and match_id
+    seen: set[frozenset] = set()
+    seen_match_ids: set[str] = set()
     deduped: list[ArbitrageOpportunity] = []
     for opp in opportunities:
-        key = (opp.buy_yes_event_id, opp.buy_no_event_id)
-        if key not in seen:
+        key = frozenset([opp.buy_yes_event_id, opp.buy_no_event_id])
+        mid = opp.matched_event.match_id
+        if key not in seen and mid not in seen_match_ids:
             seen.add(key)
+            seen_match_ids.add(mid)
             deduped.append(opp)
     opportunities = deduped
 

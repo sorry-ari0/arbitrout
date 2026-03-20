@@ -293,9 +293,10 @@ class AutoTrader:
                     self.dlog.log_opportunity_skip(opp_title, "low_spread", spread_pct=spread_pct)
                 continue
 
-            # Skip markets we already have positions on
-            market_id = opp.get("buy_yes_market_id", "")
-            if market_id and market_id in open_market_ids:
+            # Skip markets we already have positions on (check BOTH sides)
+            yes_mid = opp.get("buy_yes_market_id", "")
+            no_mid = opp.get("buy_no_market_id", "")
+            if (yes_mid and yes_mid in open_market_ids) or (no_mid and no_mid in open_market_ids):
                 self._trades_skipped += 1
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "already_open")
@@ -556,6 +557,11 @@ class AutoTrader:
                         self._trades_opened += 1
                         self._daily_trade_count += 1
                         remaining_budget -= trade_size
+                        # Refresh open IDs for this cycle
+                        for leg in pkg.get("legs", []):
+                            cid = leg.get("asset_id", "").split(":")[0]
+                            if cid:
+                                open_market_ids.add(cid)
                         logger.info("Auto trader OPENED multi-outcome arb: %s (%d outcomes, spread=%.2f%%)",
                                     pkg_name, len(outcomes), spread_pct)
                         if self.dlog:
@@ -622,6 +628,11 @@ class AutoTrader:
                         self._trades_opened += 1
                         self._daily_trade_count += 1
                         remaining_budget -= trade_size
+                        # Refresh open IDs for this cycle
+                        for leg in pkg.get("legs", []):
+                            cid = leg.get("asset_id", "").split(":")[0]
+                            if cid:
+                                open_market_ids.add(cid)
                         logger.info("Auto trader OPENED political: %s (ev=%.1f%%, size=$%.2f)",
                                     pkg_name, spread_pct, trade_size)
                         if self.dlog:
@@ -883,8 +894,11 @@ class AutoTrader:
                     self._trades_opened += 1
                     self._daily_trade_count += 1
                     remaining_budget -= trade_size
-                    if market_id:
-                        open_market_ids.add(market_id)
+                    # Refresh open market IDs so later iterations in this cycle see this trade
+                    if yes_mid:
+                        open_market_ids.add(yes_mid)
+                    if no_mid:
+                        open_market_ids.add(no_mid)
                     logger.info("Auto trader OPENED: %s (spread=%.1f%%, size=$%.2f, score=%.1f)",
                                 pkg_name, spread_pct, trade_size, score)
                     if self.dlog:

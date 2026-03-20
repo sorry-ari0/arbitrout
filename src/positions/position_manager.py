@@ -150,14 +150,19 @@ class PositionManager:
         if not pkg:
             return
 
+        # Skip recalculation for fully closed packages
+        if pkg.get("status") == "closed":
+            return
+
         total_cost = 0.0
         current_value = 0.0
         total_buy_fees = 0.0
         estimated_sell_fees = 0.0
         for leg in pkg["legs"]:
+            # Always include cost from all legs (open or closed)
+            total_cost += leg["cost"]
             if leg["status"] != "open":
                 continue
-            total_cost += leg["cost"]
             cur_price = leg.get("current_price", leg["entry_price"])
             leg_val = leg["quantity"] * cur_price
             leg["current_value"] = round(leg_val, 4)
