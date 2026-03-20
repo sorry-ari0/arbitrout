@@ -347,6 +347,7 @@ For each crypto market opportunity:
   SIZE: variable Kelly — 1/4 for favorites (>=0.70), 1/5 mid-range, 1/8 for longshots (<=0.30)
   LIMITS: 7 concurrent, $1400 auto exposure, 3 trades/day cap
   ORDERS: limit orders (GTC) for entries = 0% maker fee on Polymarket
+  BRACKETS: _use_brackets = True for standard prediction packages (not _hold_to_resolution)
 ```
 
 ### Insider Signal Strength Formula
@@ -502,6 +503,7 @@ ArbitrageOpportunity:
 | `src/positions/position_manager.py` | CRUD, persistence, execution, rollback for derivative packages |
 | `src/positions/position_router.py` | FastAPI router at `/api/derivatives/` — all position endpoints + WebSocket |
 | `src/positions/exit_engine.py` | 60s scan loop, 21 heuristic triggers, safety overrides, AI routing, limit order exits, news-validated decisions |
+| `src/positions/bracket_manager.py` | GTC target orders (0% maker) + monitored stop levels with rolling trail; safety override cancel; per-package bracket state |
 | `src/positions/auto_trader.py` | Autonomous paper trader — scans all platforms, limit orders, 3/day cap, 24h hold, variable Kelly, favorite-longshot bias |
 | `src/positions/probability_model.py` | Consensus probability aggregator — volume-weighted prices across platforms, deviation detection |
 | `src/positions/trade_journal.py` | Records completed trades with P&L, fees, exit triggers, exit_order_type, performance analytics, hold duration analysis |
@@ -557,6 +559,8 @@ ArbitrageOpportunity:
 
 The exit engine runs a 60-second scan loop evaluating all open packages.
 
+**Bracket Orders (0% maker fee exits):** On entry, a GTC sell order is placed at the target price (resting on the CLOB, 0% maker fee). Stop-loss is monitored as a price level (not a resting order) — when price drops to the stop level, a limit sell is placed. The exit engine's 60s tick adjusts the stop level upward as the position appreciates (rolling trail). Packages with `_hold_to_resolution` skip brackets. Safety overrides cancel brackets before FOK exit.
+
 **Each tick:**
 1. Resolve any pending limit orders from previous tick (check status → finalize or FOK-fallback after 60s timeout)
 2. Fetch current prices for all open legs via platform executors
@@ -564,7 +568,7 @@ The exit engine runs a 60-second scan loop evaluating all open packages.
 4. Track negative streak counter
 5. Skip packages with pending limit orders (treated as "exiting")
 6. Evaluate all 21 heuristic triggers
-7. Route fired triggers: safety overrides execute immediately (cancel pending limit orders first), others go to AI advisor
+7. Route fired triggers: safety overrides execute immediately (cancel pending limit orders first, including brackets), others go to AI advisor
 8. AI-approved exits use limit orders (0% maker fee) except stop_loss which always uses FOK
 9. AI prompt includes recent news headlines from news_scanner — no negative news → strong REJECT bias for trailing_stop, negative_drift, time_decay
 
@@ -910,7 +914,7 @@ PoliticalOpportunity:
 ## Fee Model
 | Platform | Maker (limit) | Taker (market) | Our Strategy |
 |----------|---------------|----------------|--------------|
-| Polymarket | 0% | ~2% | Limit orders (0% entry), taker exit worst case |
+| Polymarket | 0% | ~2% | Limit orders (0% entry), bracket GTC target (0% maker), FOK stop-loss (2% taker) |
 | Kalshi | 0.5% | 1% | — |
 | Coinbase | 0.4% | 0.6% | — |
 | PredictIt | 5% | 5% | — |
@@ -921,6 +925,7 @@ PoliticalOpportunity:
 | Kraken | 0.16% | 0.26% | CLI via WSL |
 
 - Paper executor uses separate buy/sell fee rates: buys at maker rate, limit sells at maker rate, FOK sells at taker rate
+- **Bracket exits use 0% maker fee** (GTC target order resting on CLOB). Legacy FOK exits still use taker fee (2%). Goal: eliminate taker fees on exits entirely.
 - P&L always calculated AFTER fees (estimated 1% sell-side for unrealized)
 - Auto trader deducts 2% round-trip from profit assessment before entering (0% maker entry + ~2% taker exit = 2% total)
 - Trade journal records buy_fees, sell_fees, total_fees per completed trade
@@ -1014,7 +1019,12 @@ python -m uvicorn server:app --host 127.0.0.1 --port 8500 --log-level info
 - **Universal eval logger:** JSONL logging of all opportunities (entered + skipped), hourly backfill loop, missed opportunity analysis, calibration tracking
 - Spec: `docs/specs/2026-03-19-political-synthetic-analysis-design.md`
 - Plan: `docs/plans/2026-03-19-political-synthetic-analysis.md`
-- **Recent changes (2026-03-20) — Trading Upgrades (portfolio NO, weather scanner, WS feed, parallel execution):**
+- **Recent changes (2026-03-20) — Bracket Orders & Rolling Trail:**
+  - **Bracket Orders & Rolling Trail** — Pre-placed GTC target orders (0% maker) + monitored stop levels with adaptive trailing stop. Eliminates ~2% taker exit fees. Safety overrides cancel brackets. Hold-to-resolution packages skip brackets.
+  - New module: `src/positions/bracket_manager.py` — per-package bracket state, place/cancel target GTC order, monitor stop level, roll stop upward on appreciation.
+  - Auto trader sets `_use_brackets = True` for standard prediction packages (not `_hold_to_resolution`).
+  - Exit engine 60s tick adjusts stop level (rolling trail) and cancels brackets on safety overrides before FOK exit.
+- **Previous changes (2026-03-20) — Trading Upgrades (portfolio NO, weather scanner, WS feed, parallel execution):**
   - **Quick wins (PR #88):** Scan interval 60s→10s with scan-in-progress guard. HIGH_CONVICTION_WATCHLIST (8 wallets at 5x) and KNOWN_MARKET_MAKERS (4 wallets at 0x) in insider_tracker. Wallet classification (conviction/market_maker/unknown). Conviction-weighted insider signal formula — market makers excluded from directional signals, conviction traders boosted 3-5x.
   - **Portfolio NO strategy:** New `scan_portfolio_no()` in ArbitrageEngine. Scans Polymarket grouped events (4+ outcomes), identifies overround (sum YES > 1.02), excludes top favorites optimally, buys NO on remaining outcomes for near-guaranteed profit. Auto trader execution path with limit orders, 10% stop loss, 15% target. Strategy type: `portfolio_no`.
   - **Weather market scanner:** New `weather_scanner.py` module. Fetches NWS forecasts for 10 US cities (NYC, Chicago, LA, Miami, Dallas, Denver, Seattle, Phoenix, Atlanta, Boston). Compares to Kalshi KXHIGHTEMP/KXRAINY market brackets. Sigmoid probability model with ±5°F std dev for temp estimation. Generates opportunities when forecast diverges >10% from market price. Strategy type: `weather_forecast`.

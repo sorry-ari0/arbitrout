@@ -76,13 +76,14 @@ def create_exit_rule(rule_type: str, params: dict) -> dict:
 class PositionManager:
     """Manages derivative packages — CRUD, persistence, execution, rollback."""
 
-    def __init__(self, data_dir: Path, executors: dict, trade_journal=None):
+    def __init__(self, data_dir: Path, executors: dict, trade_journal=None, bracket_manager=None):
         self.data_dir = Path(data_dir)
         self.executors = executors  # platform_name -> executor instance
         self.packages: dict[str, dict] = {}
         self.alerts: list[dict] = []  # pending escalation alerts
         self.trade_journal = trade_journal
         self._lock = asyncio.Lock()
+        self._bracket_manager = bracket_manager
         self._load()
 
     def _load(self):
@@ -251,6 +252,12 @@ class PositionManager:
         pkg["current_value"] = pkg["total_cost"]
         pkg["peak_value"] = pkg["total_cost"]
         self.add_package(pkg)
+        # Place bracket orders if requested
+        if pkg.get("_use_brackets") and self._bracket_manager:
+            try:
+                await self._bracket_manager.place_brackets(pkg)
+            except Exception as e:
+                logger.warning("Failed to place brackets for %s: %s", pkg["id"], e)
         return {"success": True, "package_id": pkg["id"]}
 
     async def _execute_legs_parallel(self, pkg: dict) -> dict:
