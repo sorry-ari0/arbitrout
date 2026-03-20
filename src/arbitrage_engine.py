@@ -620,6 +620,10 @@ class ArbitrageScanner:
         self._last_feed: list[dict] = []
         self._last_scan_time: float = 0
         self._lock = threading.Lock()
+        # Multi-outcome scan cache (TTL: 5 minutes)
+        self._multi_outcome_cache: list[dict] = []
+        self._multi_outcome_cache_time: float = 0
+        self._multi_outcome_cache_ttl: float = 300.0
 
     async def scan(self) -> dict:
         """Run a full scan cycle. Returns summary."""
@@ -719,7 +723,12 @@ class ArbitrageScanner:
         If all YES prices sum to $0.94, buying all = $0.06 guaranteed profit.
 
         Uses maker orders (0% fee) to enter, so profit = $1.00 - sum(prices).
+        Results cached for 5 minutes to avoid hammering the API every cycle.
         """
+        # Return cached results if still fresh
+        if time.time() - self._multi_outcome_cache_time < self._multi_outcome_cache_ttl:
+            return self._multi_outcome_cache
+
         try:
             import httpx
         except ImportError:
@@ -836,6 +845,8 @@ class ArbitrageScanner:
             logger.warning("Multi-outcome scan error: %s", e)
 
         logger.info("Multi-outcome scan: %d opportunities from grouped events", len(opportunities))
+        self._multi_outcome_cache = opportunities
+        self._multi_outcome_cache_time = time.time()
         return opportunities
 
     def _save_cache(self, events: list[NormalizedEvent]):

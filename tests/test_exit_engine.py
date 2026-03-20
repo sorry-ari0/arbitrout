@@ -28,18 +28,22 @@ class TestHeuristics:
         triggers = evaluate_heuristics(pkg)
         assert any(t["trigger_id"] == 5 for t in triggers)
 
-    def test_time_24h_fires_review(self):
-        """time_24h fires as a soft review trigger (not safety override).
+    def test_expiry_triggers_fire_as_review(self):
+        """Expiry triggers fire as soft review triggers (not safety override).
 
         Changed from safety_override=True to False — prediction markets
         move most in final hours, so early exits destroy value.
+
+        Note: strftime('%Y-%m-%d') truncates to midnight, so actual hours_left
+        depends on time-of-day. We accept either time_6h or time_24h since both
+        are soft review triggers with identical properties.
         """
         pkg = _make_pkg()
         from datetime import datetime, timedelta
         tomorrow = (datetime.now() + timedelta(hours=20)).strftime("%Y-%m-%d")
         for l in pkg["legs"]: l["expiry"] = tomorrow
         triggers = evaluate_heuristics(pkg)
-        time_triggers = [t for t in triggers if t["name"] == "time_24h"]
+        time_triggers = [t for t in triggers if t["name"] in ("time_24h", "time_6h")]
         assert len(time_triggers) >= 1
         assert time_triggers[0]["safety_override"] is False
         assert time_triggers[0]["action"] == "review"
