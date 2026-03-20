@@ -414,6 +414,18 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning("Political analyzer init failed: %s", e)
 
+    # Weather scanner — NWS forecast edge on Kalshi weather markets
+    try:
+        from positions.weather_scanner import WeatherScanner
+        _weather_scanner = WeatherScanner(
+            decision_logger=decision_log if _POSITIONS_AVAILABLE else None
+        )
+        if _POSITIONS_AVAILABLE and _auto_trader:
+            _auto_trader.set_weather_scanner(_weather_scanner)
+        logger.info("Weather scanner initialized")
+    except Exception as e:
+        logger.warning("Weather scanner init failed: %s", e)
+
     # Eval logger for hindsight analysis
     _eval_log = None
     _backfill_task = None
