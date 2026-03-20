@@ -209,6 +209,23 @@ class PositionManager:
             return await self._execute_package_locked(pkg)
 
     async def _execute_package_locked(self, pkg: dict) -> dict:
+        # Dedup guard: reject packages with condition IDs already open
+        open_cids = set()
+        for p in self.packages.values():
+            if p.get("status") != "open":
+                continue
+            for leg in p.get("legs", []):
+                if leg.get("status") == "open":
+                    aid = leg.get("asset_id", "")
+                    cid = (aid.split(":")[0] if ":" in aid else aid).lower()
+                    if cid:
+                        open_cids.add(cid)
+        for leg in pkg.get("legs", []):
+            aid = leg.get("asset_id", "")
+            cid = (aid.split(":")[0] if ":" in aid else aid).lower()
+            if cid and cid in open_cids:
+                return {"success": False, "error": f"Duplicate: {cid[:16]}... already open"}
+
         executed = []
         for leg in pkg["legs"]:
             platform = leg["platform"]
