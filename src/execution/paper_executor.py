@@ -1,5 +1,5 @@
 """Paper executor — wraps real executor for simulated trading. Real prices, fake money."""
-import logging, uuid
+import logging, time, uuid
 from .base_executor import BaseExecutor, ExecutionResult, BalanceResult, PositionInfo
 
 logger = logging.getLogger("execution.paper")
@@ -48,6 +48,7 @@ class PaperExecutor:
         self.trade_history: list[dict] = []
         self.total_fees_paid = 0.0
         self.use_limit_orders = use_limit_orders
+        self._resting_orders: dict = {}  # order_id → resting order info
         # Determine fee rates: maker for entry (limit orders), taker for exit (market orders)
         platform = getattr(real_executor, '__class__', type(real_executor)).__name__.lower()
         self.buy_fee_rate = DEFAULT_FEE_RATE
@@ -63,6 +64,7 @@ class PaperExecutor:
         # Keep fee_rate for backwards compat (average of buy/sell)
         self.fee_rate = self.buy_fee_rate
         self.order_type = "maker" if use_limit_orders else "taker"
+        self.fee_rates = {"maker": self.buy_fee_rate}
 
     async def buy(self, asset_id: str, amount_usd: float, fallback_price: float = 0) -> ExecutionResult:
         if amount_usd > self.balance:
@@ -153,45 +155,81 @@ class PaperExecutor:
         return ExecutionResult(True, tx_id, price, qty, fee, None)
 
     async def sell_limit(self, asset_id: str, quantity: float, price: float) -> ExecutionResult:
-        """Simulate a limit sell using maker fee rate (0% for Polymarket).
-        Uses the provided limit price instead of market price.
-        Mirrors buy_limit() pattern — looks up maker fee via MAKER_FEE_RATES.
+        """Place a resting sell limit order — reserves position quantity.
+
+        Does NOT fill immediately. The order rests until check_order_status
+        detects that market price >= limit price (a buyer matches our ask).
         """
         pos = self.positions.get(asset_id)
-        if not pos or pos["quantity"] < quantity * 0.999:
+        if not pos or pos.get("quantity", 0) < quantity * 0.999:
             return ExecutionResult(False, None, 0, 0, 0, f"No position or insufficient quantity for {asset_id}")
         if price <= 0:
             return ExecutionResult(False, None, 0, 0, 0, f"Invalid limit price for {asset_id}")
 
-        # Look up maker fee rate for this platform (same pattern as buy_limit)
-        platform = getattr(self.real, '__class__', type(self.real)).__name__.lower()
-        maker_rate = DEFAULT_FEE_RATE
-        for name, rate in MAKER_FEE_RATES.items():
-            if name in platform:
-                maker_rate = rate
-                break
-
-        proceeds = quantity * price
-        fee = round(proceeds * maker_rate, 4)
-        net_proceeds = proceeds - fee
-        self.balance += net_proceeds
-        self.total_fees_paid += fee
+        # Reserve position quantity (prevent double-sell)
         pos["quantity"] -= quantity
         if pos["quantity"] < 1e-10:
             del self.positions[asset_id]
+
         tx_id = f"paper_{uuid.uuid4().hex[:12]}"
+        self._resting_orders[tx_id] = {
+            "asset_id": asset_id, "quantity": quantity, "limit_price": price,
+            "placed_at": time.time(), "status": "open",
+        }
         self.trade_history.append({
-            "action": "sell_limit", "asset_id": asset_id, "price": price,
-            "quantity": quantity, "proceeds_usd": net_proceeds, "fee": fee, "tx_id": tx_id,
+            "action": "sell_limit_placed", "asset_id": asset_id, "price": price,
+            "quantity": quantity, "tx_id": tx_id,
         })
-        return ExecutionResult(True, tx_id, price, quantity, fee, None)
+        return ExecutionResult(True, tx_id, price, quantity, 0.0, None)
 
     async def check_order_status(self, order_id: str) -> dict:
-        """Paper mode: limit orders fill immediately."""
-        return {"status": "filled", "price": 0, "size_matched": 0, "fee": 0.0}
+        """Check if a resting order has filled.
+
+        Sell limit fills when market price >= limit price (buyer matches our ask).
+        """
+        resting = self._resting_orders.get(order_id)
+        if not resting:
+            # Legacy behavior for non-bracket pending orders
+            return {"status": "filled", "price": 0, "size_matched": 0, "fee": 0.0}
+        if resting["status"] != "open":
+            return {"status": resting["status"], "price": resting.get("fill_price", 0),
+                    "size_matched": resting["quantity"], "fee": resting.get("fee", 0.0)}
+
+        # Sell limit fills when a buyer matches at >= our ask price
+        try:
+            current = await self.real.get_current_price(resting["asset_id"])
+        except Exception:
+            current = 0
+        limit_price = resting["limit_price"]
+
+        if current >= limit_price:
+            # Fill at limit price (maker), not market price
+            maker_rate = self.fee_rates.get("maker", 0)
+            fee = round(resting["quantity"] * limit_price * maker_rate, 4)
+            proceeds = resting["quantity"] * limit_price - fee
+            self.balance += proceeds
+            self.total_fees_paid += fee
+            resting["status"] = "filled"
+            resting["fill_price"] = limit_price
+            resting["fee"] = fee
+            qty = resting["quantity"]
+            del self._resting_orders[order_id]
+            return {"status": "filled", "price": limit_price,
+                    "size_matched": qty, "fee": fee}
+
+        return {"status": "open", "price": 0, "size_matched": 0, "fee": 0.0}
 
     async def cancel_order(self, order_id: str) -> bool:
-        """Paper mode: no-op cancel."""
+        """Cancel a resting order and unreserve position quantity."""
+        resting = self._resting_orders.pop(order_id, None)
+        if resting and resting["status"] == "open":
+            # Unreserve position quantity
+            asset_id = resting["asset_id"]
+            pos = self.positions.get(asset_id)
+            if pos:
+                pos["quantity"] = pos.get("quantity", 0) + resting["quantity"]
+            else:
+                self.positions[asset_id] = {"quantity": resting["quantity"], "avg_entry_price": 0}
         return True
 
     async def get_balance(self) -> BalanceResult:

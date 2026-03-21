@@ -18,13 +18,18 @@ class PoliticalContractInfo:
     """Classification result for a single political contract."""
     event: NormalizedEvent          # source event (has event_id, platform, prices)
     contract_type: str              # candidate_win, party_outcome, margin_bracket,
-                                    # vote_share, matchup, yes_no_binary
+                                    # vote_share, matchup, yes_no_binary, crypto_event
     candidates: list[str] = field(default_factory=list)  # extracted candidate names
     party: Optional[str] = None     # "dem", "gop", or None
     race: Optional[str] = None      # "TX Senate", "President", etc.
     state: Optional[str] = None     # two-letter state abbreviation
     threshold: Optional[float] = None   # for margin/vote_share brackets
     direction: Optional[str] = None     # "above", "below", "between"
+    # Crypto extension fields (None for political contracts)
+    crypto_asset: Optional[str] = None       # "BTC", "ETH", "SOL", etc.
+    event_category: Optional[str] = None     # "regulatory", "price_target", "technical", "market_event"
+    crypto_direction: Optional[str] = None   # "positive", "negative", "neutral"
+    crypto_threshold: Optional[float] = None # dollar value for price_target contracts
 
 
 # ============================================================
@@ -166,7 +171,7 @@ class PoliticalOpportunity:
             buy_no_market_id = primary.event.event_id
 
         return {
-            "opportunity_type": "political_synthetic",
+            "opportunity_type": "crypto_synthetic" if self.cluster_id.startswith("crypto-") else "political_synthetic",
             "title": title,
             "canonical_title": canonical_title,
             "profit_pct": round(self.net_expected_value_pct, 2),

@@ -276,3 +276,194 @@ class TestClassifier:
         assert PLATFORM_FEES["kalshi"] == 1.5
         assert PLATFORM_FEES["predictit"] == 10.0
         assert PLATFORM_FEES["limitless"] == 2.0
+
+
+class TestCryptoModelFields:
+    """Tests for crypto fields on PoliticalContractInfo."""
+
+    def test_crypto_fields_default_none(self):
+        """Crypto fields default to None for political contracts."""
+        event = _make_event("Talarico wins TX Senate")
+        info = PoliticalContractInfo(
+            event=event, contract_type="candidate_win",
+            candidates=["Talarico"], race="TX Senate", state="TX",
+        )
+        assert info.crypto_asset is None
+        assert info.event_category is None
+        assert info.crypto_direction is None
+        assert info.crypto_threshold is None
+
+    def test_crypto_fields_populated(self):
+        """Crypto fields can be set for crypto_event contracts."""
+        event = _make_event("Bitcoin above $150K by end of 2026", platform="polymarket")
+        info = PoliticalContractInfo(
+            event=event, contract_type="crypto_event",
+            crypto_asset="BTC", event_category="price_target",
+            crypto_direction="positive", crypto_threshold=150000.0,
+        )
+        assert info.crypto_asset == "BTC"
+        assert info.event_category == "price_target"
+        assert info.crypto_direction == "positive"
+        assert info.crypto_threshold == 150000.0
+
+
+class TestCryptoEventClassifier:
+    """Tests for crypto_event classification type."""
+
+    def test_regulatory_btc(self):
+        """SEC + Bitcoin → crypto_event / regulatory."""
+        event = _make_event("Will SEC classify Bitcoin as a security?")
+        info = classify_contract(event)
+        assert info.contract_type == "crypto_event"
+        assert info.crypto_asset == "BTC"
+        assert info.event_category == "regulatory"
+        assert info.crypto_direction == "negative"
+
+    def test_price_target_btc(self):
+        """BTC above $150K → crypto_event / price_target."""
+        event = _make_event("Will Bitcoin be above $150,000 by end of 2026?")
+        info = classify_contract(event)
+        assert info.contract_type == "crypto_event"
+        assert info.crypto_asset == "BTC"
+        assert info.event_category == "price_target"
+        assert info.crypto_direction == "positive"
+        assert info.crypto_threshold == 150000.0
+
+    def test_price_target_eth(self):
+        """ETH above $5,000 → crypto_event / price_target."""
+        event = _make_event("Will Ethereum reach $5,000?")
+        info = classify_contract(event)
+        assert info.contract_type == "crypto_event"
+        assert info.crypto_asset == "ETH"
+        assert info.event_category == "price_target"
+        assert info.crypto_direction == "positive"
+        assert info.crypto_threshold == 5000.0
+
+    def test_technical_event(self):
+        """Ethereum upgrade → crypto_event / technical."""
+        event = _make_event("Will Ethereum complete the Pectra upgrade?")
+        info = classify_contract(event)
+        assert info.contract_type == "crypto_event"
+        assert info.crypto_asset == "ETH"
+        assert info.event_category == "technical"
+
+    def test_etf_approval(self):
+        """ETH ETF approved → crypto_event / regulatory / positive."""
+        event = _make_event("Will Ethereum ETF be approved by SEC?")
+        info = classify_contract(event)
+        assert info.contract_type == "crypto_event"
+        assert info.crypto_asset == "ETH"
+        assert info.event_category == "regulatory"
+        assert info.crypto_direction == "positive"
+
+    def test_hack_event(self):
+        """Solana hack → crypto_event / technical / negative."""
+        event = _make_event("Will Solana suffer a major exploit in 2026?")
+        info = classify_contract(event)
+        assert info.contract_type == "crypto_event"
+        assert info.crypto_asset == "SOL"
+        assert info.event_category == "technical"
+        assert info.crypto_direction == "negative"
+
+    def test_halving_is_technical(self):
+        """Bitcoin halving → crypto_event / technical."""
+        event = _make_event("Will Bitcoin halving happen before May 2028?")
+        info = classify_contract(event)
+        assert info.contract_type == "crypto_event"
+        assert info.crypto_asset == "BTC"
+        assert info.event_category == "technical"
+
+    def test_non_crypto_not_matched(self):
+        """Non-crypto political contract must NOT match crypto_event."""
+        event = _make_event("Talarico wins TX Senate")
+        info = classify_contract(event)
+        assert info.contract_type != "crypto_event"
+
+    def test_pure_crypto_mention_no_match(self):
+        """Pure mention of 'crypto' without actionable context → NOT crypto_event."""
+        event = _make_event("Will crypto be discussed at the debate?")
+        info = classify_contract(event)
+        assert info.contract_type == "yes_no_binary"
+
+    def test_congress_ban_bitcoin(self):
+        """Political + crypto overlap: 'Will Congress ban Bitcoin?' → crypto_event (priority)."""
+        event = _make_event("Will Congress ban Bitcoin?")
+        info = classify_contract(event)
+        assert info.contract_type == "crypto_event"
+        assert info.crypto_asset == "BTC"
+        assert info.event_category == "regulatory"
+        assert info.crypto_direction == "negative"
+
+    def test_asset_normalization(self):
+        """Various asset name forms normalize to standard tickers."""
+        cases = [
+            ("Will BTC reach $200,000?", "BTC"),
+            ("Will Ether exceed $10,000?", "ETH"),
+            ("Will SOL hit $500?", "SOL"),
+            ("Will Ripple be above $5?", "XRP"),
+            ("Will Dogecoin reach $1?", "DOGE"),
+        ]
+        for title, expected_asset in cases:
+            event = _make_event(title)
+            info = classify_contract(event)
+            assert info.contract_type == "crypto_event", f"Failed for: {title}"
+            assert info.crypto_asset == expected_asset, f"Expected {expected_asset} for: {title}"
+
+
+class TestCryptoOpportunityType:
+    """Tests for PoliticalOpportunity.to_dict() type awareness."""
+
+    def test_political_opportunity_type(self):
+        """Political cluster → opportunity_type 'political_synthetic'."""
+        from political.models import (
+            PoliticalOpportunity, PoliticalSyntheticStrategy,
+            PoliticalLeg, SyntheticLeg, Scenario,
+        )
+        event = _make_event("Talarico wins TX Senate")
+        info = PoliticalContractInfo(
+            event=event, contract_type="candidate_win",
+            candidates=["Talarico"], race="TX Senate", state="TX",
+        )
+        strategy = PoliticalSyntheticStrategy(
+            cluster_id="senate-tx-2026", strategy_name="Test",
+            legs=[SyntheticLeg(contract_idx=1, event_id=event.event_id, side="yes", weight=1.0)],
+            scenarios=[Scenario(outcome="Win", probability=0.6, pnl_pct=10.0)],
+            expected_value_pct=6.0, win_probability=0.6,
+            max_loss_pct=-40.0, confidence=0.7,
+        )
+        leg = PoliticalLeg(event=event, contract_info=info, side="yes", weight=1.0, platform_fee_pct=2.0)
+        opp = PoliticalOpportunity(
+            cluster_id="senate-tx-2026", strategy=strategy,
+            legs=[leg], total_fee_pct=2.0, net_expected_value_pct=4.0,
+            platforms=["polymarket"],
+        )
+        d = opp.to_dict()
+        assert d["opportunity_type"] == "political_synthetic"
+
+    def test_crypto_opportunity_type(self):
+        """Crypto cluster → opportunity_type 'crypto_synthetic'."""
+        from political.models import (
+            PoliticalOpportunity, PoliticalSyntheticStrategy,
+            PoliticalLeg, SyntheticLeg, Scenario,
+        )
+        event = _make_event("BTC above $150K", platform="polymarket")
+        info = PoliticalContractInfo(
+            event=event, contract_type="crypto_event",
+            crypto_asset="BTC", event_category="price_target",
+            crypto_direction="positive", crypto_threshold=150000.0,
+        )
+        strategy = PoliticalSyntheticStrategy(
+            cluster_id="crypto-btc-2026", strategy_name="BTC Hedge",
+            legs=[SyntheticLeg(contract_idx=1, event_id=event.event_id, side="yes", weight=1.0)],
+            scenarios=[Scenario(outcome="BTC up", probability=0.5, pnl_pct=15.0)],
+            expected_value_pct=7.0, win_probability=0.5,
+            max_loss_pct=-45.0, confidence=0.65,
+        )
+        leg = PoliticalLeg(event=event, contract_info=info, side="yes", weight=1.0, platform_fee_pct=2.0)
+        opp = PoliticalOpportunity(
+            cluster_id="crypto-btc-2026", strategy=strategy,
+            legs=[leg], total_fee_pct=2.0, net_expected_value_pct=5.0,
+            platforms=["polymarket"],
+        )
+        d = opp.to_dict()
+        assert d["opportunity_type"] == "crypto_synthetic"
