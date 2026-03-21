@@ -219,40 +219,58 @@ class TestTrailingStopCalibration:
         assert "25.0" in trailing[0]["details"]
 
     def test_binary_event_wider_trail(self):
-        """Sports events should get 1.5x wider trail."""
+        """Sports events with favorite entry should get 1.5x wider trail."""
         from positions.exit_engine import evaluate_heuristics
         pkg = {
             "name": "Auto: NCAA Basketball Final",
             "strategy_type": "pure_prediction",
-            "legs": [{"entry_price": 0.50, "status": "open", "current_price": 0.50,
-                       "quantity": 100, "cost": 50}],
+            "legs": [{"entry_price": 0.70, "status": "open", "current_price": 0.70,
+                       "quantity": 100, "cost": 70}],
             "exit_rules": [{"type": "trailing_stop", "active": True, "params": {"current": 35}}],
-            "total_cost": 50,
-            "peak_value": 60,
-            "current_value": 25,  # 58% drawdown
+            "total_cost": 70,
+            "peak_value": 80,
+            "current_value": 30,  # 62.5% drawdown
         }
         triggers = evaluate_heuristics(pkg)
         trailing = [t for t in triggers if t["name"] == "trailing_stop"]
-        # 35 * 1.5 (sports) = 52.5%. Drawdown is 58.3% >= 52.5%
+        # 35 * 0.7 (favorite) * 1.5 (sports) = 36.75%, floored to 36.75%. Drawdown 62.5% >= 36.75%
         assert len(trailing) == 1
 
     def test_non_sports_normal_trail(self):
-        """Non-sports positions should use normal trail without widening."""
+        """Non-sports favorite positions should use normal trail without widening."""
         from positions.exit_engine import evaluate_heuristics
         pkg = {
             "name": "Auto: Will Bitcoin reach $100k",
+            "strategy_type": "pure_prediction",
+            "legs": [{"entry_price": 0.70, "status": "open", "current_price": 0.70,
+                       "quantity": 100, "cost": 70}],
+            "exit_rules": [{"type": "trailing_stop", "active": True, "params": {"current": 35}}],
+            "total_cost": 70,
+            "peak_value": 80,
+            "current_value": 55,  # 31.25% drawdown
+        }
+        triggers = evaluate_heuristics(pkg)
+        trailing = [t for t in triggers if t["name"] == "trailing_stop"]
+        # 35 * 0.7 (favorite) = 24.5%, floored to 25%. Drawdown 31.25% >= 25%
+        assert len(trailing) == 1
+
+    def test_non_favorite_trailing_stop_skipped(self):
+        """Mid-range entries (< 0.60) should NOT trigger trailing stop."""
+        from positions.exit_engine import evaluate_heuristics
+        pkg = {
+            "name": "Auto: Will BTC reach $120k",
             "strategy_type": "pure_prediction",
             "legs": [{"entry_price": 0.50, "status": "open", "current_price": 0.50,
                        "quantity": 100, "cost": 50}],
             "exit_rules": [{"type": "trailing_stop", "active": True, "params": {"current": 35}}],
             "total_cost": 50,
             "peak_value": 60,
-            "current_value": 35,  # 41.7% drawdown
+            "current_value": 25,  # 58% drawdown — would fire, but entry < 0.60
         }
         triggers = evaluate_heuristics(pkg)
         trailing = [t for t in triggers if t["name"] == "trailing_stop"]
-        # 35% trail (no widening for crypto). Drawdown 41.7% >= 35%
-        assert len(trailing) == 1
+        # Entry 0.50 < 0.60 threshold → trailing stop skipped entirely
+        assert len(trailing) == 0
 
 
 class TestEquityCurve:
@@ -305,3 +323,135 @@ class TestEquityCurve:
             paper_curve = j.get_equity_curve(mode="paper")
             assert paper_curve["total_trades"] == 1
             assert paper_curve["cumulative_pnl_usd"] == 10.0
+
+
+class TestPoliticalEventResolved:
+    """Fix: political_event_resolved should NOT force-exit when only some legs resolved."""
+
+    def test_all_legs_resolved_triggers_immediate_exit(self):
+        """When ALL legs have resolved prices, trigger immediate_exit."""
+        from positions.exit_engine import evaluate_heuristics
+        pkg = {
+            "strategy_type": "political_synthetic",
+            "legs": [
+                {"leg_id": "L1", "entry_price": 0.40, "status": "open",
+                 "current_price": 0.99, "quantity": 50, "cost": 20},
+                {"leg_id": "L2", "entry_price": 0.30, "status": "open",
+                 "current_price": 0.01, "quantity": 50, "cost": 15},
+            ],
+            "exit_rules": [],
+            "total_cost": 35,
+            "peak_value": 50,
+            "current_value": 50,
+        }
+        triggers = evaluate_heuristics(pkg)
+        pol = [t for t in triggers if t["name"] == "political_event_resolved"]
+        assert len(pol) == 1
+        assert pol[0]["action"] == "immediate_exit"
+        assert pol[0]["safety_override"] is True
+
+    def test_partial_resolution_triggers_review_not_exit(self):
+        """When only SOME legs resolved, trigger review (not immediate_exit)."""
+        from positions.exit_engine import evaluate_heuristics
+        pkg = {
+            "strategy_type": "political_synthetic",
+            "legs": [
+                {"leg_id": "L1", "entry_price": 0.40, "status": "open",
+                 "current_price": 0.99, "quantity": 50, "cost": 20},
+                {"leg_id": "L2", "entry_price": 0.30, "status": "open",
+                 "current_price": 0.45, "quantity": 50, "cost": 15},
+            ],
+            "exit_rules": [],
+            "total_cost": 35,
+            "peak_value": 50,
+            "current_value": 72,
+        }
+        triggers = evaluate_heuristics(pkg)
+        pol = [t for t in triggers if t["name"] == "political_event_resolved"]
+        assert len(pol) == 1
+        assert pol[0]["action"] == "review"
+        assert pol[0]["safety_override"] is False
+
+    def test_no_resolved_legs_no_trigger(self):
+        """When no legs have resolved, no political trigger fires."""
+        from positions.exit_engine import evaluate_heuristics
+        pkg = {
+            "strategy_type": "political_synthetic",
+            "legs": [
+                {"leg_id": "L1", "entry_price": 0.40, "status": "open",
+                 "current_price": 0.55, "quantity": 50, "cost": 20},
+                {"leg_id": "L2", "entry_price": 0.30, "status": "open",
+                 "current_price": 0.45, "quantity": 50, "cost": 15},
+            ],
+            "exit_rules": [],
+            "total_cost": 35,
+            "peak_value": 50,
+            "current_value": 50,
+        }
+        triggers = evaluate_heuristics(pkg)
+        pol = [t for t in triggers if t["name"] == "political_event_resolved"]
+        assert len(pol) == 0
+
+
+class TestSyntheticValidation:
+    """Relaxed validation gates for political synthetic strategies."""
+
+    def test_relaxed_win_probability(self):
+        """35% win probability should now pass (was 50%)."""
+        from political.strategy import validate_strategy
+        from political.models import PoliticalSyntheticStrategy, SyntheticLeg, Scenario
+        s = PoliticalSyntheticStrategy(
+            cluster_id="test", strategy_name="test",
+            legs=[SyntheticLeg(contract_idx=1, event_id="e1", side="YES", weight=1.0)],
+            scenarios=[Scenario(outcome="win", probability=0.35, pnl_pct=20.0)],
+            expected_value_pct=2.0, win_probability=0.35,
+            max_loss_pct=-40.0, confidence="medium", reasoning="test",
+        )
+        assert validate_strategy(s) is True
+
+    def test_relaxed_expected_value(self):
+        """1% EV should now pass (was 3%)."""
+        from political.strategy import validate_strategy
+        from political.models import PoliticalSyntheticStrategy, SyntheticLeg, Scenario
+        s = PoliticalSyntheticStrategy(
+            cluster_id="test", strategy_name="test",
+            legs=[SyntheticLeg(contract_idx=1, event_id="e1", side="YES", weight=1.0)],
+            scenarios=[Scenario(outcome="win", probability=0.50, pnl_pct=5.0)],
+            expected_value_pct=1.0, win_probability=0.50,
+            max_loss_pct=-30.0, confidence="high", reasoning="test",
+        )
+        assert validate_strategy(s) is True
+
+    def test_still_rejects_low_confidence(self):
+        """Low confidence should still be rejected."""
+        from political.strategy import validate_strategy
+        from political.models import PoliticalSyntheticStrategy, SyntheticLeg, Scenario
+        s = PoliticalSyntheticStrategy(
+            cluster_id="test", strategy_name="test",
+            legs=[SyntheticLeg(contract_idx=1, event_id="e1", side="YES", weight=1.0)],
+            scenarios=[Scenario(outcome="win", probability=0.60, pnl_pct=10.0)],
+            expected_value_pct=5.0, win_probability=0.60,
+            max_loss_pct=-30.0, confidence="low", reasoning="test",
+        )
+        assert validate_strategy(s) is False
+
+    def test_still_rejects_too_low_win_prob(self):
+        """Below 35% win probability should still be rejected."""
+        from political.strategy import validate_strategy
+        from political.models import PoliticalSyntheticStrategy, SyntheticLeg, Scenario
+        s = PoliticalSyntheticStrategy(
+            cluster_id="test", strategy_name="test",
+            legs=[SyntheticLeg(contract_idx=1, event_id="e1", side="YES", weight=1.0)],
+            scenarios=[Scenario(outcome="win", probability=0.30, pnl_pct=10.0)],
+            expected_value_pct=5.0, win_probability=0.30,
+            max_loss_pct=-30.0, confidence="medium", reasoning="test",
+        )
+        assert validate_strategy(s) is False
+
+
+class TestNewsThresholds:
+    """Relaxed news scanner thresholds."""
+
+    def test_news_daily_cap_exists(self):
+        from positions.news_scanner import DAILY_TRADE_CAP
+        assert DAILY_TRADE_CAP == 5

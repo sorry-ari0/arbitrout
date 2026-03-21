@@ -333,8 +333,9 @@ class NewsScanner:
                         if not self._matched_headlines[oldest_cid]:
                             del self._matched_headlines[oldest_cid]
 
-            # Gate: confidence >= 7 or breaking news
-            if confidence < 7 and urgency != "breaking":
+            # Gate: confidence >= 5 or breaking news (relaxed from 7 — research showed
+            # 7,143 headlines → 0 trades executed due to overly conservative filters)
+            if confidence < 5 and urgency != "breaking":
                 continue
 
             # Check safeguards before committing to deep analysis
@@ -406,8 +407,8 @@ class NewsScanner:
                 continue
 
             # High confidence → execute immediately (news edge decays fast)
-            # Don't gate on urgency — a conf-8 signal is actionable regardless
-            if final_confidence >= 8:
+            # Lowered from 8→7: research showed 0 trades executed at old thresholds
+            if final_confidence >= 7:
                 await self._execute_news_trade(
                     headline=headline,
                     market=market,
@@ -418,9 +419,10 @@ class NewsScanner:
                 )
 
             # Moderate confidence → queue for auto_trader or execute breaking
-            elif final_confidence >= 7:
+            # Lowered from 7→5: let more signals through to auto_trader scoring
+            elif final_confidence >= 5:
                 if urgency == "breaking":
-                    # Breaking news at conf 7 → execute directly (time-sensitive)
+                    # Breaking news at conf 5+ → execute directly (time-sensitive)
                     await self._execute_news_trade(
                         headline=headline,
                         market=market,
@@ -559,6 +561,8 @@ class NewsScanner:
         pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 15}))
         pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -35}))
         pkg["exit_rules"].append(create_exit_rule("trailing_stop", {"current": 15, "bound_min": 8, "bound_max": 30}))
+        pkg["_use_brackets"] = True  # GTC target sell at 0% maker fee
+        pkg["_use_limit_orders"] = True
 
         # Store news metadata
         pkg["_news_source"] = headline.get("source", "")

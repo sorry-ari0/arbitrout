@@ -90,6 +90,8 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
     # Skip trailing stop entirely for hold-to-resolution positions (arb, synthetics,
     # high-probability predictions). These resolve at $0 or $1 — trailing stops
     # just cut winners early on normal prediction market noise.
+    # Also skip for non-favorites (entry < 0.60): journal shows 0/8 trailing stop
+    # wins. Mid-range and longshot positions rely on bracket target + stop loss.
     if not pkg.get("_hold_to_resolution"):
         for rule in rules:
             if rule.get("type") == "trailing_stop" and rule.get("active"):
@@ -100,6 +102,12 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
                 if open_legs:
                     entries = [l.get("entry_price", 0.5) for l in open_legs]
                     avg_entry = sum(entries) / len(entries)
+
+                # Skip trailing stop for non-favorites — 0/8 wins in journal.
+                # These positions should ride to resolution or hit bracket target.
+                if avg_entry < 0.60:
+                    continue
+
                 if avg_entry <= 0.30:
                     trail_pct *= 2.0  # Longshots: very wide trail
                 # Favorites in standard mode: tighter trail to protect gains
@@ -285,15 +293,27 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
                         "action": "review", "safety_override": False})
 
     # ── 21: Political Event Resolved ─────────────────────────────────────
-    if strategy == "political_synthetic":
-        for leg in legs:
-            cur = leg.get("current_price", 0)
-            if cur <= 0.01 or cur >= 0.99:
+    # Fixed: previously triggered immediate_exit on FIRST resolved leg, prematurely
+    # closing remaining legs that might still be profitable. Now:
+    # - ALL legs resolved → immediate_exit (package is done)
+    # - SOME legs resolved → review (evaluate if remaining legs still have EV)
+    if strategy in ("political_synthetic", "crypto_synthetic"):
+        open_legs = [l for l in legs if l.get("status") == "open"]
+        resolved_legs = [l for l in open_legs if l.get("current_price", 0.5) <= 0.01 or l.get("current_price", 0.5) >= 0.99]
+        if resolved_legs:
+            if len(resolved_legs) == len(open_legs):
+                # ALL legs resolved — package is done, exit immediately
                 triggers.append({"trigger_id": T_POLITICAL_EVENT_RESOLVED,
                     "name": "political_event_resolved",
-                    "details": f"Leg {leg['leg_id']} resolved (price={cur:.4f})",
+                    "details": f"All {len(resolved_legs)} legs resolved",
                     "action": "immediate_exit", "safety_override": True})
-                break
+            else:
+                # SOME legs resolved — don't force-exit remaining legs
+                resolved_ids = [l["leg_id"] for l in resolved_legs]
+                triggers.append({"trigger_id": T_POLITICAL_EVENT_RESOLVED,
+                    "name": "political_event_resolved",
+                    "details": f"{len(resolved_legs)}/{len(open_legs)} legs resolved ({', '.join(resolved_ids)}). Remaining legs still open.",
+                    "action": "review", "safety_override": False})
 
     # ── Minimum hold period enforcement ────────────────────────────────────
     # Suppress non-safety, non-mechanical triggers during the hold period.
