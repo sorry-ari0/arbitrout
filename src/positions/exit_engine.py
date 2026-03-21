@@ -10,6 +10,18 @@ from datetime import datetime, date, timedelta
 
 logger = logging.getLogger("positions.exit_engine")
 
+# ── Feature flag: AI-recommended exits ────────────────────────────────────────
+# Trade journal analysis (35 trades, 88.6% loss rate) shows AI-approved exits
+# have 0% win rate across 23 trades. auto:trailing_stop averages -$13.86/trade.
+# Disabling AI exit signals for: time_decay, negative_drift, trailing_stop.
+# Mechanical auto-exits (target_hit, stop_loss, auto:trailing_stop) still work.
+# Set to True to re-enable AI exit approvals after win rate improves.
+AI_EXITS_ENABLED = False
+
+# Trigger names that are blocked when AI_EXITS_ENABLED is False.
+# These are the triggers the AI advisor was approving with 0% success.
+_AI_EXIT_TRIGGERS = {"time_decay", "negative_drift", "trailing_stop"}
+
 # ── Trigger IDs ─────────────────────────────────────────────────────────────
 # Category: Profit Taking (1-3)
 T_TARGET_HIT = 1
@@ -544,6 +556,18 @@ class ExitEngine:
             if pkg.get("_brackets"):
                 continue
 
+            # Filter out AI exit triggers when AI exits are disabled
+            if not AI_EXITS_ENABLED and ai_triggers:
+                blocked = [t for t in ai_triggers if t["name"] in _AI_EXIT_TRIGGERS]
+                ai_triggers = [t for t in ai_triggers if t["name"] not in _AI_EXIT_TRIGGERS]
+                for t in blocked:
+                    logger.info("AI exit SKIPPED (AI_EXITS_ENABLED=False) [%s] on %s: %s",
+                                t["name"], pkg["id"], t["details"])
+                    if self.dlog:
+                        self.dlog.log_trigger_suppressed(
+                            pkg["id"], t["name"],
+                            f"ai_exits_disabled: {t['details']}")
+
             # Collect AI triggers for batched review
             if ai_triggers and not pkg.get("_exiting"):
                 batched_ai_work.append((pkg, ai_triggers))
@@ -637,10 +661,13 @@ class ExitEngine:
                     self.dlog.log_auto_execute(pkg["id"], trigger["name"],
                                                trigger.get("action", "full_exit"), trigger["details"])
                 if trigger.get("action") == "full_exit":
+                    # Use maker (limit) orders for non-stop exits (0% fee)
+                    is_stop = trigger["name"] == "stop_loss"
                     for leg in pkg["legs"]:
                         if leg["status"] == "open":
                             await self.pm.exit_leg(pkg["id"], leg["leg_id"],
-                                trigger=f"auto:{trigger['name']}")
+                                trigger=f"auto:{trigger['name']}",
+                                use_limit=not is_stop)
             elif trigger["name"] == "partial_profit":
                 logger.info("Auto-executing partial_profit on %s: %s", pkg["id"], trigger["details"])
                 if self.dlog:
@@ -649,7 +676,8 @@ class ExitEngine:
                 for leg in pkg["legs"]:
                     if leg["status"] == "open":
                         await self.pm.exit_leg(pkg["id"], leg["leg_id"],
-                            trigger=f"auto:{trigger['name']}")
+                            trigger=f"auto:{trigger['name']}",
+                            use_limit=True)
                         break
             elif trigger["name"] in ("correlation_break", "time_decay", "negative_drift",
                                        "platform_error", "stale_position", "longshot_decay"):
@@ -712,6 +740,12 @@ class ExitEngine:
     async def _apply_verdicts(self, pkg: dict, triggers: list[dict], verdicts: dict):
         """Apply AI verdicts — APPROVE=execute, MODIFY=adjust, REJECT=skip."""
         for trigger in triggers:
+            # Safety net: block AI exits even if they bypassed the _tick filter
+            if not AI_EXITS_ENABLED and trigger["name"] in _AI_EXIT_TRIGGERS:
+                logger.info("AI exit BLOCKED in _apply_verdicts [%s] on %s (AI_EXITS_ENABLED=False)",
+                            trigger["name"], pkg["id"])
+                continue
+
             verdict = self._find_verdict(trigger, verdicts)
             action = verdict.get("action", "REJECT")
 

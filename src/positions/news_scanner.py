@@ -554,10 +554,11 @@ class NewsScanner:
             expiry="2026-12-31",
         ))
 
-        # Exit rules — news trades: tighter target, moderate stop, trailing
+        # Exit rules — news trades: widened from trade journal analysis
+        # Stop loss widened from -10% to -35%, trailing stop from 8% to 15%
         pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 15}))
-        pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -10}))
-        pkg["exit_rules"].append(create_exit_rule("trailing_stop", {"current": 8, "bound_min": 4, "bound_max": 20}))
+        pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -35}))
+        pkg["exit_rules"].append(create_exit_rule("trailing_stop", {"current": 15, "bound_min": 8, "bound_max": 30}))
 
         # Store news metadata
         pkg["_news_source"] = headline.get("source", "")

@@ -172,9 +172,8 @@ class PositionManager:
 
             # Track fees
             total_buy_fees += leg.get("buy_fees", 0)
-            # Estimate sell fees: 2% taker worst-case, 0% if we use limit orders
-            # Use 1% as conservative middle ground (sometimes limit, sometimes market)
-            estimated_sell_fees += leg_val * 0.01
+            # Sell fees: 0% maker (GTC limit orders used for all exits)
+            estimated_sell_fees += 0
 
             # Per-leg ITM/OTM
             if leg["type"] in ("prediction_yes", "spot_buy"):
@@ -458,12 +457,13 @@ class PositionManager:
         if not executor:
             return {"success": False, "error": f"No executor for {leg['platform']}"}
 
-        # Limit price: midpoint minus max(1 cent, 1% of price)
+        # Limit price: current price (maker ask sits at or near the spread)
+        # The executor's sell_limit uses GTC which rests as maker for 0% fees.
+        # Using mid directly — the executor handles spread-edge placement.
         mid = leg.get("current_price", 0)
         if mid <= 0:
             return await self._exit_leg_locked(pkg_id, leg_id, trigger)
-        offset = max(0.01, mid * 0.01)
-        limit_price = round(mid - offset, 4)
+        limit_price = round(mid, 4)
         if limit_price <= 0:
             return await self._exit_leg_locked(pkg_id, leg_id, trigger)
 
