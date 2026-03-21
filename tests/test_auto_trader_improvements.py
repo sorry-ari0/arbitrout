@@ -108,3 +108,19 @@ class TestVolumeFilter:
             opp = {"volume": 1_000, "opportunity_type": opp_type}
             should_skip = (opp.get("opportunity_type", "") not in exempt and opp.get("volume", 0) < MIN_ARB_VOLUME)
             assert should_skip is False, f"{opp_type} should be exempt"
+
+
+class TestLLMBoost:
+    def test_set_news_scanner_method_exists(self):
+        from positions.auto_trader import AutoTrader
+        assert hasattr(AutoTrader, "set_news_scanner")
+
+    def test_set_eval_logger_method_exists(self):
+        from positions.auto_trader import AutoTrader
+        assert hasattr(AutoTrader, "set_eval_logger")
+
+    def test_constructor_accepts_llm_estimator(self):
+        import inspect
+        from positions.auto_trader import AutoTrader
+        sig = inspect.signature(AutoTrader.__init__)
+        assert "llm_estimator" in sig.parameters
