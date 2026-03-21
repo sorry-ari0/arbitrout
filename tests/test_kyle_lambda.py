@@ -446,3 +446,66 @@ class TestAutoTraderIntegration:
 
         assert score == pytest.approx(12.0)
         mock_est.get_lambda_signal.assert_called_once_with("0xtest_no", "NO")
+
+
+class TestEndToEnd:
+    """Task 6: Full pipeline integration test."""
+
+    def test_full_pipeline_trade_to_signal(self):
+        """Trade callbacks → buffer → lambda → signal: full pipeline."""
+        from positions.polymarket_ws import PolymarketPriceFeed
+        from positions.kyle_lambda import KyleLambdaEstimator
+
+        feed = PolymarketPriceFeed()
+        est = KyleLambdaEstimator()
+        feed.on_trade(est.on_trade)
+
+        now = time.time()
+        # Simulate 2hr of background trades
+        price = 0.50
+        for i in range(50):
+            price += 0.0005
+            feed._handle_message({
+                "event_type": "trade",
+                "asset_id": "0xfull_test",
+                "price": str(round(price, 4)),
+                "size": "10.0",
+                "side": "BUY",
+            })
+            # Override the last trade's timestamp to be in the past
+            if est._trades.get("0xfull_test"):
+                trades = est._trades["0xfull_test"]
+                old = trades[-1]
+                trades[-1] = (now - 7000 + i * 120, old[1], old[2], old[3])
+
+        # Simulate 15min of spike trades
+        for i in range(20):
+            price += 0.005
+            feed._handle_message({
+                "event_type": "trade",
+                "asset_id": "0xfull_test",
+                "price": str(round(price, 4)),
+                "size": "10.0",
+                "side": "BUY",
+            })
+            if est._trades.get("0xfull_test"):
+                trades = est._trades["0xfull_test"]
+                old = trades[-1]
+                trades[-1] = (now - 800 + i * 30, old[1], old[2], old[3])
+
+        signal = est.get_lambda_signal("0xfull_test", "YES")
+        assert signal["n_trades_short"] > 0
+        assert signal["n_trades_long"] > 0
+        assert "multiplier" in signal
+        assert "flow_direction" in signal
+
+    def test_get_stats(self):
+        """Verify stats method returns expected structure."""
+        from positions.kyle_lambda import KyleLambdaEstimator
+        est = KyleLambdaEstimator()
+        now = time.time()
+        est.on_trade("0xa", 0.5, 10.0, now, "buy")
+        est.on_trade("0xb", 0.6, 5.0, now, "sell")
+        stats = est.get_stats()
+        assert stats["tracked_markets"] == 2
+        assert stats["total_buffered_trades"] == 2
