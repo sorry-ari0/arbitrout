@@ -37,6 +37,11 @@ _STATE_NAMES: dict[str, str] = {
 _FILLER_WORDS = {"the", "race", "election", "seat", "special"}
 
 
+def _normalize_crypto(crypto_asset: str) -> str:
+    """Normalize crypto asset to a clustering key."""
+    return f"crypto-{crypto_asset.lower()}"
+
+
 # ============================================================
 # NORMALIZATION
 # ============================================================
@@ -100,13 +105,16 @@ def build_clusters(contracts: list[PoliticalContractInfo]) -> list[PoliticalClus
         List of PoliticalCluster objects, each containing >= 2 contracts
         for the same normalized race.
     """
-    # Group contracts by normalized race key
+    # Group contracts by normalized key
     groups: dict[str, list[PoliticalContractInfo]] = defaultdict(list)
 
     for contract in contracts:
-        if contract.race is None:
+        if contract.contract_type == "crypto_event" and contract.crypto_asset:
+            key = _normalize_crypto(contract.crypto_asset)
+        elif contract.race is not None:
+            key = _normalize_race(contract.race, contract.state)
+        else:
             continue
-        key = _normalize_race(contract.race, contract.state)
         groups[key].append(contract)
 
     # Build cluster objects, filtering out groups with < 2 contracts
