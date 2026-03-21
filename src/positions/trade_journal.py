@@ -46,7 +46,7 @@ class TradeJournal:
         """Record a completed trade (package close) with full details including fees."""
         # Belt-and-suspenders idempotency: reject if this package was already journaled
         pkg_id = pkg.get("id")
-        if any(e.get("package_id") == pkg_id for e in self.entries):
+        if pkg_id is not None and any(e.get("package_id") == pkg_id for e in self.entries):
             logger.debug("Package %s already journaled, skipping duplicate", pkg_id)
             return None
 
