@@ -175,12 +175,18 @@ def parse_strategy_response(response_text: str,
 
 
 def validate_strategy(strategy: PoliticalSyntheticStrategy) -> bool:
-    """Post-LLM validation. Returns True if strategy passes all checks."""
-    if strategy.win_probability < 0.50:
+    """Post-LLM validation. Returns True if strategy passes all checks.
+
+    Relaxed from original gates (win_prob >= 0.50, EV >= 3.0%) based on research:
+    - 0 synthetic trades executed with old thresholds — system was too conservative
+    - With 0% maker fees on Polymarket, even 1% EV is profitable
+    - win_probability >= 0.35 allows asymmetric bets (low prob but high payout)
+    """
+    if strategy.win_probability < 0.35:
         return False
     if strategy.max_loss_pct < -60.0:
         return False
-    if strategy.expected_value_pct < 3.0:
+    if strategy.expected_value_pct < 1.0:
         return False
     if strategy.confidence == "low":
         return False

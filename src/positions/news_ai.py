@@ -394,11 +394,11 @@ or
 NO_TRADE | <reasoning in one sentence>
 
 Rules:
-- TRADE only if the article provides strong, actionable evidence
-- Consider the current YES price — is there enough edge?
+- TRADE if the article provides actionable evidence that shifts probability
+- Consider the current YES price — is there enough edge? Even 5-10% edge is valuable with 0% maker fees
 - Consider portfolio exposure — avoid over-concentration
-- confidence: how confident you are the trade will profit (1-100)
-- Be conservative — NO_TRADE is the safer default"""
+- confidence: how confident you are the trade will profit (1-100). 50+ means more likely to profit than not.
+- News-driven trades have a time edge — if the article moves probability, lean toward TRADE rather than waiting"""
 
     def _parse_analysis_response(self, text: str) -> dict:
         """Parse deep analysis response into action dict."""

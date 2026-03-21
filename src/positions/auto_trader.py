@@ -168,6 +168,7 @@ class AutoTrader:
             self._daily_trade_date = today
             today_start = datetime.combine(date.today(), datetime.min.time()).timestamp()
             for p in self.pm.list_packages():
+                # Only count Auto: trades (not News: trades) against arb daily limit
                 if p.get("created_at", 0) >= today_start and p.get("name", "").startswith("Auto:"):
                     self._daily_trade_count += 1
         return self._daily_trade_count < MAX_NEW_TRADES_PER_DAY
@@ -730,6 +731,7 @@ class AutoTrader:
                     continue
 
                 pkg["_use_limit_orders"] = True
+                pkg["_use_brackets"] = True  # GTC target sell at 0% maker fee
                 pkg_name = pkg.get("name", opp_title)
                 try:
                     result = await self.pm.execute_package(pkg)
@@ -789,6 +791,7 @@ class AutoTrader:
                 pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -35}))
 
                 pkg["_use_limit_orders"] = True
+                pkg["_use_brackets"] = True  # GTC target sell at 0% maker fee
                 pkg_name = pkg.get("name", opp_title)
                 try:
                     result = await self.pm.execute_package(pkg)
@@ -846,6 +849,7 @@ class AutoTrader:
                 pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 50}))
                 pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -40}))
                 pkg["exit_rules"].append(create_exit_rule("trailing_stop", {"current": 35, "bound_min": 15, "bound_max": 50}))
+                pkg["_use_brackets"] = True  # GTC target sell at 0% maker fee
                 pkg["_political_strategy"] = opp.get("strategy", {})
 
                 # Political packages skip normal strategy/side determination.
@@ -1185,10 +1189,14 @@ class AutoTrader:
                     pkg["_hold_to_resolution"] = True
                     pkg["_min_hold_until"] = time.time() + 86400
                 else:
-                    # Standard prediction — tuned from 31-trade analysis
+                    # Standard prediction — tuned from 39-trade journal analysis
                     pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 50}))
                     pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -40}))
-                    pkg["exit_rules"].append(create_exit_rule("trailing_stop", {"current": 35, "bound_min": 15, "bound_max": 50}))
+                    # Trailing stop only for favorites (entry >= 0.60).
+                    # Journal: 0/8 trailing stop wins — catches normal prediction market noise.
+                    # Non-favorites rely on bracket target + stop loss only.
+                    if avg_entry >= 0.60:
+                        pkg["exit_rules"].append(create_exit_rule("trailing_stop", {"current": 35, "bound_min": 15, "bound_max": 50}))
                     pkg["_min_hold_until"] = time.time() + 86400
 
             # Use limit orders for 0% maker fees on entry
@@ -1206,7 +1214,11 @@ class AutoTrader:
                 if result.get("success"):
                     trades_this_cycle += 1
                     self._trades_opened += 1
-                    self._daily_trade_count += 1
+                    # News-driven trades have their own daily cap (DAILY_TRADE_CAP=5 in news_scanner).
+                    # Don't count them against the auto_trader's 3/day arb limit — otherwise
+                    # arb trades consume the cap before news signals can execute.
+                    if not opp.get("_news_driven"):
+                        self._daily_trade_count += 1
                     remaining_budget -= trade_size
                     # Refresh open market IDs so later iterations in this cycle see this trade
                     if yes_mid:
