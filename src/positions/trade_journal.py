@@ -101,7 +101,8 @@ class TradeJournal:
             "total_fees": round(total_fees, 4),
             "buy_fees": round(total_buy_fees, 4),
             "sell_fees": round(total_sell_fees, 4),
-            "pnl": round(pnl, 4),
+            "pnl": round(pnl, 4),  # 4-decimal for computation
+            "pnl_usd": round(pnl, 2),  # 2-decimal display value for cross-referencing
             "pnl_pct": round(pnl / total_cost * 100, 2) if total_cost > 0 else 0,
             "outcome": "win" if pnl > 0 else ("loss" if pnl < 0 else "flat"),
             "exit_trigger": exit_trigger,
@@ -255,3 +256,46 @@ class TradeJournal:
             b["pnl"] = round(b["pnl"], 2)
 
         return result
+
+    def get_equity_curve(self, mode: str | None = None) -> dict:
+        """Cumulative P&L over time — the authoritative USD equity tracker.
+
+        Returns chronological list of (timestamp, cumulative_pnl, cumulative_fees,
+        trade_count) plus summary stats. Survives server restarts (journal is persistent).
+        """
+        filtered = self.entries if not mode else [e for e in self.entries if e.get("mode") == mode]
+        sorted_entries = sorted(filtered, key=lambda e: e.get("closed_at", 0))
+
+        curve = []
+        cumulative_pnl = 0.0
+        cumulative_fees = 0.0
+        peak_equity = 0.0
+        max_drawdown = 0.0
+
+        for i, e in enumerate(sorted_entries):
+            pnl = e.get("pnl", 0)
+            fees = e.get("total_fees", 0)
+            cumulative_pnl += pnl
+            cumulative_fees += fees
+            peak_equity = max(peak_equity, cumulative_pnl)
+            drawdown = peak_equity - cumulative_pnl
+            max_drawdown = max(max_drawdown, drawdown)
+
+            curve.append({
+                "trade_num": i + 1,
+                "closed_at": e.get("closed_at"),
+                "name": e.get("name", ""),
+                "pnl_usd": round(pnl, 2),
+                "cumulative_pnl_usd": round(cumulative_pnl, 2),
+                "cumulative_fees_usd": round(cumulative_fees, 2),
+                "exit_trigger": e.get("exit_trigger", ""),
+            })
+
+        return {
+            "total_trades": len(sorted_entries),
+            "cumulative_pnl_usd": round(cumulative_pnl, 2),
+            "cumulative_fees_usd": round(cumulative_fees, 2),
+            "peak_equity_usd": round(peak_equity, 2),
+            "max_drawdown_usd": round(max_drawdown, 2),
+            "curve": curve,
+        }

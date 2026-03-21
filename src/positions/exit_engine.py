@@ -105,6 +105,26 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
                 # Favorites in standard mode: tighter trail to protect gains
                 elif avg_entry >= 0.60:
                     trail_pct *= 0.7
+
+                # Binary-outcome markets (sports) need wider trails
+                # Journal: 8 trailing_stop exits, 0 wins. NCAA lost -13.5% avg.
+                # These markets resolve at $0 or $1 — noise is extreme.
+                # Uses SPORTS_KEYWORDS from auto_trader for consistency.
+                pkg_name = (pkg.get("name") or "").lower()
+                try:
+                    from .auto_trader import SPORTS_KEYWORDS
+                except ImportError:
+                    SPORTS_KEYWORDS = ["ncaa", "nba", "nfl", "score", "match", "vs."]
+                is_binary_event = any(kw in pkg_name for kw in SPORTS_KEYWORDS)
+                if is_binary_event:
+                    trail_pct *= 1.5  # 50% wider for binary events
+                    # Note: longshot (2.0x) + sports (1.5x) = 105% trail — effectively
+                    # disables trailing stop for longshot sports. This is intentional:
+                    # binary-outcome longshots should ride to resolution, not be scalped.
+
+                # Enforce minimum trail of 25% — anything tighter just catches noise
+                trail_pct = max(trail_pct, 25.0)
+
                 if peak_value > 0:
                     drawdown = (peak_value - current_value) / peak_value * 100
                     if drawdown >= trail_pct:
