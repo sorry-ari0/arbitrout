@@ -45,7 +45,7 @@ def test_sell_limit_uses_maker_fee():
 
 
 def test_sell_limit_uses_limit_price_not_market():
-    """sell_limit() should use the provided price, not fetch market price."""
+    """sell_limit() places a resting order at the limit price; balance credited on fill."""
     pe = make_paper_executor(balance=1000.0)
     pe.positions["test:YES"] = {"quantity": 50.0, "avg_entry_price": 0.40}
     result = asyncio.run(
@@ -53,7 +53,12 @@ def test_sell_limit_uses_limit_price_not_market():
     )
     assert result.success
     assert result.filled_price == 0.75
-    assert pe.balance == 1000.0 + (50.0 * 0.75)
+    # Resting order: balance not credited yet (order is open, not filled)
+    assert pe.balance == 1000.0
+    # Verify resting order was placed
+    assert result.tx_id is not None
+    assert result.tx_id in pe._resting_orders
+    assert pe._resting_orders[result.tx_id]["limit_price"] == 0.75
 
 
 def test_sell_market_still_charges_taker_fee():
