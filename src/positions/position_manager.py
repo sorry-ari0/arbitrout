@@ -135,9 +135,10 @@ class PositionManager:
                 if leg["status"] == "open":
                     leg["status"] = "closed"
             self.save()
-            if self.trade_journal:
+            if not pkg.get("_journal_recorded") and self.trade_journal:
                 try:
                     self.trade_journal.record_close(pkg, exit_trigger=exit_trigger)
+                    pkg["_journal_recorded"] = True
                 except Exception as e:
                     logger.warning("Failed to record trade journal: %s", e)
 
@@ -430,9 +431,10 @@ class PositionManager:
                     l.get("quantity", 0) * l.get("exit_price", l.get("current_price", l.get("entry_price", 0)))
                     for l in pkg["legs"] if l.get("status") != "advisory"
                 ), 4)
-                if self.trade_journal:
+                if not pkg.get("_journal_recorded") and self.trade_journal:
                     try:
                         self.trade_journal.record_close(pkg, exit_trigger=trigger)
+                        pkg["_journal_recorded"] = True
                     except Exception as e:
                         logger.warning("Failed to record trade journal: %s", e)
             else:
@@ -585,9 +587,10 @@ class PositionManager:
                 l.get("quantity", 0) * l.get("exit_price", l.get("current_price", l.get("entry_price", 0)))
                 for l in pkg["legs"] if l.get("status") != "advisory"
             ), 4)
-            if self.trade_journal:
+            if not pkg.get("_journal_recorded") and self.trade_journal:
                 try:
                     self.trade_journal.record_close(pkg, exit_trigger=trigger)
+                    pkg["_journal_recorded"] = True
                 except Exception as e:
                     logger.warning("Failed to record trade journal: %s", e)
         else:

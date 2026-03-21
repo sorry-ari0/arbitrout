@@ -418,9 +418,10 @@ class ExitEngine:
                     l.get("quantity", 0) * l.get("exit_price", l.get("current_price", l.get("entry_price", 0)))
                     for l in pkg["legs"] if l.get("status") != "advisory"
                 ), 4)
-                if self.pm.trade_journal:
+                if not pkg.get("_journal_recorded") and self.pm.trade_journal:
                     try:
                         self.pm.trade_journal.record_close(pkg, exit_trigger=trigger)
+                        pkg["_journal_recorded"] = True
                     except Exception as e:
                         logger.warning("Failed to record bracket exit: %s", e)
                 pkg["updated_at"] = time.time()
