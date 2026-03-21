@@ -208,6 +208,19 @@ class TestCryptoPromptExtension:
         assert "Crypto Market Context" not in prompt
         assert "Race: TX Senate" in prompt
 
+    def test_crypto_cluster_prompt_with_spot_prices(self):
+        """Crypto prompt shows actual spot prices when provided."""
+        cluster = self._make_crypto_cluster()
+        prompt = build_cluster_prompt(cluster, [], spot_prices={"BTC": 97450.0})
+        assert "$97,450.00" in prompt
+        assert "(price unavailable)" not in prompt
+
+    def test_crypto_cluster_prompt_without_spot_prices(self):
+        """Crypto prompt shows '(price unavailable)' when spot_prices is None."""
+        cluster = self._make_crypto_cluster()
+        prompt = build_cluster_prompt(cluster, [])
+        assert "(price unavailable)" in prompt
+
     def test_political_cluster_prompt_unchanged(self):
         """Political cluster prompt still works correctly."""
         cluster = self._make_political_cluster()

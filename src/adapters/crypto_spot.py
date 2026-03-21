@@ -123,6 +123,7 @@ class CryptoSpotAdapter(BaseAdapter):
                     volume=int(volume_24h) if volume_24h else 0,
                     expiry="2026-12-31",
                     url=f"https://www.coingecko.com/en/coins/{coin_id}",
+                    spot_price=current_price,
                 ))
 
         logger.info("CryptoSpot: generated %d implied-probability events from %d coins",

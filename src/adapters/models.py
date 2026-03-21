@@ -19,6 +19,7 @@ class NormalizedEvent:
     expiry: str             # ISO date string or "ongoing"
     url: str                # direct link to market on platform
     last_updated: str = ""  # ISO datetime string
+    spot_price: float = 0.0 # underlying spot price (set by crypto_spot adapter)
 
     def __post_init__(self):
         if not self.last_updated:
