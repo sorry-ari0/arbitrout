@@ -412,6 +412,17 @@ async def lifespan(app: FastAPI):
                     _poly_ws.subscribe(list(open_cids))
                 _poly_ws.start()
                 logger.info("Polymarket WS feed started, tracking %d positions", len(open_cids))
+
+                # Kyle's lambda estimator — adverse selection signal from trade flow
+                try:
+                    from positions.kyle_lambda import KyleLambdaEstimator
+                    _kyle_est = KyleLambdaEstimator()
+                    _poly_ws.on_trade(_kyle_est.on_trade)
+                    if _auto_trader:
+                        _auto_trader.set_kyle_estimator(_kyle_est)
+                    logger.info("Kyle lambda estimator started, tracking trade flow")
+                except Exception as e:
+                    logger.warning("Kyle lambda init failed (non-critical): %s", e)
             except Exception as e:
                 logger.warning("Polymarket WS feed init failed (non-critical): %s", e)
 
