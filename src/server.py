@@ -285,6 +285,12 @@ async def lifespan(app: FastAPI):
             journal = TradeJournal(data_dir=DATA_DIR / "positions")
             pm = PositionManager(data_dir=DATA_DIR / "positions", executors=executors, trade_journal=journal, bracket_manager=bracket_manager)
 
+            # Wire journal into paper executors for persistent PnL tracking
+            if is_paper_mode():
+                for pe in executors.values():
+                    if hasattr(pe, "set_journal"):
+                        pe.set_journal(journal)
+
             # Rebuild PaperExecutor position state from loaded packages
             # (PaperExecutor tracks positions in memory, lost on restart)
             if is_paper_mode():
