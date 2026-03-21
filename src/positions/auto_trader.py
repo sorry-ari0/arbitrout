@@ -20,11 +20,12 @@ except ImportError:
 logger = logging.getLogger("positions.auto_trader")
 
 # Position limits
-MAX_TRADE_SIZE = 100.0       # Reduced from $200 to $100 until win rate improves
-                             # Trade journal: 88.6% loss rate (31/35), smaller sizing limits drawdown
-MIN_TRADE_SIZE = 5.0         # Min $5 per trade (supports small live accounts)
+MAX_TRADE_SIZE = 50.0        # Ramped from $5-12 (Phase 3) toward $100 target
+                             # Phase 3 bracket wins proved the system works at small sizes
+                             # Next step: $50 max until win rate exceeds 30% over 20+ trades
+MIN_TRADE_SIZE = 10.0        # Min $10 per trade (Phase 3's $5 was too small for meaningful P&L)
 MAX_CONCURRENT = 7           # Max 7 open packages (reserve 3 slots for news-driven trades)
-MAX_TOTAL_EXPOSURE = 700.0   # Reduced from $1400 to $700 (proportional to trade size cut)
+MAX_TOTAL_EXPOSURE = 350.0   # 7 slots * $50 max = $350 ceiling (was $700 when max was $100)
 PORTFOLIO_EXPOSURE_CAP = 0.40  # Kelly portfolio rule: never exceed 40% of total bankroll
 TOTAL_BANKROLL = 2000.0      # Total bankroll (auto_trader $1400 + news $600)
 SCAN_INTERVAL = 300          # 5 minutes between self-initiated scans (safety net)
@@ -38,6 +39,22 @@ MAX_LOSSES_PER_MARKET = 2    # Block market after 2 losses (prevents BTC-top-per
 MAX_NEW_TRADES_PER_DAY = 3          # Max new positions per calendar day
 MARKET_COOLDOWN_SECONDS = 172800    # 48h cooldown per market (was 86400)
 MIN_HOURS_TO_EXPIRY = 1.0  # Skip markets expiring within 1 hour (dynamic fees, bot dominance)
+
+# Market category keywords — shared with exit_engine.py for consistency
+# Journal analysis: sports -$91.99/10 trades (20% WR), commodities -$45.76/3 trades (0% WR)
+SPORTS_KEYWORDS = [
+    "score", "ncaa", "nba", "nfl", "nhl", "mlb", "epl", "la liga",
+    "bundesliga", "serie a", "ligue 1", "uefa", "champions league",
+    "premier league", "euroleague", "ufc", "mma", "fight night",
+    "boxing", "formula 1", "f1", "grand prix", "nascar",
+    "atp", "wta", "wimbledon", "tournament", "playoff",
+    "super bowl", "world cup", "world series", "vs.", "vs ",
+    "match", "game", "winner",
+]
+COMMODITIES_KEYWORDS = [
+    "crude oil", "wti", "brent", "natural gas", "gold price",
+    "silver price", "copper",
+]
 
 
 class AutoTrader:
@@ -345,6 +362,14 @@ class AutoTrader:
             title = (opp.get("title") or opp.get("canonical_title") or "").lower()
             is_crypto = any(kw in title for kw in ["btc", "bitcoin", "eth", "ethereum", "crypto", "solana", "sol", "xrp"])
 
+            # Market category filter: penalize historically unprofitable categories
+            # Trade journal (39 trades): sports -$91.99 (10 trades, 20% WR),
+            # commodities -$45.76 (3 trades, 0% WR). Exact-score bets are worst.
+            is_sports_exact_score = "exact score" in title
+            is_ncaa = "ncaa" in title
+            is_sports = any(kw in title for kw in SPORTS_KEYWORDS)
+            is_commodities = any(kw in title for kw in COMMODITIES_KEYWORDS)
+
             # Check expiry — parse with time precision when available
             expiry = opp.get("expiry") or opp.get("end_date") or ""
             is_near_expiry = False
@@ -386,6 +411,24 @@ class AutoTrader:
                 score *= 2.0
             if is_near_expiry:
                 score *= 1.5
+
+            # Market category penalties (journal-driven)
+            if is_sports_exact_score:
+                # Exact-score bets: -$24 from 3 trades, 0% win rate. Skip entirely.
+                self._trades_skipped += 1
+                if self.dlog:
+                    self.dlog.log_opportunity_skip(opp_title, "exact_score_market")
+                continue
+            if is_ncaa:
+                # NCAA: -$68 from 5 trades, 0% win rate (all trailing stop losses at -13.5%)
+                score *= 0.1  # Heavy penalty, effectively blocks unless massive spread
+            elif is_sports:
+                # Other sports: -$92 total, 20% win rate. Discount heavily.
+                score *= 0.3
+            if is_commodities:
+                # Commodities: -$46 from 3 trades, 0% WR. All closed by AI negative_drift.
+                # Now that AI exits are off, may perform better — moderate penalty.
+                score *= 0.4
 
             # Favorite-longshot bias (research-validated):
             # Research: longshots lose ~40%, favorites lose ~5%

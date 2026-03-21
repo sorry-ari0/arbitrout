@@ -154,3 +154,154 @@ class TestTradeablePlatformFilter:
             trader._arb_to_opportunity(arb)
         # The tradeable filter should NOT have triggered
         assert "Skipping arb on non-tradeable platform" not in caplog.text
+
+
+class TestMarketCategoryFilter:
+    """Journal-driven: sports -$91.99 (10 trades), commodities -$45.76 (3 trades)."""
+
+    def test_sports_keywords_exist(self):
+        from positions.auto_trader import SPORTS_KEYWORDS
+        assert "ncaa" in SPORTS_KEYWORDS
+        assert "nba" in SPORTS_KEYWORDS
+        assert "ufc" in SPORTS_KEYWORDS
+        assert "vs." in SPORTS_KEYWORDS
+
+    def test_commodities_keywords_exist(self):
+        from positions.auto_trader import COMMODITIES_KEYWORDS
+        assert "crude oil" in COMMODITIES_KEYWORDS
+        assert "wti" in COMMODITIES_KEYWORDS
+
+    def test_exact_score_detected(self):
+        title = "Exact Score: Fulham FC 1 - 1 Burnley FC".lower()
+        assert "exact score" in title
+
+    def test_ncaa_detected(self):
+        from positions.auto_trader import SPORTS_KEYWORDS
+        title = "Will the 2026 Men's NCAA basketball championship go to Duke?".lower()
+        assert any(kw in title for kw in SPORTS_KEYWORDS)
+
+    def test_crypto_not_detected_as_sports(self):
+        from positions.auto_trader import SPORTS_KEYWORDS
+        title = "Will Bitcoin reach $100k by end of 2026?".lower()
+        assert not any(kw in title for kw in SPORTS_KEYWORDS)
+
+    def test_commodities_detected(self):
+        from positions.auto_trader import COMMODITIES_KEYWORDS
+        title = "Will Crude Oil (CL) settle over $70 by Friday?".lower()
+        assert any(kw in title for kw in COMMODITIES_KEYWORDS)
+
+    def test_position_size_constants(self):
+        from positions.auto_trader import MAX_TRADE_SIZE, MIN_TRADE_SIZE, MAX_TOTAL_EXPOSURE
+        assert MAX_TRADE_SIZE == 50.0
+        assert MIN_TRADE_SIZE == 10.0
+        assert MAX_TOTAL_EXPOSURE == 350.0
+
+
+class TestTrailingStopCalibration:
+    """Journal-driven: 0/8 trailing stop wins, NCAA lost -13.5% avg."""
+
+    def test_minimum_trail_floor(self):
+        """Trail should never go below 25%, even for favorites."""
+        from positions.exit_engine import evaluate_heuristics
+        pkg = {
+            "strategy_type": "pure_prediction",
+            "legs": [{"entry_price": 0.80, "status": "open", "current_price": 0.80,
+                       "quantity": 100, "cost": 80}],
+            "exit_rules": [{"type": "trailing_stop", "active": True, "params": {"current": 35}}],
+            "total_cost": 80,
+            "peak_value": 100,
+            "current_value": 70,  # 30% drawdown from peak
+        }
+        triggers = evaluate_heuristics(pkg)
+        trailing = [t for t in triggers if t["name"] == "trailing_stop"]
+        # 35 * 0.7 (favorite) = 24.5, but floor is 25%. Drawdown is 30% >= 25%
+        assert len(trailing) == 1
+        assert "25.0" in trailing[0]["details"]
+
+    def test_binary_event_wider_trail(self):
+        """Sports events should get 1.5x wider trail."""
+        from positions.exit_engine import evaluate_heuristics
+        pkg = {
+            "name": "Auto: NCAA Basketball Final",
+            "strategy_type": "pure_prediction",
+            "legs": [{"entry_price": 0.50, "status": "open", "current_price": 0.50,
+                       "quantity": 100, "cost": 50}],
+            "exit_rules": [{"type": "trailing_stop", "active": True, "params": {"current": 35}}],
+            "total_cost": 50,
+            "peak_value": 60,
+            "current_value": 25,  # 58% drawdown
+        }
+        triggers = evaluate_heuristics(pkg)
+        trailing = [t for t in triggers if t["name"] == "trailing_stop"]
+        # 35 * 1.5 (sports) = 52.5%. Drawdown is 58.3% >= 52.5%
+        assert len(trailing) == 1
+
+    def test_non_sports_normal_trail(self):
+        """Non-sports positions should use normal trail without widening."""
+        from positions.exit_engine import evaluate_heuristics
+        pkg = {
+            "name": "Auto: Will Bitcoin reach $100k",
+            "strategy_type": "pure_prediction",
+            "legs": [{"entry_price": 0.50, "status": "open", "current_price": 0.50,
+                       "quantity": 100, "cost": 50}],
+            "exit_rules": [{"type": "trailing_stop", "active": True, "params": {"current": 35}}],
+            "total_cost": 50,
+            "peak_value": 60,
+            "current_value": 35,  # 41.7% drawdown
+        }
+        triggers = evaluate_heuristics(pkg)
+        trailing = [t for t in triggers if t["name"] == "trailing_stop"]
+        # 35% trail (no widening for crypto). Drawdown 41.7% >= 35%
+        assert len(trailing) == 1
+
+
+class TestEquityCurve:
+    """Equity curve for persistent P&L tracking."""
+
+    def test_empty_journal(self):
+        from positions.trade_journal import TradeJournal
+        from pathlib import Path
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            j = TradeJournal(Path(d))
+            curve = j.get_equity_curve()
+            assert curve["total_trades"] == 0
+            assert curve["cumulative_pnl_usd"] == 0
+            assert curve["curve"] == []
+
+    def test_cumulative_tracking(self):
+        from positions.trade_journal import TradeJournal
+        from pathlib import Path
+        import tempfile, time
+        with tempfile.TemporaryDirectory() as d:
+            j = TradeJournal(Path(d))
+            j.entries = [
+                {"pnl": 10.0, "total_fees": 1.0, "closed_at": time.time() - 300,
+                 "name": "Win1", "exit_trigger": "bracket_target", "mode": "paper"},
+                {"pnl": -5.0, "total_fees": 0.5, "closed_at": time.time() - 200,
+                 "name": "Loss1", "exit_trigger": "stop_loss", "mode": "paper"},
+                {"pnl": 8.0, "total_fees": 0.0, "closed_at": time.time() - 100,
+                 "name": "Win2", "exit_trigger": "bracket_target", "mode": "paper"},
+            ]
+            curve = j.get_equity_curve()
+            assert curve["total_trades"] == 3
+            assert curve["cumulative_pnl_usd"] == 13.0
+            assert curve["cumulative_fees_usd"] == 1.5
+            assert curve["peak_equity_usd"] == 13.0
+            assert curve["max_drawdown_usd"] == 5.0  # Peak 10 -> trough 5
+
+    def test_mode_filter(self):
+        from positions.trade_journal import TradeJournal
+        from pathlib import Path
+        import tempfile, time
+        with tempfile.TemporaryDirectory() as d:
+            j = TradeJournal(Path(d))
+            j.entries = [
+                {"pnl": 10.0, "total_fees": 0, "closed_at": time.time(),
+                 "name": "Paper", "exit_trigger": "t", "mode": "paper"},
+                {"pnl": 20.0, "total_fees": 0, "closed_at": time.time(),
+                 "name": "Live", "exit_trigger": "t", "mode": "live"},
+            ]
+            paper_curve = j.get_equity_curve(mode="paper")
+            assert paper_curve["total_trades"] == 1
+            assert paper_curve["cumulative_pnl_usd"] == 10.0
