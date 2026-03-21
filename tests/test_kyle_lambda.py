@@ -168,10 +168,19 @@ class TestLambdaComputation:
         from positions.kyle_lambda import KyleLambdaEstimator
         est = KyleLambdaEstimator()
         now = time.time()
-        est._trades["0xtest"] = []
         for i in range(20):
-            est._trades["0xtest"].append((now - 800 + i * 40, 0.50 + i * 0.001, 0.0, "buy"))
+            est.on_trade("0xtest", 0.50 + i * 0.001, 0.0, now - 800 + i * 40, "buy")
         result = est._compute_lambda("0xtest", 900)
+        assert result is None
+
+    def test_long_window_requires_30_trades(self):
+        """Long window with 10-29 trades should return None (needs 30 min)."""
+        from positions.kyle_lambda import KyleLambdaEstimator, LONG_WINDOW_SECONDS, MIN_TRADES_LONG
+        est = KyleLambdaEstimator()
+        now = time.time()
+        for i in range(20):
+            est.on_trade("0xtest", 0.50 + i * 0.001, 10.0, now - 3600 + i * 60, "buy")
+        result = est._compute_lambda("0xtest", LONG_WINDOW_SECONDS, MIN_TRADES_LONG)
         assert result is None
 
     def test_unknown_market_returns_none(self):
