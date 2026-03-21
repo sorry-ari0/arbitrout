@@ -6,6 +6,7 @@ and produces PoliticalOpportunity objects for auto trader consumption.
 """
 import asyncio
 import logging
+import re
 import time
 from datetime import datetime, timezone
 
@@ -23,6 +24,23 @@ logger = logging.getLogger("political.analyzer")
 SCAN_INTERVAL = 900  # 15 minutes
 MAX_CLUSTERS_PER_CYCLE = 10
 MAX_COMBOS_PER_CLUSTER = 3
+
+# Fast crypto relevance check — matches specific crypto asset names in titles
+_CRYPTO_RELEVANCE_RE = re.compile(
+    r"\b(bitcoin|btc|ethereum|eth|ether|solana|sol|xrp|ripple|"
+    r"dogecoin|doge|cardano|ada|avalanche|avax|chainlink|link|"
+    r"polkadot|dot|polygon|pol)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_crypto_relevant(title: str) -> bool:
+    """Fast check if a title contains specific crypto asset names.
+
+    Returns True only for specific asset names (BTC, ETH, etc.),
+    NOT for generic 'crypto'/'cryptocurrency'.
+    """
+    return bool(_CRYPTO_RELEVANCE_RE.search(title))
 
 
 class PoliticalAnalyzer:
@@ -72,13 +90,15 @@ class PoliticalAnalyzer:
         if not all_events_raw:
             return
 
-        # Filter to political events and reconstruct NormalizedEvents
+        # Filter to political/crypto events and reconstruct NormalizedEvents
         from adapters.models import NormalizedEvent
-        political_events = []
+        filtered_events = []
         for ev_dict in all_events_raw:
             markets = ev_dict.get("markets", [])
             for m in markets:
-                if m.get("category", "") == "politics":
+                category = m.get("category", "")
+                title = m.get("title", "")
+                if category == "politics" or category == "crypto" or _is_crypto_relevant(title):
                     try:
                         ne = NormalizedEvent(
                             platform=m["platform"], event_id=m["event_id"],
@@ -89,26 +109,26 @@ class PoliticalAnalyzer:
                             url=m.get("url", ""),
                             last_updated=m.get("last_updated", ""),
                         )
-                        political_events.append(ne)
+                        filtered_events.append(ne)
                     except (KeyError, TypeError):
                         continue
 
-        if not political_events:
-            logger.debug("Political analyzer: no political events found")
+        if not filtered_events:
+            logger.debug("Political analyzer: no political/crypto events found")
             return
 
-        # Classify all political events
-        classified = [classify_contract(ev) for ev in political_events]
+        # Classify all political/crypto events
+        classified = [classify_contract(ev) for ev in filtered_events]
 
         # Build clusters
         clusters = build_clusters(classified)
         self._clusters = clusters
         if not clusters:
-            logger.debug("Political analyzer: no clusters formed from %d events", len(political_events))
+            logger.debug("Political analyzer: no clusters formed from %d events", len(filtered_events))
             return
 
-        logger.info("Political analyzer: %d political events → %d clusters",
-                     len(political_events), len(clusters))
+        logger.info("Political analyzer: %d political/crypto events → %d clusters",
+                     len(filtered_events), len(clusters))
 
         # Analyze top clusters
         new_opportunities = []
@@ -125,7 +145,7 @@ class PoliticalAnalyzer:
         if self.dlog and new_opportunities:
             self.dlog._write({
                 "type": "political_analysis_cycle",
-                "political_events": len(political_events),
+                "political_events": len(filtered_events),
                 "clusters": len(clusters),
                 "opportunities": len(new_opportunities),
                 "elapsed_ms": elapsed_ms,
