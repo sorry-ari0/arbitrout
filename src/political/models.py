@@ -92,9 +92,9 @@ class PoliticalLeg:
     platform_fee_pct: float     # fee for this platform
 
 
-# Platform fee schedule (taker fees as percentage)
+# Platform fee schedule (maker fees — all Polymarket orders use GTC limit)
 PLATFORM_FEES: dict[str, float] = {
-    "polymarket": 2.0,
+    "polymarket": 0.0,    # 0% maker fee (GTC limit orders)
     "kalshi": 1.5,
     "predictit": 10.0,
     "limitless": 2.0,

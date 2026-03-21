@@ -38,7 +38,7 @@ def build_cluster_prompt(cluster: PoliticalCluster, relationships: list[dict],
 analyze the contracts and recommend optimal synthetic positions.
 
 IMPORTANT: All expected value and P&L figures must be AFTER platform fees.
-Fee rates (round-trip): Polymarket=2%, Kalshi=1.5%, PredictIt=10%, Limitless=2%.
+Fee rates (round-trip): Polymarket=0% (maker), Kalshi=1.5%, PredictIt=10%, Limitless=2%.
 
 [CLUSTER:{cluster.cluster_id}]
 {header_line}

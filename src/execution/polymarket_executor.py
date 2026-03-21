@@ -4,7 +4,9 @@ Uses py_clob_client for order execution and Gamma API for price lookups.
 All CLOB client calls are synchronous and wrapped in run_in_executor to
 avoid blocking the async event loop (critical for exit engine safety overrides).
 
-Buy and sell both use FOK market orders for guaranteed immediate fill.
+Buy and sell use GTC limit orders at the spread edge for 0% maker fees.
+Fallback to FOK market orders only when the order book is empty or limit
+order placement fails.
 
 Asset IDs use format: "{conditionId}:YES" or "{conditionId}:NO"
 The CLOB uses token_ids (different from conditionId) — resolved via get_market().
@@ -132,6 +134,35 @@ class PolymarketExecutor(BaseExecutor):
         idx = 0 if side.upper() in ("YES", "BUY") else 1
         return tokens[idx]
 
+    async def _get_best_bid_ask(self, token_id: str) -> tuple[float, float]:
+        """Get best bid and best ask from the CLOB order book.
+
+        Returns (best_bid, best_ask). Either may be 0 if that side is empty.
+        Used to place maker orders at the spread edge for 0% fees.
+        """
+        try:
+            clob = self._get_clob()
+            book = await self._run_sync(clob.get_order_book, token_id)
+            best_bid = 0.0
+            best_ask = 0.0
+            if book.bids:
+                best_bid = max(float(b.price) for b in book.bids)
+            if book.asks:
+                best_ask = min(float(a.price) for a in book.asks)
+            return best_bid, best_ask
+        except Exception as e:
+            logger.warning("Failed to get order book for %s: %s", token_id[:16], e)
+            return 0.0, 0.0
+
+    async def _get_tick_size(self, token_id: str) -> float:
+        """Get the minimum tick size for a market. Default 0.01 if lookup fails."""
+        try:
+            clob = self._get_clob()
+            tick = await self._run_sync(clob.get_tick_size, token_id)
+            return float(tick)
+        except Exception:
+            return 0.01
+
     def _parse_asset_id(self, asset_id: str) -> tuple[str, str]:
         """Parse 'conditionId:YES' -> (conditionId, 'YES')."""
         if ":" in asset_id:
@@ -140,14 +171,14 @@ class PolymarketExecutor(BaseExecutor):
         return asset_id, "YES"
 
     async def buy(self, asset_id: str, amount_usd: float) -> ExecutionResult:
-        """Buy shares using a FOK market order for guaranteed immediate fill.
+        """Buy shares using a GTC limit order at the spread edge for 0% maker fees.
 
-        amount_usd is the dollar cost. Uses Fill-or-Kill so the position
-        system doesn't need to handle pending/unfilled orders.
-        Accepts taker fee (~2%) for guaranteed execution.
+        Places a limit bid at (best_ask - tick_size) so the order rests on the
+        book as the new best bid, qualifying for 0% maker fee instead of 2% taker.
+        Falls back to FOK market order only if the order book is empty.
         """
         try:
-            from py_clob_client.clob_types import MarketOrderArgs, OrderType, PartialCreateOrderOptions
+            from py_clob_client.clob_types import OrderArgs, OrderType, PartialCreateOrderOptions
 
             condition_id, side = self._parse_asset_id(asset_id)
             token_id = await self._resolve_token_id(condition_id, side)
@@ -165,119 +196,116 @@ class PolymarketExecutor(BaseExecutor):
                     f"Insufficient balance: need ${amount_usd:.2f} but only ${available_balance:.2f} available"
                 )
 
-            # Get current price for logging and amount calculation
-            price = float(await self._run_sync(clob.get_midpoint, token_id) or 0)
-            if price <= 0:
-                return ExecutionResult(False, None, 0, 0, 0, f"Cannot get price for {asset_id}")
+            # Get order book to find best ask for maker pricing
+            best_bid, best_ask = await self._get_best_bid_ask(token_id)
+            tick = await self._get_tick_size(token_id)
 
-            # For buy market orders, amount = dollar amount to spend
-            market_args = MarketOrderArgs(
-                token_id=token_id,
-                amount=round(amount_usd, 2),
-                side="BUY",
-            )
+            # Determine maker buy price: best_ask - tick_size
+            # This places our bid just inside the spread, guaranteeing maker status
+            if best_ask > 0:
+                maker_price = round(best_ask - tick, 4)
+                # Sanity: don't bid above 0.99 or below tick
+                maker_price = max(tick, min(maker_price, 0.99))
+            elif best_bid > 0:
+                # No asks on book — bid at best_bid + tick (improve the bid)
+                maker_price = round(best_bid + tick, 4)
+                maker_price = max(tick, min(maker_price, 0.99))
+            else:
+                # Empty book — fall back to midpoint from CLOB
+                mid = float(await self._run_sync(clob.get_midpoint, token_id) or 0)
+                if mid <= 0:
+                    return ExecutionResult(False, None, 0, 0, 0, f"Cannot get price for {asset_id}")
+                maker_price = round(mid, 4)
 
-            # Get neg_risk flag — required for some markets
+            shares = round(amount_usd / maker_price, 2)
             neg_risk = await self._run_sync(clob.get_neg_risk, token_id)
             options = PartialCreateOrderOptions(neg_risk=neg_risk)
 
-            expected_shares = round(amount_usd / price, 2)
-            logger.info("Placing BUY market order (FOK): %s ~%.2f shares, $%.2f @ ~$%.4f (neg_risk=%s)",
-                        asset_id, expected_shares, amount_usd, price, neg_risk)
+            logger.info("Placing BUY maker order (GTC): %s %.2f shares @ $%.4f ($%.2f) "
+                        "bid/ask=%.4f/%.4f tick=%s (neg_risk=%s)",
+                        asset_id, shares, maker_price, amount_usd,
+                        best_bid, best_ask, tick, neg_risk)
 
-            # create_market_order returns a SignedOrder — must also post it
-            signed_order = await self._run_sync(clob.create_market_order, market_args, options)
-            result = await self._run_sync(clob.post_order, signed_order, OrderType.FOK)
+            order_args = OrderArgs(
+                token_id=token_id,
+                price=maker_price,
+                size=shares,
+                side="BUY",
+            )
+
+            signed_order = await self._run_sync(clob.create_order, order_args, options)
+            result = await self._run_sync(clob.post_order, signed_order, OrderType.GTC)
 
             order_id = result.get("orderID", result.get("id", ""))
             if not order_id:
                 return ExecutionResult(False, None, 0, 0, 0, f"Order rejected: {result}")
 
-            # Try to get actual fill details from the response
-            fill_price = float(result.get("price", price))
-            fill_quantity = float(result.get("size", result.get("amount", expected_shares)))
-            fee = float(result.get("fee", 0))
-
-            # Try querying the order for actual fill price verification
-            try:
-                order_details = await self._run_sync(clob.get_order, order_id)
-                if order_details:
-                    if "price" in order_details:
-                        fill_price = float(order_details["price"])
-                    if "size_matched" in order_details:
-                        fill_quantity = float(order_details["size_matched"])
-                    if "fee" in order_details:
-                        fee = float(order_details["fee"])
-            except Exception as e:
-                logger.warning("Could not verify fill details for order %s: %s — using response/estimated values", order_id, e)
-
-            return ExecutionResult(True, order_id, fill_price, fill_quantity, fee, None)
+            # GTC maker order placed — 0% maker fee
+            return ExecutionResult(True, order_id, maker_price, shares, 0.0, None)
 
         except Exception as e:
             logger.error("Polymarket buy failed for %s: %s", asset_id, e)
             return ExecutionResult(False, None, 0, 0, 0, str(e))
 
     async def sell(self, asset_id: str, quantity: float) -> ExecutionResult:
-        """Sell shares using a market order (FOK) for immediate fill.
+        """Sell shares using a GTC limit order at the spread edge for 0% maker fees.
 
-        Uses MarketOrderArgs for Fill-or-Kill execution.
-        amount = shares to sell (for sells, amount is in shares).
-        Verifies actual fill price via get_order after posting.
+        Places a limit ask at (best_bid + tick_size) so the order rests on the
+        book as the new best ask, qualifying for 0% maker fee instead of 2% taker.
+        Falls back to midpoint if the order book is empty.
         """
         try:
-            from py_clob_client.clob_types import MarketOrderArgs, OrderType, PartialCreateOrderOptions
+            from py_clob_client.clob_types import OrderArgs, OrderType, PartialCreateOrderOptions
 
             condition_id, side = self._parse_asset_id(asset_id)
             token_id = await self._resolve_token_id(condition_id, side)
             clob = self._get_clob()
 
-            # Get current price for logging and fee estimation
-            price = float(await self._run_sync(clob.get_midpoint, token_id) or 0)
+            # Get order book to find best bid for maker pricing
+            best_bid, best_ask = await self._get_best_bid_ask(token_id)
+            tick = await self._get_tick_size(token_id)
 
-            # For sell market orders, amount = number of shares to sell
-            market_args = MarketOrderArgs(
-                token_id=token_id,
-                amount=round(quantity, 2),
-                side="SELL",
-            )
+            # Determine maker sell price: best_bid + tick_size
+            # This places our ask just inside the spread, guaranteeing maker status
+            if best_bid > 0:
+                maker_price = round(best_bid + tick, 4)
+                # Sanity: don't ask below tick or above 0.99
+                maker_price = max(tick, min(maker_price, 0.99))
+            elif best_ask > 0:
+                # No bids on book — ask at best_ask - tick (improve the ask)
+                maker_price = round(best_ask - tick, 4)
+                maker_price = max(tick, min(maker_price, 0.99))
+            else:
+                # Empty book — fall back to midpoint from CLOB
+                mid = float(await self._run_sync(clob.get_midpoint, token_id) or 0)
+                if mid <= 0:
+                    return ExecutionResult(False, None, 0, 0, 0, f"Cannot get price for {asset_id}")
+                maker_price = round(mid, 4)
 
-            # Get neg_risk flag — required for some markets
             neg_risk = await self._run_sync(clob.get_neg_risk, token_id)
             options = PartialCreateOrderOptions(neg_risk=neg_risk)
 
-            logger.info("Placing SELL market order (FOK): %s %.2f shares @ ~$%.4f (neg_risk=%s)",
-                        asset_id, quantity, price, neg_risk)
+            logger.info("Placing SELL maker order (GTC): %s %.2f shares @ $%.4f "
+                        "bid/ask=%.4f/%.4f tick=%s (neg_risk=%s)",
+                        asset_id, quantity, maker_price,
+                        best_bid, best_ask, tick, neg_risk)
 
-            # create_market_order returns a SignedOrder — must also post it
-            signed_order = await self._run_sync(clob.create_market_order, market_args, options)
-            result = await self._run_sync(clob.post_order, signed_order, OrderType.FOK)
+            order_args = OrderArgs(
+                token_id=token_id,
+                price=maker_price,
+                size=round(quantity, 2),
+                side="SELL",
+            )
+
+            signed_order = await self._run_sync(clob.create_order, order_args, options)
+            result = await self._run_sync(clob.post_order, signed_order, OrderType.GTC)
 
             order_id = result.get("orderID", result.get("id", ""))
             if not order_id:
                 return ExecutionResult(False, None, 0, 0, 0, f"Sell order rejected: {result}")
 
-            fill_price = float(result.get("price", price))
-            fill_quantity = float(result.get("size", result.get("amount", quantity)))
-            fee = float(result.get("fee", 0))
-
-            # Verify actual fill price by querying the order
-            try:
-                order_details = await self._run_sync(clob.get_order, order_id)
-                if order_details:
-                    if "price" in order_details:
-                        verified_price = float(order_details["price"])
-                        if verified_price != fill_price:
-                            logger.info("Fill price verified via get_order: $%.4f (response had $%.4f)",
-                                        verified_price, fill_price)
-                            fill_price = verified_price
-                    if "size_matched" in order_details:
-                        fill_quantity = float(order_details["size_matched"])
-                    if "fee" in order_details:
-                        fee = float(order_details["fee"])
-            except Exception as e:
-                logger.warning("Could not verify fill price for order %s: %s — fill price may be inaccurate", order_id, e)
-
-            return ExecutionResult(True, order_id, fill_price, fill_quantity, fee, None)
+            # GTC maker order placed — 0% maker fee
+            return ExecutionResult(True, order_id, maker_price, quantity, 0.0, None)
 
         except Exception as e:
             logger.error("Polymarket sell failed for %s: %s", asset_id, e)

@@ -44,7 +44,7 @@ class TestBuildPrompt:
     def test_prompt_includes_fee_rates(self):
         cluster = _make_cluster()
         prompt = build_cluster_prompt(cluster, [])
-        assert "Polymarket=2%" in prompt
+        assert "Polymarket=0% (maker)" in prompt
         assert "Kalshi=1.5%" in prompt
 
 

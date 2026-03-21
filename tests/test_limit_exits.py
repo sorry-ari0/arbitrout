@@ -61,15 +61,15 @@ def test_sell_limit_uses_limit_price_not_market():
     assert pe._resting_orders[result.tx_id]["limit_price"] == 0.75
 
 
-def test_sell_market_still_charges_taker_fee():
-    """Regular sell() should still charge 2% taker fee."""
+def test_sell_market_charges_maker_fee():
+    """Regular sell() should charge 0% maker fee (all orders now use GTC limit)."""
     pe = make_paper_executor(balance=1000.0)
     pe.positions["test:YES"] = {"quantity": 100.0, "avg_entry_price": 0.50}
     result = asyncio.run(
         pe.sell("test:YES", 100.0)
     )
     assert result.success
-    assert result.fees > 0, "Market sell should charge taker fee"
+    assert result.fees == 0.0, "Polymarket sell should charge 0% maker fee"
 
 
 def test_check_order_status_returns_filled():

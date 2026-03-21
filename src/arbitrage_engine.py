@@ -25,9 +25,9 @@ DATA_DIR = Path(__file__).parent / "data" / "arbitrage"
 # ============================================================
 # PLATFORM FEE RATES (for opportunity filtering)
 # ============================================================
-# Taker fees (market orders) applied at entry
+# Entry fees: maker (GTC limit orders) for Polymarket (0%), taker for others
 _TAKER_FEES = {
-    "polymarket": 0.02,
+    "polymarket": 0.0,      # 0% maker fee (all orders use GTC limit)
     "kalshi": 0.01,
     "predictit": 0.0,       # No entry fee; profit taxed at resolution
     "limitless": 0.01,
@@ -35,7 +35,7 @@ _TAKER_FEES = {
     "coinbase_spot": 0.006,
     "kraken": 0.0026,
 }
-_DEFAULT_TAKER_FEE = 0.02
+_DEFAULT_TAKER_FEE = 0.0
 _PREDICTIT_PROFIT_TAX = 0.10  # 10% of profits at contract resolution
 _PREDICTIT_WITHDRAWAL_FEE = 0.05  # 5% of withdrawal amount
 
@@ -1301,7 +1301,7 @@ class ArbitrageScanner:
 
                     # Find optimal exclusion: remove favorites until remaining
                     # sum still > 1.0 (+ fee buffer for guaranteed profit)
-                    fee_buffer = 0.02  # 2% buffer for execution/fees
+                    fee_buffer = 0.005  # 0.5% buffer for slippage (0% maker fees)
                     threshold = 1.0 + fee_buffer
 
                     favorites = []
