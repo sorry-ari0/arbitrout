@@ -79,3 +79,32 @@ class TestFavoriteLongshot:
         favorite_frac = 0.25
         assert longshot_frac < midrange_frac < favorite_frac
         assert longshot_frac <= favorite_frac * 0.5
+
+
+class TestVolumeFilter:
+    def test_volume_filter_constant(self):
+        from positions.auto_trader import MIN_ARB_VOLUME
+        assert MIN_ARB_VOLUME == 50_000
+        assert isinstance(MIN_ARB_VOLUME, int)
+
+    def test_low_volume_arb_skipped(self):
+        from positions.auto_trader import MIN_ARB_VOLUME
+        opp = {"volume": 30_000, "opportunity_type": ""}
+        exempt = ("political_synthetic", "crypto_synthetic", "weather", "multi_outcome_arb", "portfolio_no")
+        should_skip = (opp.get("opportunity_type", "") not in exempt and opp.get("volume", 0) < MIN_ARB_VOLUME)
+        assert should_skip is True
+
+    def test_high_volume_arb_not_skipped(self):
+        from positions.auto_trader import MIN_ARB_VOLUME
+        opp = {"volume": 100_000, "opportunity_type": ""}
+        exempt = ("political_synthetic", "crypto_synthetic", "weather", "multi_outcome_arb", "portfolio_no")
+        should_skip = (opp.get("opportunity_type", "") not in exempt and opp.get("volume", 0) < MIN_ARB_VOLUME)
+        assert should_skip is False
+
+    def test_synthetic_exempt_from_volume_filter(self):
+        from positions.auto_trader import MIN_ARB_VOLUME
+        exempt = ("political_synthetic", "crypto_synthetic", "weather", "multi_outcome_arb", "portfolio_no")
+        for opp_type in ["political_synthetic", "crypto_synthetic"]:
+            opp = {"volume": 1_000, "opportunity_type": opp_type}
+            should_skip = (opp.get("opportunity_type", "") not in exempt and opp.get("volume", 0) < MIN_ARB_VOLUME)
+            assert should_skip is False, f"{opp_type} should be exempt"

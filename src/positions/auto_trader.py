@@ -39,6 +39,7 @@ MAX_LOSSES_PER_MARKET = 2    # Block market after 2 losses (prevents BTC-top-per
 MAX_NEW_TRADES_PER_DAY = 3          # Max new positions per calendar day
 MARKET_COOLDOWN_SECONDS = 172800    # 48h cooldown per market (was 86400)
 MIN_HOURS_TO_EXPIRY = 1.0  # Skip markets expiring within 1 hour (dynamic fees, bot dominance)
+MIN_ARB_VOLUME = 50_000  # Skip arb opportunities below $50K daily volume (78% execution failure)
 
 
 class AutoTrader:
@@ -325,6 +326,17 @@ class AutoTrader:
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "low_spread", spread_pct=spread_pct)
                 continue
+
+            # Volume filter for arb opportunities (78% execution failure below $50K daily volume)
+            # Exempt: directional strategies that don't require simultaneous cross-platform execution.
+            opp_type = opp.get("opportunity_type", "")
+            if opp_type not in ("political_synthetic", "crypto_synthetic", "weather", "multi_outcome_arb", "portfolio_no"):
+                arb_volume = opp.get("volume", opp.get("combined_volume", 0))
+                if arb_volume < MIN_ARB_VOLUME:
+                    self._trades_skipped += 1
+                    if self.dlog:
+                        self.dlog.log_opportunity_skip(opp_title, "low_volume", volume=arb_volume)
+                    continue
 
             # Skip markets we already have positions on (check BOTH sides, case-insensitive)
             # EXCEPTION: allow re-entry when news or insider signals provide new information
