@@ -139,3 +139,61 @@ class TestJournal:
             perf = journal.get_performance()
             assert perf["total_trades"] == 0
             assert "message" in perf
+
+    def test_record_close_idempotency_same_package(self):
+        """Calling record_close twice with the same package creates only one entry."""
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = TradeJournal(Path(tmp))
+
+            pkg = _make_closed_package("Duplicate Test", "cross_platform_arb", 100.0, 120.0)
+            entry1 = journal.record_close(pkg, exit_trigger="target_hit")
+            entry2 = journal.record_close(pkg, exit_trigger="target_hit")
+
+            assert entry1 is not None
+            assert entry2 is None  # Second call should be rejected
+            assert len(journal.entries) == 1
+
+    def test_record_close_different_packages(self):
+        """Different packages should both be recorded."""
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = TradeJournal(Path(tmp))
+
+            pkg1 = _make_closed_package("Trade A", "cross_platform_arb", 100.0, 120.0)
+            pkg2 = _make_closed_package("Trade B", "pure_prediction", 80.0, 90.0)
+
+            entry1 = journal.record_close(pkg1, exit_trigger="target_hit")
+            entry2 = journal.record_close(pkg2, exit_trigger="stop_loss")
+
+            assert entry1 is not None
+            assert entry2 is not None
+            assert len(journal.entries) == 2
+            assert journal.entries[0]["package_id"] == "pkg_trade_a"
+            assert journal.entries[1]["package_id"] == "pkg_trade_b"
+
+    def test_cross_site_idempotency(self):
+        """Simulate two call sites racing to journal the same package.
+
+        First caller journals and sets _journal_recorded flag.
+        Second caller checks the flag and skips.
+        Belt-and-suspenders in record_close() also blocks if flag was missed.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = TradeJournal(Path(tmp))
+
+            pkg = _make_closed_package("Cross Site", "cross_platform_arb", 100.0, 110.0)
+
+            # Simulate call site 1 (e.g. position_manager._exit_leg_locked):
+            # checks flag, journals, sets flag
+            assert not pkg.get("_journal_recorded")
+            entry1 = journal.record_close(pkg, exit_trigger="trailing_stop")
+            pkg["_journal_recorded"] = True
+            assert entry1 is not None
+
+            # Simulate call site 2 (e.g. exit_engine._resolve_bracket_fills):
+            # checks flag — flag is set, so it skips the call entirely
+            assert pkg.get("_journal_recorded") is True
+
+            # Even if call site 2 ignores the flag, belt-and-suspenders catches it
+            entry2 = journal.record_close(pkg, exit_trigger="bracket_tp")
+            assert entry2 is None
+            assert len(journal.entries) == 1

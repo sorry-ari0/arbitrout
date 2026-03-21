@@ -44,6 +44,12 @@ class TradeJournal:
 
     def record_close(self, pkg: dict, exit_trigger: str = "manual"):
         """Record a completed trade (package close) with full details including fees."""
+        # Belt-and-suspenders idempotency: reject if this package was already journaled
+        pkg_id = pkg.get("id")
+        if pkg_id is not None and any(e.get("package_id") == pkg_id for e in self.entries):
+            logger.debug("Package %s already journaled, skipping duplicate", pkg_id)
+            return None
+
         legs_detail = []
         total_buy_fees = 0.0
         total_sell_fees = 0.0
