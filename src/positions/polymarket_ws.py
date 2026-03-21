@@ -35,6 +35,7 @@ class PolymarketPriceFeed:
         self._ws = None
         self._reconnect_delay = RECONNECT_BASE_DELAY
         self._on_price_callbacks: list = []
+        self._on_trade_callbacks: list = []
 
     def get_price(self, asset_id: str) -> float | None:
         """Get latest price for an asset. Returns None if not tracked or stale."""
@@ -72,6 +73,10 @@ class PolymarketPriceFeed:
     def on_price(self, callback):
         """Register callback for price updates: callback(asset_id, price, timestamp)."""
         self._on_price_callbacks.append(callback)
+
+    def on_trade(self, callback):
+        """Register callback for trade events: callback(asset_id, price, size, timestamp, side)."""
+        self._on_trade_callbacks.append(callback)
 
     @property
     def is_connected(self) -> bool:
@@ -186,12 +191,35 @@ class PolymarketPriceFeed:
                 self._prices[asset_id] = price
                 self._updated_at[asset_id] = time.time()
 
-                # Fire callbacks
+                # Fire price callbacks
                 for cb in self._on_price_callbacks:
                     try:
                         cb(asset_id, price, time.time())
                     except Exception:
                         pass
+
+                # Fire trade callbacks (only for trade events with size)
+                if event_type == "trade" and self._on_trade_callbacks:
+                    size = None
+                    for size_field in ("size", "amount", "quantity"):
+                        val = msg.get(size_field)
+                        if val is not None:
+                            try:
+                                size = float(val)
+                                if size > 0:
+                                    break
+                                size = None
+                            except (ValueError, TypeError):
+                                pass
+                    if size is not None:
+                        side_raw = msg.get("side", "unknown")
+                        side = side_raw.lower() if isinstance(side_raw, str) else "unknown"
+                        now = time.time()
+                        for cb in self._on_trade_callbacks:
+                            try:
+                                cb(asset_id, price, size, now, side)
+                            except Exception:
+                                pass
 
     def get_stats(self) -> dict:
         """Return feed status for API/dashboard."""
