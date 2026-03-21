@@ -20,21 +20,20 @@ except ImportError:
 logger = logging.getLogger("positions.auto_trader")
 
 # Position limits
-MAX_TRADE_SIZE = 200.0       # Max $200 per trade
+MAX_TRADE_SIZE = 100.0       # Reduced from $200 to $100 until win rate improves
+                             # Trade journal: 88.6% loss rate (31/35), smaller sizing limits drawdown
 MIN_TRADE_SIZE = 5.0         # Min $5 per trade (supports small live accounts)
 MAX_CONCURRENT = 7           # Max 7 open packages (reserve 3 slots for news-driven trades)
-MAX_TOTAL_EXPOSURE = 1400.0  # Max $1400 for auto trader (reserve $600 for news)
+MAX_TOTAL_EXPOSURE = 700.0   # Reduced from $1400 to $700 (proportional to trade size cut)
 PORTFOLIO_EXPOSURE_CAP = 0.40  # Kelly portfolio rule: never exceed 40% of total bankroll
 TOTAL_BANKROLL = 2000.0      # Total bankroll (auto_trader $1400 + news $600)
 SCAN_INTERVAL = 300          # 5 minutes between self-initiated scans (safety net)
-MIN_SPREAD_PCT = 12.0        # Minimum 12% spread to ensure profit after fees
-# Polymarket: 0% maker fee on limit orders. Use limit orders (maker) to enter,
-# taker to exit in worst case = ~2% one-way exit fee.
-# Conservative estimate: 0% entry + 2% exit = 2% round-trip
-# With 12% min spread - 2% fees = 10% net margin minimum
-# Raised from 8%: 21 trades in 12h was excessive churn. 12% min spread
-# provides 10% net margin after fees, reducing low-quality entries.
-ROUND_TRIP_FEE_PCT = 2.0     # Estimated round-trip fees with limit order entry
+MIN_SPREAD_PCT = 8.0         # Minimum 8% spread (reduced: 0% maker fees both sides)
+# Polymarket: 0% maker fee on GTC limit orders for BOTH entry and exit.
+# All orders (buy + sell) now use GTC limit at spread edge = 0% round-trip.
+# With 8% min spread - 0% fees = 8% net margin minimum.
+# Lowered from 12%: with 0% fees we can capture more opportunities.
+ROUND_TRIP_FEE_PCT = 0.0     # 0% round-trip fees (maker orders both sides)
 MAX_LOSSES_PER_MARKET = 2    # Block market after 2 losses (prevents BTC-top-performer pattern: 6 entries, $24 lost)
 MAX_NEW_TRADES_PER_DAY = 3          # Max new positions per calendar day
 MARKET_COOLDOWN_SECONDS = 172800    # 48h cooldown per market (was 86400)
@@ -585,7 +584,9 @@ class AutoTrader:
                     ))
 
                 # Multi-outcome arb: guaranteed profit — only exit on safety
-                pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -15}))
+                # Widened from -15% to -35%: trade journal showed tight stops
+                # cut arb positions before resolution (88.6% loss rate)
+                pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -35}))
 
                 if not pkg["legs"]:
                     self._trades_skipped += 1
@@ -655,7 +656,8 @@ class AutoTrader:
                     ))
 
                 # Near-guaranteed profit — only exit on safety or if overround collapses
-                pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -10}))
+                # Widened from -10% to -35%: tight stops cut winners early
+                pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -35}))
                 pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 15}))
 
                 if not pkg["legs"]:
@@ -716,9 +718,10 @@ class AutoTrader:
                     expiry=opp.get("expiry", opp.get("target_date", ""))[:10],
                 ))
 
-                # Daily weather markets resolve quickly — tight exits
+                # Daily weather markets resolve quickly — widened stops
+                # Widened from -25% to -35%: trade journal analysis
                 pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 30}))
-                pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -25}))
+                pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -35}))
 
                 pkg["_use_limit_orders"] = True
                 pkg_name = pkg.get("name", opp_title)
@@ -1232,11 +1235,11 @@ class AutoTrader:
             return None
 
         # Enforce per-platform-pair minimum spread thresholds
-        # Cross-platform fees: Polymarket taker ~2% + Kalshi ~1.2% = ~3.2% round-trip
+        # Cross-platform fees: Polymarket maker 0% + Kalshi ~1.2% = ~1.2% round-trip
         profit_pct = arb.get("profit_pct", 0)
         is_cross_platform = buy_yes_platform != buy_no_platform
         if is_cross_platform:
-            min_spread = 3.5  # Must exceed combined cross-platform fees
+            min_spread = 2.0  # Must exceed combined cross-platform fees (0% Poly + 1.2% Kalshi)
             if profit_pct < min_spread:
                 logger.debug("Cross-platform spread too thin (%.1f%% < %.1f%%): %s",
                              profit_pct, min_spread, title[:40])
