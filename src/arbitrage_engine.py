@@ -61,7 +61,7 @@ _POLYMARKET_FEE_PARAMS: dict[str, dict] = {
 _POLYMARKET_FEE_DEFAULT = "crypto"  # unknown categories fall back to most conservative
 
 
-def compute_taker_fee(platform: str, price: float, category: str) -> float:
+def compute_taker_fee(platform: str, price: float, category: str = "") -> float:
     """Return the effective taker fee rate for a given platform, price, and category.
 
     For Polymarket: applies dynamic price-sensitive curve

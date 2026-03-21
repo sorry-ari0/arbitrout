@@ -309,7 +309,7 @@ class TestFindArbitrageWithCategory:
         assert opp.net_profit_pct > 0
         # Dynamic fee is less than old flat, so net_profit_pct should be >= old calc
         # Old flat Polymarket fee: 0.40 * 0.02 = 0.008
-        # Dynamic crypto fee at 0.40: 0.25*(0.40*0.60)^2 = 0.00144
+        # Dynamic crypto fee at 0.40: 0.25*(0.40*0.60)^2 = 0.0144
         # So net should be better (higher) with dynamic fees
         old_yes_fee = 0.40 * 0.02
         new_yes_fee = 0.40 * compute_taker_fee("polymarket", 0.40, "crypto")
