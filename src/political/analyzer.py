@@ -108,6 +108,7 @@ class PoliticalAnalyzer:
                             expiry=m.get("expiry", "ongoing"),
                             url=m.get("url", ""),
                             last_updated=m.get("last_updated", ""),
+                            spot_price=m.get("spot_price", 0.0),
                         )
                         filtered_events.append(ne)
                     except (KeyError, TypeError):
@@ -189,7 +190,13 @@ class PoliticalAnalyzer:
 
         # Build prompt with top combo's relationships
         top_combo = combos[0]
-        prompt = build_cluster_prompt(cluster, top_combo["relationships"])
+        # Extract spot prices from crypto contracts for the LLM prompt
+        spot_prices = {}
+        for c in cluster.contracts:
+            if c.crypto_asset and c.event.spot_price > 0:
+                spot_prices[c.crypto_asset] = c.event.spot_price
+        prompt = build_cluster_prompt(cluster, top_combo["relationships"],
+                                      spot_prices=spot_prices or None)
 
         # Call AI provider
         try:
