@@ -176,3 +176,69 @@ class TestBuildClusters:
 
         assert clusters[0].race == "TX Senate"
         assert clusters[0].state == "TX"
+
+
+class TestCryptoClustering:
+    """Tests for crypto contract clustering by asset."""
+
+    def _make_crypto_contract(self, title, crypto_asset, event_category="regulatory",
+                              platform="polymarket", event_id=None):
+        """Helper: create a crypto_event PoliticalContractInfo."""
+        event = _make_event(title, platform=platform)
+        if event_id:
+            event = NormalizedEvent(
+                platform=platform, event_id=event_id, title=title,
+                category="crypto", yes_price=0.55, no_price=0.45,
+                volume=5000, expiry="2026-12-31",
+                url=f"https://{platform}.com/test",
+            )
+        return PoliticalContractInfo(
+            event=event, contract_type="crypto_event",
+            crypto_asset=crypto_asset, event_category=event_category,
+            crypto_direction="positive",
+        )
+
+    def test_btc_contracts_cluster_together(self):
+        """Two BTC contracts → one crypto-btc cluster."""
+        c1 = self._make_crypto_contract("BTC above $150K", "BTC", "price_target", event_id="e1")
+        c2 = self._make_crypto_contract("SEC classifies BTC as security", "BTC", "regulatory", event_id="e2")
+        clusters = build_clusters([c1, c2])
+        assert len(clusters) == 1
+        assert clusters[0].cluster_id == "crypto-btc-2026"
+        assert len(clusters[0].contracts) == 2
+
+    def test_different_assets_separate_clusters(self):
+        """BTC and ETH contracts → separate clusters."""
+        c1 = self._make_crypto_contract("BTC above $150K", "BTC", "price_target", event_id="e1")
+        c2 = self._make_crypto_contract("BTC above $100K", "BTC", "price_target", event_id="e2")
+        c3 = self._make_crypto_contract("ETH above $5K", "ETH", "price_target", event_id="e3")
+        c4 = self._make_crypto_contract("ETH ETF approved", "ETH", "regulatory", event_id="e4")
+        clusters = build_clusters([c1, c2, c3, c4])
+        cluster_ids = {c.cluster_id for c in clusters}
+        assert "crypto-btc-2026" in cluster_ids
+        assert "crypto-eth-2026" in cluster_ids
+
+    def test_singleton_crypto_filtered(self):
+        """Single crypto contract → no cluster (minimum 2)."""
+        c1 = self._make_crypto_contract("BTC above $150K", "BTC", "price_target", event_id="e1")
+        clusters = build_clusters([c1])
+        assert len(clusters) == 0
+
+    def test_mixed_political_and_crypto(self):
+        """Political + crypto events produce separate clusters."""
+        pol1 = _make_contract("Talarico wins TX Senate", "TX Senate", "TX")
+        pol2 = _make_contract("Cruz wins TX Senate", "TX Senate", "TX")
+        cry1 = self._make_crypto_contract("BTC above $150K", "BTC", "price_target", event_id="c1")
+        cry2 = self._make_crypto_contract("SEC bans BTC", "BTC", "regulatory", event_id="c2")
+        clusters = build_clusters([pol1, pol2, cry1, cry2])
+        cluster_ids = {c.cluster_id for c in clusters}
+        assert any("crypto-btc" in cid for cid in cluster_ids)
+        assert any("senate" in cid.lower() or "tx" in cid.lower() for cid in cluster_ids)
+
+    def test_crypto_cluster_race_state_none(self):
+        """Crypto clusters have race=None and state=None."""
+        c1 = self._make_crypto_contract("BTC above $150K", "BTC", "price_target", event_id="e1")
+        c2 = self._make_crypto_contract("SEC bans BTC", "BTC", "regulatory", event_id="e2")
+        clusters = build_clusters([c1, c2])
+        assert clusters[0].race is None
+        assert clusters[0].state is None
