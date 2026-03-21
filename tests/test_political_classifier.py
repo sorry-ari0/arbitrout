@@ -272,7 +272,7 @@ class TestClassifier:
     # -- platform fees dict --
     def test_platform_fees(self):
         """PLATFORM_FEES contains expected platforms and values."""
-        assert PLATFORM_FEES["polymarket"] == 2.0
+        assert PLATFORM_FEES["polymarket"] == 0.0
         assert PLATFORM_FEES["kalshi"] == 1.5
         assert PLATFORM_FEES["predictit"] == 10.0
         assert PLATFORM_FEES["limitless"] == 2.0

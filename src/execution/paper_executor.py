@@ -32,7 +32,7 @@ TAKER_FEE_RATES = {
     "crypto_spot": 0.0,       # Synthetic — no real fees
     "kraken": 0.0026,         # 0.26% taker
 }
-DEFAULT_FEE_RATE = 0.02  # 2% default (taker)
+DEFAULT_FEE_RATE = 0.0  # 0% default (maker — all orders now use GTC limit)
 
 
 class PaperExecutor:
@@ -57,9 +57,9 @@ class PaperExecutor:
             if name in platform:
                 self.buy_fee_rate = rate if use_limit_orders else TAKER_FEE_RATES.get(name, DEFAULT_FEE_RATE)
                 break
-        for name, rate in TAKER_FEE_RATES.items():
+        for name, rate in MAKER_FEE_RATES.items():
             if name in platform:
-                self.sell_fee_rate = rate  # exits always use taker rate
+                self.sell_fee_rate = rate if use_limit_orders else TAKER_FEE_RATES.get(name, DEFAULT_FEE_RATE)
                 break
         # Keep fee_rate for backwards compat (average of buy/sell)
         self.fee_rate = self.buy_fee_rate

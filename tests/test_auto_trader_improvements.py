@@ -5,10 +5,10 @@ from unittest.mock import MagicMock
 
 
 class TestChurnReduction:
-    def test_min_spread_is_12(self):
-        """MIN_SPREAD_PCT should be raised from 8% to 12%."""
+    def test_min_spread_is_8(self):
+        """MIN_SPREAD_PCT lowered to 8% (0% maker fees both sides)."""
         from positions.auto_trader import MIN_SPREAD_PCT
-        assert MIN_SPREAD_PCT == 12.0
+        assert MIN_SPREAD_PCT == 8.0
 
     def test_max_trades_per_day_is_3(self):
         from positions.auto_trader import MAX_NEW_TRADES_PER_DAY
