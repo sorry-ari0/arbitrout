@@ -432,11 +432,14 @@ class AutoTrader:
                 poly_platform = opp.get("buy_yes_platform", "")
                 if poly_platform == "polymarket":
                     kyle_direction = "YES"
+                    kyle_market_id = market_id
                 elif opp.get("buy_no_platform", "") == "polymarket":
                     kyle_direction = "NO"
+                    kyle_market_id = opp.get("buy_no_market_id", market_id)
                 else:
                     kyle_direction = "YES"  # fallback
-                kyle_signal = self.kyle_estimator.get_lambda_signal(market_id, kyle_direction)
+                    kyle_market_id = market_id
+                kyle_signal = self.kyle_estimator.get_lambda_signal(kyle_market_id, kyle_direction)
                 if kyle_signal:
                     score *= kyle_signal["multiplier"]
                     opp["kyle_signal"] = kyle_signal

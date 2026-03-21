@@ -431,7 +431,8 @@ class TestAutoTraderIntegration:
         opp = {
             "buy_yes_platform": "kalshi",
             "buy_no_platform": "polymarket",
-            "buy_yes_market_id": "0xtest_no",
+            "buy_yes_market_id": "0xkalshi_id",
+            "buy_no_market_id": "0xpoly_no_id",
         }
         market_id = opp["buy_yes_market_id"]
         score = 20.0
@@ -440,16 +441,20 @@ class TestAutoTraderIntegration:
             poly_platform = opp.get("buy_yes_platform", "")
             if poly_platform == "polymarket":
                 kyle_direction = "YES"
+                kyle_market_id = market_id
             elif opp.get("buy_no_platform", "") == "polymarket":
                 kyle_direction = "NO"
+                kyle_market_id = opp.get("buy_no_market_id", market_id)
             else:
                 kyle_direction = "YES"
-            kyle_signal = trader.kyle_estimator.get_lambda_signal(market_id, kyle_direction)
+                kyle_market_id = market_id
+            kyle_signal = trader.kyle_estimator.get_lambda_signal(kyle_market_id, kyle_direction)
             if kyle_signal:
                 score *= kyle_signal["multiplier"]
 
         assert score == pytest.approx(12.0)
-        mock_est.get_lambda_signal.assert_called_once_with("0xtest_no", "NO")
+        # Should use the Polymarket market ID, not the Kalshi one
+        mock_est.get_lambda_signal.assert_called_once_with("0xpoly_no_id", "NO")
 
 
 class TestEndToEnd:
