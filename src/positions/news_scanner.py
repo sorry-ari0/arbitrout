@@ -616,6 +616,9 @@ class NewsScanner:
             "news_confidence": confidence,
             "news_side": side,
             "news_reasoning": analysis.get("reasoning", "")[:200],
+            # Signal decay: track when signal was created for urgency scoring
+            # Research: news signals have minutes-to-hours half-life
+            "signal_created_at": time.time(),
         }
 
     # ── Market Cache ─────────────────────────────────────────────────────────

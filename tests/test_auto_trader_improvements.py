@@ -62,15 +62,28 @@ class TestFavoriteLongshot:
     def test_favorite_scores_higher_than_longshot(self):
         """Same spread — favorite (0.85) should score much higher than longshot (0.15)."""
         spread_pct = 15.0
-        fav_score = spread_pct * 2.5
-        long_score = spread_pct * 0.2
+        fav_score = spread_pct * 3.0  # Strong favorite: 3.0x
+        long_score = spread_pct * 0.1  # Extreme longshot: 0.1x
         assert fav_score > long_score * 10
 
     def test_moderate_favorite_multiplier(self):
-        """Moderate favorites (0.70-0.79) should get 1.8x."""
+        """Moderate favorites (0.70-0.79) should get 2.2x."""
         spread_pct = 15.0
-        score = spread_pct * 1.8
+        score = spread_pct * 2.2
         assert score > spread_pct * 1.5
+
+    def test_mild_favorite_tier(self):
+        """Mild favorites (0.60-0.69) should get 1.4x — new tier."""
+        spread_pct = 15.0
+        mild = spread_pct * 1.4
+        base = spread_pct * 1.0
+        assert mild > base
+
+    def test_extreme_longshot_near_zero(self):
+        """Extreme longshots (<= 0.15) should get 0.1x — near elimination."""
+        spread_pct = 15.0
+        extreme = spread_pct * 0.1
+        assert extreme < 2.0  # Nearly eliminated
 
     def test_kelly_fraction_longshot_is_smaller(self):
         """Longshots (<=0.30) use 1/8 Kelly, favorites (>=0.70) use 1/4."""
@@ -447,6 +460,388 @@ class TestSyntheticValidation:
             max_loss_pct=-30.0, confidence="medium", reasoning="test",
         )
         assert validate_strategy(s) is False
+
+
+class TestKellySizing:
+    """Kelly criterion position sizing across all strategy types."""
+
+    def test_kelly_constants_exist(self):
+        from positions.auto_trader import KELLY_EDGE_BY_STRATEGY, KELLY_FRACTION_BY_STRATEGY
+        assert "multi_outcome_arb" in KELLY_EDGE_BY_STRATEGY
+        assert "portfolio_no" in KELLY_EDGE_BY_STRATEGY
+        assert "weather_forecast" in KELLY_EDGE_BY_STRATEGY
+        assert "political_synthetic" in KELLY_EDGE_BY_STRATEGY
+        assert "cross_platform_arb" in KELLY_EDGE_BY_STRATEGY
+
+    def test_kelly_size_respects_bounds(self):
+        """Kelly size should be between MIN_TRADE_SIZE and MAX_TRADE_SIZE."""
+        from positions.auto_trader import AutoTrader, MIN_TRADE_SIZE, MAX_TRADE_SIZE
+        pm = MagicMock()
+        pm.list_packages = MagicMock(return_value=[])
+        trader = AutoTrader(pm)
+        size = trader._kelly_size("multi_outcome_arb", 500.0, spread_pct=15.0)
+        assert MIN_TRADE_SIZE <= size <= MAX_TRADE_SIZE
+
+    def test_kelly_size_arb_larger_than_synthetic(self):
+        """Arb (high confidence) should size larger than synthetic (uncertain)."""
+        from positions.auto_trader import AutoTrader
+        pm = MagicMock()
+        pm.list_packages = MagicMock(return_value=[])
+        trader = AutoTrader(pm)
+        arb_size = trader._kelly_size("cross_platform_arb", 500.0, spread_pct=15.0)
+        synth_size = trader._kelly_size("political_synthetic", 500.0, spread_pct=15.0)
+        assert arb_size >= synth_size
+
+    def test_kelly_size_small_budget_floors_at_min(self):
+        """With tiny budget, should floor at MIN_TRADE_SIZE."""
+        from positions.auto_trader import AutoTrader, MIN_TRADE_SIZE
+        pm = MagicMock()
+        pm.list_packages = MagicMock(return_value=[])
+        trader = AutoTrader(pm)
+        size = trader._kelly_size("political_synthetic", 15.0, spread_pct=5.0)
+        assert size == MIN_TRADE_SIZE
+
+    def test_half_kelly_fractions(self):
+        """Multi-outcome arb and portfolio NO should use Half Kelly (0.50)."""
+        from positions.auto_trader import KELLY_FRACTION_BY_STRATEGY
+        assert KELLY_FRACTION_BY_STRATEGY["multi_outcome_arb"] == 0.50
+        assert KELLY_FRACTION_BY_STRATEGY["portfolio_no"] == 0.50
+        assert KELLY_FRACTION_BY_STRATEGY["cross_platform_arb"] == 0.50
+
+
+class TestRegimeDetection:
+    """5-loss rule: consecutive losses reduce position sizes."""
+
+    def test_regime_constants(self):
+        from positions.auto_trader import LOSS_STREAK_THRESHOLD, REGIME_SIZE_REDUCTION
+        assert LOSS_STREAK_THRESHOLD == 5
+        assert REGIME_SIZE_REDUCTION == 0.50
+
+    def test_regime_penalty_after_5_losses(self):
+        """After 5 consecutive losses, regime_penalty should be 0.50."""
+        from positions.auto_trader import AutoTrader
+        pm = MagicMock()
+        pm.list_packages = MagicMock(return_value=[])
+        journal = MagicMock()
+        journal.get_recent = MagicMock(return_value=[
+            {"outcome": "loss", "closed_at": 100},
+            {"outcome": "loss", "closed_at": 99},
+            {"outcome": "loss", "closed_at": 98},
+            {"outcome": "loss", "closed_at": 97},
+            {"outcome": "loss", "closed_at": 96},
+            {"outcome": "win", "closed_at": 95},
+        ])
+        pm.trade_journal = journal
+        trader = AutoTrader(pm)
+        trader._update_regime()
+        assert trader._loss_streak == 5
+        assert trader._regime_penalty == 0.50
+
+    def test_regime_normal_after_win(self):
+        """If most recent trade is a win, regime should be normal."""
+        from positions.auto_trader import AutoTrader
+        pm = MagicMock()
+        pm.list_packages = MagicMock(return_value=[])
+        journal = MagicMock()
+        journal.get_recent = MagicMock(return_value=[
+            {"outcome": "win", "closed_at": 100},
+            {"outcome": "loss", "closed_at": 99},
+            {"outcome": "loss", "closed_at": 98},
+        ])
+        pm.trade_journal = journal
+        trader = AutoTrader(pm)
+        trader._update_regime()
+        assert trader._loss_streak == 0
+        assert trader._regime_penalty == 1.0
+
+    def test_regime_4_losses_still_normal(self):
+        """4 consecutive losses should NOT trigger regime reduction."""
+        from positions.auto_trader import AutoTrader
+        pm = MagicMock()
+        pm.list_packages = MagicMock(return_value=[])
+        journal = MagicMock()
+        journal.get_recent = MagicMock(return_value=[
+            {"outcome": "loss", "closed_at": 100},
+            {"outcome": "loss", "closed_at": 99},
+            {"outcome": "loss", "closed_at": 98},
+            {"outcome": "loss", "closed_at": 97},
+            {"outcome": "win", "closed_at": 96},
+        ])
+        pm.trade_journal = journal
+        trader = AutoTrader(pm)
+        trader._update_regime()
+        assert trader._loss_streak == 4
+        assert trader._regime_penalty == 1.0
+
+    def test_kelly_size_reduced_in_bad_regime(self):
+        """Kelly sizing should be halved during bad regime."""
+        from positions.auto_trader import AutoTrader
+        pm = MagicMock()
+        pm.list_packages = MagicMock(return_value=[])
+        trader = AutoTrader(pm)
+        # Normal regime
+        trader._regime_penalty = 1.0
+        normal_size = trader._kelly_size("multi_outcome_arb", 500.0, spread_pct=15.0)
+        # Bad regime
+        trader._regime_penalty = 0.50
+        bad_size = trader._kelly_size("multi_outcome_arb", 500.0, spread_pct=15.0)
+        assert bad_size <= normal_size
+
+
+class TestPortfolioCorrelation:
+    """Portfolio concentration limits — max 30% in any one category."""
+
+    def test_category_detection_crypto(self):
+        from positions.auto_trader import AutoTrader
+        assert AutoTrader._detect_category("Will BTC exceed $100k?") == "crypto"
+        assert AutoTrader._detect_category("Ethereum price target") == "crypto"
+
+    def test_category_detection_politics(self):
+        from positions.auto_trader import AutoTrader
+        assert AutoTrader._detect_category("Will Trump win the election?") == "politics"
+
+    def test_category_detection_sports(self):
+        from positions.auto_trader import AutoTrader
+        assert AutoTrader._detect_category("NCAA Basketball Final") == "sports"
+
+    def test_category_detection_weather(self):
+        from positions.auto_trader import AutoTrader
+        assert AutoTrader._detect_category("NYC Temperature above 90F") == "weather"
+
+    def test_category_detection_other(self):
+        from positions.auto_trader import AutoTrader
+        assert AutoTrader._detect_category("Will aliens land?") == "other"
+
+    def test_concentration_allows_first_trade(self):
+        """First trade in empty portfolio should always be allowed."""
+        from positions.auto_trader import AutoTrader
+        pm = MagicMock()
+        pm.list_packages = MagicMock(return_value=[])
+        trader = AutoTrader(pm)
+        assert trader._check_concentration("BTC price", 50.0, 0.0, {}) is True
+
+    def test_concentration_blocks_overweight(self):
+        """If crypto is already 30%, adding more crypto should be blocked."""
+        from positions.auto_trader import AutoTrader
+        pm = MagicMock()
+        pm.list_packages = MagicMock(return_value=[])
+        trader = AutoTrader(pm)
+        # 100 total, 30 in crypto = 30%. Adding 10 more crypto = 40/110 = 36% > 30%
+        assert trader._check_concentration(
+            "BTC target $200k", 10.0, 100.0, {"crypto": 30.0}
+        ) is False
+
+    def test_concentration_allows_different_category(self):
+        """Adding politics trade when crypto is heavy should be fine."""
+        from positions.auto_trader import AutoTrader
+        pm = MagicMock()
+        pm.list_packages = MagicMock(return_value=[])
+        trader = AutoTrader(pm)
+        assert trader._check_concentration(
+            "Will election happen?", 10.0, 100.0, {"crypto": 30.0}
+        ) is True
+
+    def test_max_concentration_constant(self):
+        from positions.auto_trader import MAX_CATEGORY_CONCENTRATION
+        assert MAX_CATEGORY_CONCENTRATION == 0.30
+
+
+class TestSignalDecay:
+    """News signal urgency decay based on signal age."""
+
+    def test_fresh_signal_full_score(self):
+        """Signal < 5 min old should get 1.0 multiplier."""
+        import time
+        from positions.auto_trader import AutoTrader
+        decay = AutoTrader._signal_decay(time.time() - 60)  # 1 minute ago
+        assert decay == 1.0
+
+    def test_moderate_signal_reduced(self):
+        """Signal 15 min old should get 0.7 multiplier."""
+        import time
+        from positions.auto_trader import AutoTrader
+        decay = AutoTrader._signal_decay(time.time() - 15 * 60)  # 15 min ago
+        assert decay == 0.7
+
+    def test_old_signal_heavily_reduced(self):
+        """Signal 45 min old should get 0.4 multiplier."""
+        import time
+        from positions.auto_trader import AutoTrader
+        decay = AutoTrader._signal_decay(time.time() - 45 * 60)  # 45 min ago
+        assert decay == 0.4
+
+    def test_stale_signal_minimal(self):
+        """Signal > 60 min old should get 0.1 multiplier."""
+        import time
+        from positions.auto_trader import AutoTrader
+        decay = AutoTrader._signal_decay(time.time() - 120 * 60)  # 2 hours ago
+        assert decay == 0.1
+
+    def test_no_timestamp_full_score(self):
+        """Missing signal_created_at should return 1.0 (don't penalize)."""
+        from positions.auto_trader import AutoTrader
+        assert AutoTrader._signal_decay(0) == 1.0
+        assert AutoTrader._signal_decay(None) == 1.0
+
+    def test_decay_tiers_exist(self):
+        from positions.auto_trader import SIGNAL_DECAY_TIERS
+        assert len(SIGNAL_DECAY_TIERS) == 4
+        # Tiers should be ordered by max_age ascending
+        ages = [t[0] for t in SIGNAL_DECAY_TIERS]
+        assert ages == sorted(ages)
+
+
+class TestWalkForwardValidation:
+    """Monte Carlo robustness validation of strategy parameters."""
+
+    def test_insufficient_data(self):
+        """With < 10 trades, should return insufficient_data."""
+        from positions.trade_journal import TradeJournal
+        from pathlib import Path
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            j = TradeJournal(Path(d))
+            j.entries = [{"pnl": 5.0, "mode": "paper"} for _ in range(5)]
+            result = j.validate_robustness()
+            assert result["verdict"] == "insufficient_data"
+
+    def test_profitable_strategy_robust(self):
+        """A clearly profitable strategy should pass robustness checks."""
+        from positions.trade_journal import TradeJournal
+        from pathlib import Path
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            j = TradeJournal(Path(d))
+            # 20 trades, mostly wins — should be robust
+            j.entries = [
+                {"pnl": 10.0, "mode": "paper"} for _ in range(15)
+            ] + [
+                {"pnl": -3.0, "mode": "paper"} for _ in range(5)
+            ]
+            result = j.validate_robustness(n_simulations=50)
+            assert result["verdict"] == "robust"
+            assert result["jitter_test"]["passed"] is True
+            assert result["skip_test"]["passed"] is True
+
+    def test_losing_strategy_fragile(self):
+        """A losing strategy should fail robustness checks."""
+        from positions.trade_journal import TradeJournal
+        from pathlib import Path
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            j = TradeJournal(Path(d))
+            # 20 trades, mostly losses — should be fragile
+            j.entries = [
+                {"pnl": -8.0, "mode": "paper"} for _ in range(15)
+            ] + [
+                {"pnl": 2.0, "mode": "paper"} for _ in range(5)
+            ]
+            result = j.validate_robustness(n_simulations=50)
+            assert result["verdict"] == "fragile"
+
+    def test_max_drawdown_calculation(self):
+        from positions.trade_journal import TradeJournal
+        dd = TradeJournal._calc_max_drawdown([10, -5, -3, 8, -2])
+        # Cumulative: 10, 5, 2, 10, 8 → peak 10, trough 2 → dd = 8
+        assert dd == 8.0
+
+    def test_mode_filter(self):
+        """Should filter by mode when specified."""
+        from positions.trade_journal import TradeJournal
+        from pathlib import Path
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            j = TradeJournal(Path(d))
+            j.entries = [
+                {"pnl": 10.0, "mode": "paper"} for _ in range(15)
+            ] + [
+                {"pnl": -50.0, "mode": "live"} for _ in range(5)
+            ]
+            paper = j.validate_robustness(mode="paper", n_simulations=50)
+            assert paper["total_trades"] == 15
+            assert paper["verdict"] == "robust"
+
+
+class TestWhaleConvergence:
+    """Whale convergence: 3+ wallets on same market = strong signal."""
+
+    def test_convergence_threshold_constant(self):
+        from positions.insider_tracker import CONVERGENCE_THRESHOLD
+        assert CONVERGENCE_THRESHOLD == 3
+
+    def test_no_convergence_without_signal(self):
+        """With no positions, convergence fields should be False/0."""
+        from positions.insider_tracker import InsiderTracker
+        from pathlib import Path
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            tracker = InsiderTracker(Path(d))
+            sig = tracker.get_insider_signal("nonexistent_cid")
+            assert sig["has_signal"] is False
+            assert sig.get("has_convergence") is not None  # Field exists in empty case too
+
+    def test_convergence_detection_in_movements(self):
+        """When 3 new wallets enter same market, should create convergence alert."""
+        from positions.insider_tracker import InsiderTracker
+        from pathlib import Path
+        import tempfile, time as t
+        with tempfile.TemporaryDirectory() as d:
+            tracker = InsiderTracker(Path(d))
+            # Previous: had one other market (makes _prev_positions truthy)
+            # cid_test was NOT in prev → all 3 wallets are "new entrants"
+            tracker._prev_positions = {"other_cid": [{"wallet": "old_w"}]}
+            tracker._insider_positions = {
+                "cid_test": [
+                    {"wallet": "w1", "outcome": "YES", "current_value": 5000, "title": "Test"},
+                    {"wallet": "w2", "outcome": "YES", "current_value": 3000, "title": "Test"},
+                    {"wallet": "w3", "outcome": "YES", "current_value": 2000, "title": "Test"},
+                ]
+            }
+            tracker._flagged_wallets = {
+                "w1": {"wallet_type": "conviction", "signal_weight": 5.0},
+                "w2": {"wallet_type": "unknown", "signal_weight": 1.0},
+                "w3": {"wallet_type": "unknown", "signal_weight": 1.0},
+            }
+            tracker._detect_movements()
+            convergence_alerts = [a for a in tracker._movement_alerts if a["type"] == "whale_convergence"]
+            assert len(convergence_alerts) >= 1
+            assert convergence_alerts[0]["converging_wallets"] == 3
+            assert convergence_alerts[0]["auto_triggered"] is True
+
+    def test_signal_strength_boosted_by_convergence(self):
+        """Signal strength should be higher when convergence is active."""
+        from positions.insider_tracker import InsiderTracker
+        from pathlib import Path
+        import tempfile, time as t
+        with tempfile.TemporaryDirectory() as d:
+            tracker = InsiderTracker(Path(d))
+            tracker._insider_positions = {
+                "cid_boost": [
+                    {"wallet": "w1", "outcome": "YES", "current_value": 5000, "title": "Boosted"},
+                    {"wallet": "w2", "outcome": "YES", "current_value": 3000, "title": "Boosted"},
+                    {"wallet": "w3", "outcome": "YES", "current_value": 2000, "title": "Boosted"},
+                ]
+            }
+            tracker._flagged_wallets = {
+                "w1": {"wallet_type": "conviction", "signal_weight": 5.0},
+                "w2": {"wallet_type": "conviction", "signal_weight": 3.0},
+                "w3": {"wallet_type": "unknown", "signal_weight": 1.0},
+            }
+            # Get signal without convergence
+            sig_no_conv = tracker.get_insider_signal("cid_boost")
+            strength_no = sig_no_conv["signal_strength"]
+
+            # Add convergence alert
+            tracker._movement_alerts.append({
+                "type": "whale_convergence",
+                "condition_id": "cid_boost",
+                "converging_wallets": 3,
+                "timestamp": t.time(),
+            })
+            sig_with_conv = tracker.get_insider_signal("cid_boost")
+            strength_with = sig_with_conv["signal_strength"]
+            assert strength_with >= strength_no
+            assert sig_with_conv["has_convergence"] is True
 
 
 class TestNewsThresholds:

@@ -40,6 +40,49 @@ MAX_NEW_TRADES_PER_DAY = 3          # Max new positions per calendar day
 MARKET_COOLDOWN_SECONDS = 172800    # 48h cooldown per market (was 86400)
 MIN_HOURS_TO_EXPIRY = 1.0  # Skip markets expiring within 1 hour (dynamic fees, bot dominance)
 
+# ── Portfolio correlation / concentration limits ──────────────────────────────
+# Research: max 20-30% in one sector. Count correlated positions as single exposure.
+MAX_CATEGORY_CONCENTRATION = 0.30  # No more than 30% of total exposure in one category
+# CATEGORY_KEYWORDS defined after SPORTS_KEYWORDS below
+
+# ── Regime detection (5-loss rule) ────────────────────────────────────────────
+# Research: after 5 consecutive losses, cut position sizes 50% until a win
+# This prevents drawdown spirals and forces the system to wait for regime change
+LOSS_STREAK_THRESHOLD = 5    # Consecutive losses before regime reduction
+REGIME_SIZE_REDUCTION = 0.50 # Multiply position sizes by this during bad regime
+
+# ── Kelly sizing defaults for non-prediction trade types ──────────────────────
+# Research: Half Kelly = 75% of full Kelly growth with 50% less drawdown
+# Quarter Kelly retains 56% of max growth with ~3% chance of halving bankroll
+KELLY_EDGE_BY_STRATEGY = {
+    "multi_outcome_arb": 0.10,       # 10% edge — near-guaranteed profit
+    "portfolio_no": 0.08,            # 8% edge — strong structural advantage
+    "weather_forecast": 0.05,        # 5% edge — NWS data advantage
+    "political_synthetic": 0.03,     # 3% edge — LLM-derived, uncertain
+    "crypto_synthetic": 0.03,        # 3% edge — LLM-derived, uncertain
+    "cross_platform_arb": 0.12,      # 12% edge — guaranteed spread
+    "synthetic_derivative": 0.04,    # 4% edge — structural but uncertain
+}
+# ── Signal decay (news urgency) ───────────────────────────────────────────────
+# Research: news signals have minutes-to-hours half-life. Fresh = full edge.
+# Signal age → score multiplier (linear decay within each bucket)
+SIGNAL_DECAY_TIERS = [
+    (5 * 60,    1.0),    # 0-5 min: full score
+    (30 * 60,   0.7),    # 5-30 min: 70%
+    (60 * 60,   0.4),    # 30-60 min: 40%
+    (float('inf'), 0.1), # >60 min: 10% (stale signal)
+]
+
+KELLY_FRACTION_BY_STRATEGY = {
+    "multi_outcome_arb": 0.50,       # Half Kelly — high confidence
+    "portfolio_no": 0.50,            # Half Kelly — high confidence
+    "weather_forecast": 0.25,        # Quarter Kelly — moderate confidence
+    "political_synthetic": 0.20,     # 1/5 Kelly — uncertain
+    "crypto_synthetic": 0.20,        # 1/5 Kelly — uncertain
+    "cross_platform_arb": 0.50,      # Half Kelly — guaranteed profit
+    "synthetic_derivative": 0.25,    # Quarter Kelly — structural edge
+}
+
 # Market category keywords — shared with exit_engine.py for consistency
 # Journal analysis: sports -$91.99/10 trades (20% WR), commodities -$45.76/3 trades (0% WR)
 SPORTS_KEYWORDS = [
@@ -55,6 +98,20 @@ COMMODITIES_KEYWORDS = [
     "crude oil", "wti", "brent", "natural gas", "gold price",
     "silver price", "copper",
 ]
+
+# Portfolio correlation category detection (uses SPORTS_KEYWORDS defined above)
+CATEGORY_KEYWORDS = {
+    "crypto": ["btc", "bitcoin", "eth", "ethereum", "crypto", "solana", "sol", "xrp",
+               "cardano", "dogecoin", "doge", "bnb", "ripple", "avalanche", "polygon"],
+    "politics": ["president", "election", "congress", "senate", "governor", "democrat",
+                 "republican", "trump", "biden", "nomination", "primary", "impeach",
+                 "supreme court", "legislation", "bill pass"],
+    "sports": SPORTS_KEYWORDS,
+    "weather": ["temperature", "weather", "rainfall", "hurricane", "tornado", "snowfall",
+                "heat wave", "cold", "precipitation", "forecast"],
+    "finance": ["fed", "interest rate", "gdp", "inflation", "unemployment", "cpi",
+                "fomc", "treasury", "yield", "recession", "tariff", "trade war"],
+}
 
 
 class AutoTrader:
@@ -83,6 +140,8 @@ class AutoTrader:
         self._political_analyzer = None
         self._weather_scanner = None
         self.kyle_estimator = None
+        self._loss_streak = 0         # Current consecutive losses
+        self._regime_penalty = 1.0    # 1.0 = normal, 0.5 = bad regime
 
     def set_political_analyzer(self, analyzer):
         """Set the political analyzer reference for opportunity consumption."""
@@ -95,6 +154,120 @@ class AutoTrader:
     def set_kyle_estimator(self, estimator):
         """Set the Kyle's lambda estimator for adverse selection scoring."""
         self.kyle_estimator = estimator
+
+    @staticmethod
+    def _detect_category(title: str) -> str:
+        """Detect market category from title for concentration tracking."""
+        title_lower = title.lower()
+        for category, keywords in CATEGORY_KEYWORDS.items():
+            if any(kw in title_lower for kw in keywords):
+                return category
+        return "other"
+
+    def _get_category_exposure(self, open_pkgs: list[dict]) -> dict[str, float]:
+        """Calculate current exposure per category."""
+        exposure: dict[str, float] = {}
+        for pkg in open_pkgs:
+            name = pkg.get("name", "")
+            cat = self._detect_category(name)
+            cost = pkg.get("total_cost", 0)
+            exposure[cat] = exposure.get(cat, 0) + cost
+        return exposure
+
+    def _check_concentration(self, title: str, trade_size: float,
+                             total_exposure: float, category_exposure: dict[str, float]) -> bool:
+        """Check if adding this trade would exceed category concentration limit.
+
+        Returns True if trade is allowed, False if it would over-concentrate.
+        """
+        if total_exposure + trade_size <= 0:
+            return True
+        # Allow trades when portfolio is small (< 3 positions worth)
+        # — can't diversify a near-empty portfolio
+        if total_exposure < MIN_TRADE_SIZE * 3:
+            return True
+        cat = self._detect_category(title)
+        new_cat_exposure = category_exposure.get(cat, 0) + trade_size
+        new_total = total_exposure + trade_size
+        concentration = new_cat_exposure / new_total
+        return concentration <= MAX_CATEGORY_CONCENTRATION
+
+    @staticmethod
+    def _signal_decay(signal_created_at: float) -> float:
+        """Calculate decay multiplier based on signal age.
+
+        Research: news signals have minutes-to-hours half-life.
+        Fresh signals get full score, stale signals get 10%.
+        """
+        if not signal_created_at:
+            return 1.0
+        age_seconds = time.time() - signal_created_at
+        if age_seconds < 0:
+            return 1.0
+        for max_age, multiplier in SIGNAL_DECAY_TIERS:
+            if age_seconds < max_age:
+                return multiplier
+        return 0.1
+
+    def _update_regime(self):
+        """Check trade journal for consecutive loss streak and adjust regime penalty.
+
+        Research: 5 consecutive losses → cut position sizes 50% until a win.
+        Prevents drawdown spirals during adverse market regimes.
+        """
+        if not self.pm.trade_journal:
+            return
+        entries = self.pm.trade_journal.get_recent(limit=LOSS_STREAK_THRESHOLD + 5)
+        if not entries:
+            self._loss_streak = 0
+            self._regime_penalty = 1.0
+            return
+
+        # Count consecutive losses from most recent trade backward
+        streak = 0
+        for entry in entries:  # Already sorted most recent first
+            if entry.get("outcome") == "loss":
+                streak += 1
+            else:
+                break
+
+        self._loss_streak = streak
+        if streak >= LOSS_STREAK_THRESHOLD:
+            self._regime_penalty = REGIME_SIZE_REDUCTION
+            logger.warning("REGIME: %d consecutive losses — reducing position sizes by %.0f%%",
+                           streak, (1 - REGIME_SIZE_REDUCTION) * 100)
+        else:
+            self._regime_penalty = 1.0
+
+    def _kelly_size(self, strategy: str, remaining_budget: float,
+                    implied_prob: float = 0.0, spread_pct: float = 0.0) -> float:
+        """Calculate Kelly-optimal position size for any strategy type.
+
+        Research: Half Kelly = 75% growth with 50% less drawdown.
+        Returns sized trade amount capped at MAX_TRADE_SIZE, floored at MIN_TRADE_SIZE.
+        """
+        edge = KELLY_EDGE_BY_STRATEGY.get(strategy, 0.02)
+        frac = KELLY_FRACTION_BY_STRATEGY.get(strategy, 0.25)
+
+        # For strategies with known spread, use actual spread as edge estimate
+        if spread_pct > 0:
+            edge = max(edge, spread_pct / 100.0)
+
+        # Kelly: f* = edge / odds, simplified for binary: f* = 2*p - 1 where p = 0.5 + edge/2
+        # More precisely: f* = (b*p - q) / b where b = net odds
+        if implied_prob > 0:
+            p_true = min(0.95, implied_prob + edge)
+            b = (1.0 - implied_prob) / implied_prob if implied_prob > 0 else 1.0
+            kelly_full = (b * p_true - (1.0 - p_true)) / b if b > 0 else 0
+        else:
+            # No implied probability — use edge directly
+            kelly_full = edge
+
+        kelly_sized = max(0.0, kelly_full * frac)
+        sized = round(min(MAX_TRADE_SIZE, remaining_budget * kelly_sized), 2)
+        # Apply regime penalty (5-loss rule: reduce by 50% during bad streaks)
+        sized = round(sized * self._regime_penalty, 2)
+        return max(MIN_TRADE_SIZE, min(sized, MAX_TRADE_SIZE))
 
     async def add_news_opportunity(self, opp: dict):
         """Called by NewsScanner to queue a normal-urgency signal."""
@@ -175,6 +348,9 @@ class AutoTrader:
 
     async def _scan_and_trade(self):
         """One scan cycle: find opportunities, filter, create packages."""
+        # Update regime state from trade journal (5-loss rule)
+        self._update_regime()
+
         open_pkgs = self.pm.list_packages("open")
         if len(open_pkgs) >= MAX_CONCURRENT:
             logger.info("Auto trader: at max concurrent positions (%d), skipping", len(open_pkgs))
@@ -251,15 +427,20 @@ class AutoTrader:
             # Fallback: direct Polymarket scan (only if scanner failed entirely)
             opportunities = await self._scan_polymarket()
 
-        # Merge queued news opportunities with score boost
+        # Merge queued news opportunities with score boost + signal decay
         # News-driven entries can bypass dedup to add to existing positions
         news_opps = await self._drain_news_opportunities()
         for news_opp in news_opps:
-            news_opp["_score"] = news_opp.get("_score", 10.0) * 2.0  # News edge boost
+            base_score = news_opp.get("_score", 10.0) * 2.0  # News edge boost
+            # Apply signal decay: fresh signals get full score, stale ones penalized
+            decay = self._signal_decay(news_opp.get("signal_created_at", 0))
+            news_opp["_score"] = base_score * decay
+            news_opp["_signal_decay"] = decay
             news_opp["_news_driven"] = True
             opportunities.append(news_opp)
         if news_opps:
-            logger.info("Auto trader: merged %d news opportunities", len(news_opps))
+            decayed = sum(1 for o in news_opps if o.get("_signal_decay", 1.0) < 1.0)
+            logger.info("Auto trader: merged %d news opportunities (%d decayed)", len(news_opps), decayed)
 
         # Merge multi-outcome arbitrage opportunities
         if self.scanner:
@@ -323,6 +504,9 @@ class AutoTrader:
                      len(opportunities), remaining_budget, remaining_slots)
         if self.dlog:
             self.dlog.log_scan_start(len(open_pkgs), total_exposure, remaining_budget, remaining_slots)
+
+        # Portfolio correlation tracking — compute category exposure
+        category_exposure = self._get_category_exposure(open_pkgs)
 
         trades_this_cycle = 0
         for opp in opportunities:
@@ -434,15 +618,21 @@ class AutoTrader:
             # Favorite-longshot bias (research-validated):
             # Research: longshots lose ~40%, favorites lose ~5%
             # Kalshi: contracts <$0.10 lose >60% of buyer's money
+            # Academic evidence: markets systematically overprice longshots,
+            # underprice favorites. This is a documented, persistent edge.
             favored = min(buy_yes_price, buy_no_price) if buy_no_price > 0 else buy_yes_price
             if favored >= 0.80:
-                score *= 2.5  # Strong favorite (was 1.8x)
+                score *= 3.0  # Strong favorite — strongest documented edge
             elif favored >= 0.70:
-                score *= 1.8  # Moderate favorite (was 1.4x)
+                score *= 2.2  # Moderate favorite — solid edge
+            elif favored >= 0.60:
+                score *= 1.4  # Mild favorite — still has bias edge
+            elif favored <= 0.15:
+                score *= 0.1  # Extreme longshot — near-zero expected value
             elif favored <= 0.20:
-                score *= 0.2  # Severe longshot penalty (was 0.4x)
+                score *= 0.2  # Severe longshot penalty
             elif favored <= 0.30:
-                score *= 0.5  # Longshot penalty (was 0.7x)
+                score *= 0.5  # Longshot penalty
 
             # Insider signal boost: conviction traders get massive boost, market makers ignored
             insider_signal = None
@@ -495,7 +685,18 @@ class AutoTrader:
                                                    spread_pct=spread_pct, days_to_expiry=days_to_expiry)
                 continue
 
-            # Size the trade
+            # Portfolio concentration check: skip if adding this trade
+            # would put >30% of total exposure in one category
+            if not self._check_concentration(opp_title, MIN_TRADE_SIZE,
+                                             total_exposure, category_exposure):
+                self._trades_skipped += 1
+                cat = self._detect_category(opp_title)
+                if self.dlog:
+                    self.dlog.log_opportunity_skip(opp_title, "concentration_limit",
+                                                   category=cat)
+                continue
+
+            # Size the trade — Kelly for arb/synthetic, pure_prediction uses its own Kelly below
             trade_size = min(MAX_TRADE_SIZE, remaining_budget / 2, remaining_budget)
             trade_size = max(MIN_TRADE_SIZE, trade_size)
 
@@ -632,6 +833,10 @@ class AutoTrader:
                 if total_price <= 0:
                     continue
 
+                # Kelly-sized trade (Half Kelly for near-guaranteed arb)
+                trade_size = self._kelly_size("multi_outcome_arb", remaining_budget,
+                                              spread_pct=spread_pct)
+
                 for outcome in outcomes:
                     leg_price = outcome.get("yes_price", 0)
                     if leg_price <= 0:
@@ -667,6 +872,9 @@ class AutoTrader:
                         self._trades_opened += 1
                         self._daily_trade_count += 1
                         remaining_budget -= trade_size
+                        total_exposure += trade_size
+                        _cat = self._detect_category(opp_title)
+                        category_exposure[_cat] = category_exposure.get(_cat, 0) + trade_size
                         # Refresh open IDs for this cycle
                         for leg in pkg.get("legs", []):
                             cid = leg.get("asset_id", "").split(":")[0]
@@ -698,6 +906,10 @@ class AutoTrader:
                 no_targets = opp.get("no_targets", [])
                 if not no_targets:
                     continue
+
+                # Kelly-sized trade (Half Kelly for near-guaranteed profit)
+                trade_size = self._kelly_size("portfolio_no", remaining_budget,
+                                              spread_pct=spread_pct)
 
                 # Allocate proportionally to each NO price
                 total_no_cost = sum(o.get("no_price", 0) for o in no_targets)
@@ -740,6 +952,9 @@ class AutoTrader:
                         self._trades_opened += 1
                         self._daily_trade_count += 1
                         remaining_budget -= trade_size
+                        total_exposure += trade_size
+                        _cat = self._detect_category(opp_title)
+                        category_exposure[_cat] = category_exposure.get(_cat, 0) + trade_size
                         for leg in pkg.get("legs", []):
                             cid = leg.get("asset_id", "").split(":")[0]
                             if cid:
@@ -772,6 +987,11 @@ class AutoTrader:
                 except ValueError:
                     continue
 
+                # Kelly-sized trade (Quarter Kelly — NWS data edge)
+                trade_size = self._kelly_size("weather_forecast", remaining_budget,
+                                              implied_prob=entry_price,
+                                              spread_pct=opp.get("edge", 0) * 100)
+
                 leg_type = "prediction_yes" if side == "YES" else "prediction_no"
                 market_id = opp.get("market_ticker", opp.get("buy_yes_market_id", ""))
 
@@ -800,6 +1020,9 @@ class AutoTrader:
                         self._trades_opened += 1
                         self._daily_trade_count += 1
                         remaining_budget -= trade_size
+                        total_exposure += trade_size
+                        _cat = self._detect_category(opp_title)
+                        category_exposure[_cat] = category_exposure.get(_cat, 0) + trade_size
                         cid = market_id.split(":")[0] if ":" in market_id else market_id
                         if cid:
                             open_market_ids.add(cid)
@@ -829,6 +1052,10 @@ class AutoTrader:
                 opp_legs = opp.get("legs", [])
                 if not opp_legs:
                     continue
+
+                # Kelly-sized trade (1/5 Kelly — LLM-derived edge)
+                trade_size = self._kelly_size("political_synthetic", remaining_budget,
+                                              spread_pct=spread_pct)
 
                 for opp_leg in opp_legs:
                     leg_cost = round(trade_size * opp_leg.get("weight", 1.0 / len(opp_legs)), 2)
@@ -870,6 +1097,9 @@ class AutoTrader:
                         self._trades_opened += 1
                         self._daily_trade_count += 1
                         remaining_budget -= trade_size
+                        total_exposure += trade_size
+                        _cat = self._detect_category(opp_title)
+                        category_exposure[_cat] = category_exposure.get(_cat, 0) + trade_size
                         # Refresh open IDs for this cycle
                         for leg in pkg.get("legs", []):
                             cid = leg.get("asset_id", "").split(":")[0]
@@ -901,6 +1131,10 @@ class AutoTrader:
                 opp_legs = opp.get("legs", [])
                 if not opp_legs:
                     continue
+
+                # Kelly-sized trade (1/5 Kelly — LLM-derived edge)
+                trade_size = self._kelly_size("crypto_synthetic", remaining_budget,
+                                              spread_pct=spread_pct)
 
                 for opp_leg in opp_legs:
                     leg_cost = round(trade_size * opp_leg.get("weight", 1.0 / len(opp_legs)), 2)
@@ -939,6 +1173,9 @@ class AutoTrader:
                         self._trades_opened += 1
                         self._daily_trade_count += 1
                         remaining_budget -= trade_size
+                        total_exposure += trade_size
+                        _cat = self._detect_category(opp_title)
+                        category_exposure[_cat] = category_exposure.get(_cat, 0) + trade_size
                         for leg in pkg.get("legs", []):
                             cid = leg.get("asset_id", "").split(":")[0]
                             if cid:
@@ -989,6 +1226,9 @@ class AutoTrader:
                 pkg["insider_signal"] = opp["insider_signal"]
 
             if is_cross_platform or is_synthetic:
+                # Kelly size for arb/synthetic strategies
+                trade_size = self._kelly_size(strategy, remaining_budget,
+                                              spread_pct=spread_pct)
                 # Multi-leg trade: cross-platform arb OR synthetic derivative
                 # Both require buying YES on one market/platform and NO on another
                 #
@@ -1127,7 +1367,8 @@ class AutoTrader:
                 kelly_quarter = max(0.0, kelly_full * kelly_frac)
 
                 # Apply Kelly fraction to remaining budget, capped at MAX_TRADE_SIZE
-                sized_trade = round(min(MAX_TRADE_SIZE, remaining_budget * kelly_quarter), 2)
+                # Apply regime penalty (5-loss rule: reduce by 50% during bad streaks)
+                sized_trade = round(min(MAX_TRADE_SIZE, remaining_budget * kelly_quarter) * self._regime_penalty, 2)
                 sized_trade = max(MIN_TRADE_SIZE, min(sized_trade, trade_size))
 
                 pkg["legs"].append(create_leg(
@@ -1220,6 +1461,9 @@ class AutoTrader:
                     if not opp.get("_news_driven"):
                         self._daily_trade_count += 1
                     remaining_budget -= trade_size
+                    total_exposure += trade_size
+                    cat = self._detect_category(opp_title)
+                    category_exposure[cat] = category_exposure.get(cat, 0) + trade_size
                     # Refresh open market IDs so later iterations in this cycle see this trade
                     if yes_mid:
                         open_market_ids.add(yes_mid)
