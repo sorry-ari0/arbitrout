@@ -66,6 +66,7 @@ class AutoTrader:
         self._news_opportunities: list[dict] = []
         self._political_analyzer = None
         self._weather_scanner = None
+        self.kyle_estimator = None
 
     def set_political_analyzer(self, analyzer):
         """Set the political analyzer reference for opportunity consumption."""
@@ -74,6 +75,10 @@ class AutoTrader:
     def set_weather_scanner(self, scanner):
         """Set the weather scanner reference for opportunity consumption."""
         self._weather_scanner = scanner
+
+    def set_kyle_estimator(self, estimator):
+        """Set the Kyle's lambda estimator for adverse selection scoring."""
+        self.kyle_estimator = estimator
 
     async def add_news_opportunity(self, opp: dict):
         """Called by NewsScanner to queue a normal-urgency signal."""
@@ -421,6 +426,20 @@ class AutoTrader:
                 consensus = self.probability_model.get_consensus(opp_title)
                 if consensus and consensus.get("max_deviation", 0) > 0.10:
                     score *= 1.3
+
+            # Kyle's lambda: adverse selection / informed flow signal
+            if self.kyle_estimator and market_id:
+                poly_platform = opp.get("buy_yes_platform", "")
+                if poly_platform == "polymarket":
+                    kyle_direction = "YES"
+                elif opp.get("buy_no_platform", "") == "polymarket":
+                    kyle_direction = "NO"
+                else:
+                    kyle_direction = "YES"  # fallback
+                kyle_signal = self.kyle_estimator.get_lambda_signal(market_id, kyle_direction)
+                if kyle_signal:
+                    score *= kyle_signal["multiplier"]
+                    opp["kyle_signal"] = kyle_signal
 
             # Skip low-score opportunities
             if score < MIN_SPREAD_PCT:

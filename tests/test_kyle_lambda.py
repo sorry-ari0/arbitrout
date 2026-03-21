@@ -336,3 +336,113 @@ class TestDirectionalSignal:
             "n_trades_long", "sufficient_data",
         }
         assert set(signal.keys()) == expected_keys
+
+
+class TestAutoTraderIntegration:
+    """Task 4: AutoTrader setter and scoring integration."""
+
+    def test_set_kyle_estimator(self):
+        """AutoTrader should accept a kyle_estimator via setter."""
+        from positions.auto_trader import AutoTrader
+        pm = MagicMock()
+        pm.list_packages = MagicMock(return_value=[])
+        pm.executors = {"polymarket": MagicMock(), "kalshi": MagicMock()}
+        trader = AutoTrader(pm)
+        assert trader.kyle_estimator is None
+
+        mock_est = MagicMock()
+        trader.set_kyle_estimator(mock_est)
+        assert trader.kyle_estimator is mock_est
+
+    def test_scoring_applies_kyle_multiplier(self):
+        """The scoring loop should multiply score by kyle_signal['multiplier']."""
+        from positions.auto_trader import AutoTrader
+        pm = MagicMock()
+        pm.list_packages = MagicMock(return_value=[])
+        pm.executors = {"polymarket": MagicMock(), "kalshi": MagicMock()}
+        trader = AutoTrader(pm)
+
+        mock_est = MagicMock()
+        mock_est.get_lambda_signal.return_value = {
+            "multiplier": 1.3,
+            "short_lambda": 0.005,
+            "long_lambda": 0.002,
+            "lambda_ratio": 2.5,
+            "flow_direction": "YES",
+            "agrees_with_arb": True,
+            "n_trades_short": 15,
+            "n_trades_long": 40,
+            "sufficient_data": True,
+        }
+        trader.set_kyle_estimator(mock_est)
+
+        opp = {
+            "buy_yes_platform": "polymarket",
+            "buy_no_platform": "kalshi",
+            "buy_yes_market_id": "0xtest_market",
+        }
+        market_id = opp["buy_yes_market_id"]
+        score = 20.0
+
+        if trader.kyle_estimator and market_id:
+            poly_platform = opp.get("buy_yes_platform", "")
+            if poly_platform == "polymarket":
+                kyle_direction = "YES"
+            elif opp.get("buy_no_platform", "") == "polymarket":
+                kyle_direction = "NO"
+            else:
+                kyle_direction = "YES"
+            kyle_signal = trader.kyle_estimator.get_lambda_signal(market_id, kyle_direction)
+            if kyle_signal:
+                score *= kyle_signal["multiplier"]
+                opp["kyle_signal"] = kyle_signal
+
+        assert score == pytest.approx(26.0)
+        assert "kyle_signal" in opp
+        assert opp["kyle_signal"]["multiplier"] == 1.3
+        mock_est.get_lambda_signal.assert_called_once_with("0xtest_market", "YES")
+
+    def test_scoring_direction_when_polymarket_is_no_side(self):
+        """When Polymarket is the buy_no_platform, direction should be NO."""
+        from positions.auto_trader import AutoTrader
+        pm = MagicMock()
+        pm.list_packages = MagicMock(return_value=[])
+        pm.executors = {"polymarket": MagicMock(), "kalshi": MagicMock()}
+        trader = AutoTrader(pm)
+
+        mock_est = MagicMock()
+        mock_est.get_lambda_signal.return_value = {
+            "multiplier": 0.6,
+            "short_lambda": 0.01,
+            "long_lambda": 0.003,
+            "lambda_ratio": 3.3,
+            "flow_direction": "YES",
+            "agrees_with_arb": False,
+            "n_trades_short": 20,
+            "n_trades_long": 50,
+            "sufficient_data": True,
+        }
+        trader.set_kyle_estimator(mock_est)
+
+        opp = {
+            "buy_yes_platform": "kalshi",
+            "buy_no_platform": "polymarket",
+            "buy_yes_market_id": "0xtest_no",
+        }
+        market_id = opp["buy_yes_market_id"]
+        score = 20.0
+
+        if trader.kyle_estimator and market_id:
+            poly_platform = opp.get("buy_yes_platform", "")
+            if poly_platform == "polymarket":
+                kyle_direction = "YES"
+            elif opp.get("buy_no_platform", "") == "polymarket":
+                kyle_direction = "NO"
+            else:
+                kyle_direction = "YES"
+            kyle_signal = trader.kyle_estimator.get_lambda_signal(market_id, kyle_direction)
+            if kyle_signal:
+                score *= kyle_signal["multiplier"]
+
+        assert score == pytest.approx(12.0)
+        mock_est.get_lambda_signal.assert_called_once_with("0xtest_no", "NO")
