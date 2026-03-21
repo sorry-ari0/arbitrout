@@ -1188,12 +1188,12 @@ class AutoTrader:
         buy_no_platform = arb.get("buy_no_platform", "")
 
         # Skip opportunities on platforms we can't trade on
-        tradeable = set(self.pm.executors.keys()) if hasattr(self.pm, 'executors') else set()
-        if tradeable:
-            if buy_yes_platform not in tradeable or buy_no_platform not in tradeable:
-                logger.debug("Skipping arb on non-tradeable platform: %s/%s",
-                              buy_yes_platform, buy_no_platform)
-                return None
+        # Same pattern as _events_to_opportunities() — falls back to {"polymarket"} if pm is None
+        tradeable = set(self.pm.executors.keys()) if self.pm else {"polymarket"}
+        if buy_yes_platform not in tradeable or buy_no_platform not in tradeable:
+            logger.debug("Skipping arb on non-tradeable platform: %s/%s",
+                          buy_yes_platform, buy_no_platform)
+            return None
 
         # CRITICAL FIX: reject same-platform "arb" — buying both YES and NO on
         # the same platform costs ~$1.00 and guarantees a fee-only loss.
