@@ -305,3 +305,106 @@ class TestCryptoModelFields:
         assert info.event_category == "price_target"
         assert info.crypto_direction == "positive"
         assert info.crypto_threshold == 150000.0
+
+
+class TestCryptoEventClassifier:
+    """Tests for crypto_event classification type."""
+
+    def test_regulatory_btc(self):
+        """SEC + Bitcoin → crypto_event / regulatory."""
+        event = _make_event("Will SEC classify Bitcoin as a security?")
+        info = classify_contract(event)
+        assert info.contract_type == "crypto_event"
+        assert info.crypto_asset == "BTC"
+        assert info.event_category == "regulatory"
+        assert info.crypto_direction == "negative"
+
+    def test_price_target_btc(self):
+        """BTC above $150K → crypto_event / price_target."""
+        event = _make_event("Will Bitcoin be above $150,000 by end of 2026?")
+        info = classify_contract(event)
+        assert info.contract_type == "crypto_event"
+        assert info.crypto_asset == "BTC"
+        assert info.event_category == "price_target"
+        assert info.crypto_direction == "positive"
+        assert info.crypto_threshold == 150000.0
+
+    def test_price_target_eth(self):
+        """ETH above $5,000 → crypto_event / price_target."""
+        event = _make_event("Will Ethereum reach $5,000?")
+        info = classify_contract(event)
+        assert info.contract_type == "crypto_event"
+        assert info.crypto_asset == "ETH"
+        assert info.event_category == "price_target"
+        assert info.crypto_direction == "positive"
+        assert info.crypto_threshold == 5000.0
+
+    def test_technical_event(self):
+        """Ethereum upgrade → crypto_event / technical."""
+        event = _make_event("Will Ethereum complete the Pectra upgrade?")
+        info = classify_contract(event)
+        assert info.contract_type == "crypto_event"
+        assert info.crypto_asset == "ETH"
+        assert info.event_category == "technical"
+
+    def test_etf_approval(self):
+        """ETH ETF approved → crypto_event / regulatory / positive."""
+        event = _make_event("Will Ethereum ETF be approved by SEC?")
+        info = classify_contract(event)
+        assert info.contract_type == "crypto_event"
+        assert info.crypto_asset == "ETH"
+        assert info.event_category == "regulatory"
+        assert info.crypto_direction == "positive"
+
+    def test_hack_event(self):
+        """Solana hack → crypto_event / technical / negative."""
+        event = _make_event("Will Solana suffer a major exploit in 2026?")
+        info = classify_contract(event)
+        assert info.contract_type == "crypto_event"
+        assert info.crypto_asset == "SOL"
+        assert info.event_category == "technical"
+        assert info.crypto_direction == "negative"
+
+    def test_halving_is_technical(self):
+        """Bitcoin halving → crypto_event / technical."""
+        event = _make_event("Will Bitcoin halving happen before May 2028?")
+        info = classify_contract(event)
+        assert info.contract_type == "crypto_event"
+        assert info.crypto_asset == "BTC"
+        assert info.event_category == "technical"
+
+    def test_non_crypto_not_matched(self):
+        """Non-crypto political contract must NOT match crypto_event."""
+        event = _make_event("Talarico wins TX Senate")
+        info = classify_contract(event)
+        assert info.contract_type != "crypto_event"
+
+    def test_pure_crypto_mention_no_match(self):
+        """Pure mention of 'crypto' without actionable context → NOT crypto_event."""
+        event = _make_event("Will crypto be discussed at the debate?")
+        info = classify_contract(event)
+        assert info.contract_type == "yes_no_binary"
+
+    def test_congress_ban_bitcoin(self):
+        """Political + crypto overlap: 'Will Congress ban Bitcoin?' → crypto_event (priority)."""
+        event = _make_event("Will Congress ban Bitcoin?")
+        info = classify_contract(event)
+        assert info.contract_type == "crypto_event"
+        assert info.crypto_asset == "BTC"
+        assert info.event_category == "regulatory"
+        assert info.crypto_direction == "negative"
+
+    def test_asset_normalization(self):
+        """Various asset name forms normalize to standard tickers."""
+        cases = [
+            ("Will BTC reach $200,000?", "BTC"),
+            ("Will Ether exceed $10,000?", "ETH"),
+            ("Will SOL hit $500?", "SOL"),
+            ("Will Ripple be above $5?", "XRP"),
+            ("Will Dogecoin reach $1?", "DOGE"),
+        ]
+        for title, expected_asset in cases:
+            event = _make_event(title)
+            info = classify_contract(event)
+            assert info.contract_type == "crypto_event", f"Failed for: {title}"
+            assert info.crypto_asset == expected_asset, f"Expected {expected_asset} for: {title}"
