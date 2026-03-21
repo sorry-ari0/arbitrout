@@ -88,7 +88,7 @@ class EstimateResult:
 
 **Constructor change:** Add `llm_estimator=None` parameter to `AutoTrader.__init__()`. Store as `self._llm_estimator`. Wire in `server.py` alongside the existing `probability_model` initialization.
 
-**News scanner access:** Add `set_news_scanner(scanner)` method to `AutoTrader` (same pattern as existing `set_political_analyzer()`). Wire in `server.py`. The news scanner's existing `get_recent_headlines(condition_id, hours=24)` method is called with the opportunity's condition_id.
+**News scanner access:** Add `set_news_scanner(scanner)` method to `AutoTrader` (same pattern as existing `set_political_analyzer()` and `set_weather_scanner()`). This is distinct from the existing `add_news_opportunity()` queue — the queue feeds news-triggered opportunities, while the setter provides headline lookup for LLM context. Wire in `server.py` after news_scanner initialization. The news scanner's existing `get_recent_headlines(condition_id, hours=24)` method is called with the opportunity's condition_id.
 
 In the scoring section (around line 420), after checking `probability_model`:
 
@@ -189,12 +189,12 @@ _POLYMARKET_FEE_PARAMS = {
 
 Current:
 ```python
-def _compute_fee_adjusted_profit(yes_platform, yes_price, no_platform, no_price):
+def _compute_fee_adjusted_profit(yes_price, no_price, yes_platform, no_platform):
     fee_yes = _TAKER_FEES.get(yes_platform, 0.02)
 ```
 New:
 ```python
-def _compute_fee_adjusted_profit(yes_platform, yes_price, no_platform, no_price, category=""):
+def _compute_fee_adjusted_profit(yes_price, no_price, yes_platform, no_platform, category=""):
     fee_yes = compute_taker_fee(yes_platform, yes_price, category)
 ```
 
