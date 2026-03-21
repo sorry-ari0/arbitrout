@@ -1,7 +1,7 @@
 # Project: Arbitrout (Prediction Market Arbitrage + Auto Trading)
 Status: ACTIVE
 Phase: BUILD
-Last Updated: 2026-03-20
+Last Updated: 2026-03-21
 Repo: https://github.com/sorry-ari0/arbitrout.git
 Branch: main
 
@@ -18,6 +18,7 @@ Arbitrout is a prediction market trading system with eleven core capabilities:
 9. **Portfolio NO strategy** — buys NO on all non-favorites in multi-outcome events (tournaments, elections). Exploits overround: when sum(YES) > 1.0, buying NO on non-favorites guarantees profit since exactly one outcome wins. Excludes top favorites optimally to maximize guaranteed minimum return.
 10. **Weather market scanner** — fetches NWS (National Weather Service) forecasts for 10 major US cities, compares to Kalshi daily temperature/precipitation market brackets. Generates opportunities when forecast probability diverges >10% from market price.
 11. **Real-time Polymarket WebSocket** — persistent connection to Polymarket CLOB WebSocket for live price updates on open positions. Auto-subscribes to condition IDs, exponential backoff reconnect, stale price detection.
+12. **Kyle's Lambda (adverse selection)** — real-time trade flow analysis from Polymarket CLOB WebSocket. Estimates price impact coefficient (λ = Δp/Q) using dual rolling windows (15min spike detection + 2hr baseline). Directional multiplier (0.4–1.5) boosts/discounts auto-trader scoring based on whether informed flow agrees or opposes our arb direction.
 
 Integrated into the Lobsterminal financial terminal as a switchable tab. Backend is Python FastAPI on port 8500.
 
@@ -52,6 +53,7 @@ server.py creates all subsystems and injects dependencies:
   NewsAI       <─── NewsScanner            (headline scan + deep article analysis)
   NewsScanner  ──> ExitEngine              (headline cache for news-validated exits)
   InsiderTracker ──> AutoTrader            (signal boost for scoring)
+  KyleLambdaEstimator ──> AutoTrader      (adverse selection multiplier for scoring)
   NewsScanner  ──> AutoTrader              (queued opportunities via asyncio.Lock)
   CalibrationEngine <── EvalLogger + TradeJournal  (24h reports, /api/derivatives/calibration)
 
@@ -74,6 +76,7 @@ server.py creates all subsystems and injects dependencies:
   ArbitrageScanner ──> portfolio_no scan   (NO on non-favorites in tournaments)
   WeatherScanner ──> AutoTrader            (NWS forecast edge on Kalshi weather)
   PolymarketPriceFeed ──> ExitEngine       (real-time prices for open positions)
+  PolymarketPriceFeed ──> KyleLambdaEstimator  (on_trade callback for λ estimation)
 ```
 
 ### Runtime Data Flow
@@ -113,8 +116,9 @@ server.py creates all subsystems and injects dependencies:
 |       |  1. Check scanner for cross-platform arb opportunities       |
 |       |  2. Fallback: scan Polymarket Gamma API for crypto markets   |
 |       |  3. Query InsiderTracker for whale signal boost              |
-|       |  4. Score: profit * crypto * expiry * volume * insider       |
-|       |  5. Filter: net profit > 12% after 2% round-trip fees       |
+|       |  4. Query KyleLambdaEstimator for adverse selection signal   |
+|       |  5. Score: profit * crypto * expiry * insider * kyle_lambda  |
+|       |  6. Filter: net profit > 8% (0% maker fees)                 |
 |       |                                                              |
 |       +---> PositionManager.execute_package()                        |
 |                  |                                                   |
@@ -262,13 +266,13 @@ Package: "Auto: Will ETH hit $5000?"
   Legs:
     - YES @ polymarket  entry=$0.35  qty=285.71  cost=$100
   Exit Rules:
-    - target_profit: exit all if P&L >= +25%
-    - stop_loss:     exit all if P&L <= -20%
-    - trailing_stop: exit if drawdown from peak >= 12%
+    - target_profit: exit all if P&L >= +50%
+    - stop_loss:     exit all if P&L <= -35%
+    - trailing_stop: exit if drawdown from peak >= 35% (adaptive: 15-50%)
 
   P&L Calculation (every 60s):
     current_value   = sum(qty * current_price) for open legs
-    estimated_fees  = current_value * 1% (conservative sell-side)
+    estimated_fees  = 0 (maker exits = 0% fee)
     net_value       = current_value - estimated_fees
     unrealized_pnl  = net_value - total_cost
     pnl_pct         = unrealized_pnl / total_cost * 100
@@ -314,7 +318,7 @@ The AI advisor (Claude) reviews non-safety triggers with full context:
 For each crypto market opportunity:
 
   raw_profit  = ((1.0 - favored_price) / favored_price) * 100
-  net_profit  = raw_profit - 2%  (round-trip fee estimate)
+  net_profit  = raw_profit - 0%  (0% round-trip: maker entry + maker exit)
 
   SKIP if: yes_price > 0.92 or < 0.08  (near-resolved, no edge)
   SKIP if: 0.42 < yes_price < 0.58     (near-50/50, no conviction)
@@ -342,11 +346,17 @@ For each crypto market opportunity:
   # Cross-platform disagreement boost (probability model)
   if platforms disagree >10%:  score *= 1.3
 
-  ENTER if: score >= 12.0 AND net_profit >= 12% (MIN_SPREAD_PCT)
+  # Kyle's lambda: adverse selection signal
+  if lambda_spike detected:
+    if informed flow agrees with our direction:  score *= 1.15–1.5
+    if informed flow opposes our direction:      score *= 0.4–0.8
+    if mixed/unclear flow:                       score *= 0.85
+
+  ENTER if: score >= 8.0 AND net_profit >= 8% (MIN_SPREAD_PCT)
   STRATEGY: directional bet (one side) on same-platform, arb (both sides) on cross-platform
   SIZE: variable Kelly — 1/4 for favorites (>=0.70), 1/5 mid-range, 1/8 for longshots (<=0.30)
-  LIMITS: 7 concurrent, $1400 auto exposure, 3 trades/day cap
-  ORDERS: limit orders (GTC) for entries = 0% maker fee on Polymarket
+  LIMITS: 7 concurrent, $700 auto exposure, 3 trades/day cap
+  ORDERS: limit orders (GTC) for entries + exits = 0% maker fee on Polymarket
   BRACKETS: _use_brackets = True for standard prediction packages (not _hold_to_resolution)
 ```
 
@@ -518,7 +528,8 @@ ArbitrageOpportunity:
 | `src/positions/btc_sniper.py` | Multi-asset 5-min directional sniper — event-driven evaluation, composite signal at T-10s, maker orders |
 | `src/positions/market_maker.py` | Dual-sided liquidity — preemptive cancel on adverse ticks, on-chain token merging, multi-asset discovery |
 | `src/positions/weather_scanner.py` | NWS forecast-based edge scanner for Kalshi daily temperature/precipitation markets (10 US cities) |
-| `src/positions/polymarket_ws.py` | Polymarket CLOB WebSocket — real-time price feed, auto-subscribe, reconnect with exponential backoff |
+| `src/positions/kyle_lambda.py` | Kyle's lambda estimator — trade flow analysis, OLS regression, dual-window spike detection, directional multiplier for scoring |
+| `src/positions/polymarket_ws.py` | Polymarket CLOB WebSocket — real-time price feed + trade callbacks, auto-subscribe, reconnect with exponential backoff |
 
 ### How Derivative Packages Work
 
@@ -608,6 +619,7 @@ The exit engine runs a 60-second scan loop evaluating all open packages.
 - Batched prompt uses `[PKG:id]` markers so AI can address each package separately
 - Provider chain: Groq → Gemini → OpenRouter (Anthropic first in live mode)
 - AI returns per-package: APPROVE (execute), MODIFY (adjust rule params within bounds), REJECT (skip with reason)
+- **AI_EXITS_ENABLED = False** — AI exit signals (time_decay, negative_drift, trailing_stop) are disabled based on trade journal analysis (35 trades, 88.6% loss rate, 0% win rate on AI-approved exits). Mechanical exits (auto:target_hit, auto:stop_loss, auto:trailing_stop) still fire via `_auto_execute_triggers`.
 - AI prompt includes paper trading performance data (17 auto exits, 0 wins, -$143) to bias toward REJECT
 - AI prompt is nuanced per trigger type:
   - `trailing_stop`: REJECT unless drawdown >25% from peak AND position open >24 hours
@@ -647,23 +659,25 @@ The exit engine runs a 60-second scan loop evaluating all open packages.
 3. Fallback: direct Polymarket Gamma API scan if scanner fails entirely
 4. **ITM/OTM filter:** skips entries with side price > $0.96 (fees exceed max profit) or < $0.15 (lottery tickets)
 5. **Filters:** skips near-resolved (>0.92 or <0.08), near-50/50 (0.42-0.58), <2 day expiry, AND <1 hour expiry (short-duration markets with dynamic fees up to 3.15%, dominated by sub-100ms bots)
-6. Calculates profit potential AFTER estimated round-trip fees: `raw_profit = ((1.0 - favored_price) / favored_price) * 100`, then `net_profit = raw_profit - 2%` round-trip fees
+6. Calculates profit potential: `raw_profit = ((1.0 - favored_price) / favored_price) * 100` (0% round-trip fees with maker orders)
 7. Scores each market: `profit_pct * crypto_boost(2x) * expiry_boost(2x if 3-14d, 1.5x if 14-30d) * volume_boost(1.5x if >100K, 1.2x if >10K) * conviction_boost(1.5x if >0.3) * insider_boost * favorite_longshot_bias * cross_platform_disagreement_boost(1.3x if >10% deviation)`
 8. **Favorite-longshot bias (research-validated):** Strong favorites (>=0.80) get 2.5x boost, moderate (>=0.70) 1.8x. Severe longshots (<=0.20) get 0.2x penalty, mild (<=0.30) 0.5x. Longshots lose ~40%, favorites ~5%.
 9. Insider signal boost: if insiders have positions, `score *= (1 + strength * 2)`. Suspicious insiders add extra 1.5x
 10. **Probability model:** Volume-weighted consensus across platforms. Boosts score 1.3x when platforms disagree >10% (informational edge).
-11. Requires minimum 12% gross spread to enter (ensures ~10% net margin after 2% round-trip fees — raised from 8% to reduce churn)
-12. **Limit orders for entry:** All entries use GTC limit orders (0% maker fee on Polymarket) instead of FOK market orders (2% taker fee). Saves ~$108 per $5.7K deployed.
+11. Requires minimum 8% spread to enter (was 12% when paying 2% taker fees — lowered since maker orders = 0% round-trip)
+12. **Maker orders for entry + exit:** All entries AND exits use GTC limit orders (0% maker fee on Polymarket). Only stop_loss uses FOK (immediate). Eliminates ~$108 per $5.7K deployed in fee drag.
 13. **Directional bets (same platform):** picks ONE side based on conviction — cheaper side = higher upside. Buying both YES and NO on the same platform locks in the spread minus fees = guaranteed loss
 14. **Cross-platform arb:** buys both sides on different platforms (spread capture)
 15. **Cooldown:** 48-hour re-entry cooldown after exiting a market (raised from 24h)
 16. **Daily trade cap:** Max 3 new trades per calendar day (counter resets at midnight)
-17. Exit rules tuned from 31-trade paper data: target profit (50%), stop loss (-40%), trailing stop (35%, bounds 15-50%)
+17. Exit rules tuned from 35-trade journal analysis: target profit (50%), stop loss (-35% minimum across all strategies), trailing stop (35% base, adaptive: 2x wider for longshots <$0.30, 0.7x tighter for favorites >$0.60, bounds 15-50%)
 18. **Variable Kelly sizing:** 1/4 Kelly for favorites (>=0.70), 1/5 for mid-range, 1/8 for longshots (<=0.30). Reduces risk on uncertain positions.
 19. **24h minimum hold period:** All new packages get `_min_hold_until` timestamp. During hold, soft triggers (trailing_stop, negative_drift, time_decay, stale_position) are suppressed. Safety overrides (spread_inversion, political_event_resolved) and mechanical exits (target_hit, stop_loss) still fire. Research: <24h holds underperform by 18%.
-20. Position limits: $200 max per trade, $5 min, 7 concurrent positions (3 reserved for news), $1400 auto exposure + $600 news
+20. Position limits: $100 max per trade (reduced from $200 — journal analysis showed oversized positions amplified losses), $5 min, 7 concurrent positions (3 reserved for news), $700 auto exposure + $600 news
 21. **Market loss limit:** Block re-entry after 2 losses on the same market (prevents churning)
 22. **Decision logging:** all buys, skips (with reason), and failures logged to `decision_log.jsonl`
+23. **Kyle's lambda signal:** After insider and cross-platform boosts, queries `KyleLambdaEstimator.get_lambda_signal(market_id, direction)`. Detects informed trading spikes (short 15min λ vs long 2hr λ baseline). If spike detected: flow agrees → 1.15–1.5x boost, flow opposes → 0.4–0.8x discount, mixed → 0.85x. Neutral (1.0x) if insufficient data or no spike. Uses Polymarket market_id (resolves to buy_no_market_id when Polymarket is the NO side).
+24. **AI exits disabled:** `AI_EXITS_ENABLED = False` in exit_engine.py. Trade journal analysis (35 trades, 88.6% loss rate) showed AI-approved exits had 0% win rate. Mechanical auto-execute exits still work (target_hit, stop_loss, trailing_stop).
 
 ### How the Insider Tracker Works
 
@@ -746,7 +760,7 @@ is_configured() → bool
 - Wraps a real executor for price lookups but simulates money
 - Starting balance: $10,000 (configurable via `PAPER_STARTING_BALANCE` env var)
 - Separate maker/taker fee rates (split buy vs sell):
-  - Polymarket: 0% maker / 2% taker
+  - Polymarket: 0% maker / 0% maker (all orders now GTC limit = maker)
   - Kalshi: 0.5% maker / 1% taker
   - Coinbase: 0.4% maker / 0.6% taker
   - PredictIt: 5% / 5%
@@ -755,7 +769,7 @@ is_configured() → bool
   - Robinhood: 0% / 0% (commission-free)
   - Crypto Spot: 0% / 0% (synthetic, no real fees)
   - Kraken: 0.16% maker / 0.26% taker
-- **Buys use maker rate** (limit orders, 0% for Polymarket), **sells use maker rate for limit exits** (0% for Polymarket) **or taker rate for FOK exits** (2% for Polymarket)
+- **All Polymarket orders use maker rate** (0% fee) — both buy() and sell() now place GTC limit orders at the spread edge. Only stop_loss FOK sells use taker rate (2%).
 - `sell_limit(asset_id, quantity, price)` — limit sell at specified price using maker fee (0% for Polymarket). Used by exit engine for non-emergency exits.
 - `sell(asset_id, quantity, last_known_price=0)` — FOK market sell, tries real price first, falls back to `last_known_price` (from exit engine's last scan), then entry price
 - `check_order_status(order_id)` — returns order fill status (paper mode: always "filled" immediately)
@@ -914,7 +928,7 @@ PoliticalOpportunity:
 ## Fee Model
 | Platform | Maker (limit) | Taker (market) | Our Strategy |
 |----------|---------------|----------------|--------------|
-| Polymarket | 0% | ~2% | Limit orders (0% entry), bracket GTC target (0% maker), FOK stop-loss (2% taker) |
+| Polymarket | 0% | ~2% | All orders GTC limit (0% maker entry + exit), FOK only for stop-loss (2% taker) |
 | Kalshi | 0.5% | 1% | — |
 | Coinbase | 0.4% | 0.6% | — |
 | PredictIt | 5% | 5% | — |
@@ -924,10 +938,10 @@ PoliticalOpportunity:
 | Crypto Spot | 0% | 0% | Synthetic (no real fees) |
 | Kraken | 0.16% | 0.26% | CLI via WSL |
 
-- Paper executor uses separate buy/sell fee rates: buys at maker rate, limit sells at maker rate, FOK sells at taker rate
-- **Bracket exits use 0% maker fee** (GTC target order resting on CLOB). Legacy FOK exits still use taker fee (2%). Goal: eliminate taker fees on exits entirely.
+- Paper executor uses maker rate for all Polymarket orders (0% buy + 0% sell). Other platforms: buys at maker rate, sells at taker rate.
+- **Bracket exits use 0% maker fee** (GTC target order resting on CLOB). All exits now use maker orders except stop_loss FOK.
 - P&L always calculated AFTER fees (estimated 1% sell-side for unrealized)
-- Auto trader deducts 2% round-trip from profit assessment before entering (0% maker entry + ~2% taker exit = 2% total)
+- Auto trader deducts 0% round-trip from profit assessment before entering (0% maker entry + 0% maker exit)
 - Trade journal records buy_fees, sell_fees, total_fees per completed trade
 - Trade journal recalculates exit value from per-leg exit data (not stale pkg current_value)
 
@@ -1010,7 +1024,7 @@ python -m uvicorn server:app --host 127.0.0.1 --port 8500 --log-level info
 - Root cause of losses: AI advisor was blanket-approving time_decay/negative_drift exits → all 7 time_decay exits lost money. Fixed with nuanced AI prompt.
 - AI advisor active via Groq (Llama 3.3 70B), batched reviews (~1 call per tick instead of 8)
 - Insider tracker: 100 traders monitored, 139 markets with signals
-- Auto trader: event-driven, MIN_SPREAD_PCT raised to 12% (ensures 10% net margin), limit orders (0% maker fee), 3/day cap, 48h cooldown, 24h hold period, variable Kelly sizing, favorite-longshot bias (2.5x/0.2x), probability model (1.3x cross-platform disagreement boost)
+- Auto trader: event-driven, MIN_SPREAD_PCT=8% (0% maker fees), $100 max trade size, 3/day cap, 48h cooldown, 24h hold period, variable Kelly sizing, favorite-longshot bias (2.5x/0.2x), probability model (1.3x), Kyle's lambda adverse selection signal (0.4–1.5x), AI exits disabled
 - Exit engine: 60s interval, 21 heuristic triggers, batched AI reviews (single LLM call for all packages per tick)
 - News scanner: 150s interval, 14 RSS feeds, two-pass AI pipeline (headline scan → deep analysis), breaking trades execute immediately
 - Decision logging: all buys, skips, trigger fires, AI verdicts, news signals logged to `decision_log.jsonl`
@@ -1019,7 +1033,12 @@ python -m uvicorn server:app --host 127.0.0.1 --port 8500 --log-level info
 - **Universal eval logger:** JSONL logging of all opportunities (entered + skipped), hourly backfill loop, missed opportunity analysis, calibration tracking
 - Spec: `docs/specs/2026-03-19-political-synthetic-analysis-design.md`
 - Plan: `docs/plans/2026-03-19-political-synthetic-analysis.md`
-- **Recent changes (2026-03-20) — Bracket Orders & Rolling Trail:**
+- **Recent changes (2026-03-21) — Kyle's Lambda, Journal Fixes, Maker Orders:**
+  - **Kyle's Lambda (adverse selection)** — New module `kyle_lambda.py`. Estimates price impact coefficient from Polymarket trade flow using OLS regression. Dual rolling windows (15min + 2hr), spike detection, directional multiplier (0.4–1.5x). Wired into auto-trader scoring after cross-platform disagreement boost. 29 tests.
+  - **Journal-driven fixes** — Trade journal analysis (35 trades, 88.6% loss rate) drove: `AI_EXITS_ENABLED=False` (0% win rate on AI exits), stop loss widened to -35% minimum, trailing stop widened to 35% base (was 8%), max trade size $200→$100, max exposure $1400→$700.
+  - **Maker orders everywhere** — Polymarket buy() and sell() now use GTC limit orders at spread edge (0% maker fee). Only stop_loss uses FOK. `ROUND_TRIP_FEE_PCT=0.0`, `MIN_SPREAD_PCT` lowered 12%→8%. Fee tables updated across arbitrage_engine, auto_trader, political models.
+  - **Trade callback channel** — `PolymarketPriceFeed.on_trade()` fires callbacks with (asset_id, price, size, timestamp, side) for each trade event. Size fallback: tries `size`, `amount`, `quantity` fields.
+- **Previous changes (2026-03-20) — Bracket Orders & Rolling Trail:**
   - **Bracket Orders & Rolling Trail** — Pre-placed GTC target orders (0% maker) + monitored stop levels with adaptive trailing stop. Eliminates ~2% taker exit fees. Safety overrides cancel brackets. Hold-to-resolution packages skip brackets.
   - New module: `src/positions/bracket_manager.py` — per-package bracket state, place/cancel target GTC order, monitor stop level, roll stop upward on appreciation.
   - Auto trader sets `_use_brackets = True` for standard prediction packages (not `_hold_to_resolution`).
@@ -1047,7 +1066,7 @@ python -m uvicorn server:app --host 127.0.0.1 --port 8500 --log-level info
   - Plan: `docs/superpowers/plans/2026-03-19-exit-optimization.md`
 - **Previous changes (2026-03-19) — Trading Performance Overhaul (branch: feature/trading-perf-overhaul):**
   - **Limit orders (Task 1):** Added `buy_limit`/`sell_limit`/`check_order_status`/`cancel_order` to BaseExecutor (defaults), PolymarketExecutor (GTC orders via OrderArgs + OrderType.GTC), and PaperExecutor (0% maker fee simulation). Position manager routes to `buy_limit` when `pkg["_use_limit_orders"]` is set. All auto-trader entries now use limit orders. Saves ~$108 per $5.7K deployed.
-  - **Churn reduction (Task 2):** `MIN_SPREAD_PCT` 8%→12%, `MAX_NEW_TRADES_PER_DAY=3` (daily counter resets on date change), `MARKET_COOLDOWN_SECONDS` 24h→48h (172800s). `get_stats()` now reports `trades_today` and `max_trades_per_day`.
+  - **Churn reduction (Task 2):** `MIN_SPREAD_PCT` 8%→12%→8% (lowered back after switching to 0% maker fees), `MAX_NEW_TRADES_PER_DAY=3` (daily counter resets on date change), `MARKET_COOLDOWN_SECONDS` 24h→48h (172800s). `get_stats()` now reports `trades_today` and `max_trades_per_day`.
   - **24h hold period (Task 3):** All packages get `_min_hold_until = time.time() + 86400`. Exit engine suppresses soft triggers (trailing_stop, negative_drift, time_decay, stale_position, longshot_decay, spread_compression, vol_spike, correlation_break, platform_error) during hold. Safety overrides + target_hit + stop_loss + political_event_resolved still fire.
   - **Short-duration filter (Task 4):** `MIN_HOURS_TO_EXPIRY=1.0`. Upgraded expiry parsing to `datetime.fromisoformat()` with hour precision (fallback to date-only). Filter applied in all 3 scoring pipelines (_scan_and_trade, _events_to_opportunities, _scan_polymarket).
   - **Favorite-longshot scoring (Task 5):** Multipliers strengthened: favorites 1.8x→2.5x (>=0.80), 1.4x→1.8x (>=0.70); longshots 0.4x→0.2x (<=0.20), 0.7x→0.5x (<=0.30). Variable Kelly: 1/4 favorites, 1/5 mid-range, 1/8 longshots. Applied consistently across all 3 scoring pipelines.
