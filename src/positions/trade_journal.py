@@ -6,6 +6,7 @@ Records: entry/exit prices, P&L, triggers that fired, AI verdicts, and strategy 
 import json
 import logging
 import os
+import random
 import time
 import uuid
 from pathlib import Path
@@ -299,3 +300,100 @@ class TradeJournal:
             "max_drawdown_usd": round(max_drawdown, 2),
             "curve": curve,
         }
+
+    def validate_robustness(self, mode: str | None = None, n_simulations: int = 100,
+                            jitter_pct: float = 0.20, skip_pct: float = 0.10) -> dict:
+        """Monte Carlo robustness validation of current strategy parameters.
+
+        Research: walk-forward optimization prevents curve-fitting.
+        Three tests:
+        1. Parameter jitter: randomly adjust P&L by ±jitter_pct, check if still profitable
+        2. Trade shuffle: randomize trade order, check if drawdown stays manageable
+        3. Skip test: randomly drop skip_pct of trades, check if still profitable
+
+        Returns verdict: "robust", "fragile", or "insufficient_data".
+        """
+        filtered = self.entries if not mode else [e for e in self.entries if e.get("mode") == mode]
+        if len(filtered) < 10:
+            return {
+                "verdict": "insufficient_data",
+                "total_trades": len(filtered),
+                "message": "Need at least 10 trades for robustness validation",
+            }
+
+        pnls = [e.get("pnl", 0) for e in filtered]
+        base_total_pnl = sum(pnls)
+
+        # Test 1: Parameter jitter — simulate ±jitter_pct variance on each trade's P&L
+        jitter_profitable = 0
+        for _ in range(n_simulations):
+            jittered_pnl = sum(
+                p * (1 + random.uniform(-jitter_pct, jitter_pct)) for p in pnls
+            )
+            if jittered_pnl > 0:
+                jitter_profitable += 1
+        jitter_pass_rate = jitter_profitable / n_simulations
+
+        # Test 2: Trade shuffle — randomize order, check max drawdown
+        base_max_dd = self._calc_max_drawdown(pnls)
+        shuffle_pass = 0
+        for _ in range(n_simulations):
+            shuffled = pnls.copy()
+            random.shuffle(shuffled)
+            dd = self._calc_max_drawdown(shuffled)
+            # Pass if drawdown doesn't exceed 2x base drawdown
+            if dd <= max(base_max_dd * 2, abs(base_total_pnl) * 0.5):
+                shuffle_pass += 1
+        shuffle_pass_rate = shuffle_pass / n_simulations
+
+        # Test 3: Skip test — drop random 10% of trades
+        skip_profitable = 0
+        skip_count = max(1, int(len(pnls) * skip_pct))
+        for _ in range(n_simulations):
+            indices = random.sample(range(len(pnls)), max(0, len(pnls) - skip_count))
+            skipped_pnl = sum(pnls[i] for i in indices)
+            if skipped_pnl > 0:
+                skip_profitable += 1
+        skip_pass_rate = skip_profitable / n_simulations
+
+        # Verdict: all three must pass at >60% to be "robust"
+        all_pass = jitter_pass_rate > 0.60 and shuffle_pass_rate > 0.60 and skip_pass_rate > 0.60
+        verdict = "robust" if all_pass else "fragile"
+
+        result = {
+            "verdict": verdict,
+            "total_trades": len(filtered),
+            "base_total_pnl": round(base_total_pnl, 2),
+            "jitter_test": {
+                "pass_rate": round(jitter_pass_rate, 3),
+                "jitter_pct": jitter_pct,
+                "passed": jitter_pass_rate > 0.60,
+            },
+            "shuffle_test": {
+                "pass_rate": round(shuffle_pass_rate, 3),
+                "base_max_drawdown": round(base_max_dd, 2),
+                "passed": shuffle_pass_rate > 0.60,
+            },
+            "skip_test": {
+                "pass_rate": round(skip_pass_rate, 3),
+                "skip_pct": skip_pct,
+                "passed": skip_pass_rate > 0.60,
+            },
+        }
+
+        logger.info("Robustness validation: %s (jitter=%.0f%%, shuffle=%.0f%%, skip=%.0f%%)",
+                     verdict, jitter_pass_rate * 100, shuffle_pass_rate * 100, skip_pass_rate * 100)
+        return result
+
+    @staticmethod
+    def _calc_max_drawdown(pnls: list[float]) -> float:
+        """Calculate maximum drawdown from a sequence of P&L values."""
+        cumulative = 0.0
+        peak = 0.0
+        max_dd = 0.0
+        for p in pnls:
+            cumulative += p
+            peak = max(peak, cumulative)
+            dd = peak - cumulative
+            max_dd = max(max_dd, dd)
+        return max_dd

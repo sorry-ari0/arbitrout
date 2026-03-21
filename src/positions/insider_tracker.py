@@ -31,6 +31,7 @@ MIN_POSITION_SIZE = 100      # Minimum $100 position to count as signal
 LEADERBOARD_SIZE = 50        # Top 50 traders to monitor
 SCAN_INTERVAL = 900          # 15 minutes between full scans
 CACHE_TTL = 600              # Cache insider data for 10 minutes
+CONVERGENCE_THRESHOLD = 3    # 3+ wallets entering same market = convergence signal
 
 # Wallet classification thresholds
 # Conviction = consistently winning at high rates, regardless of volume
@@ -309,6 +310,7 @@ class InsiderTracker:
         - Multiple insiders enter a market they weren't in before
         - Insider position size increases by >50%
         - Suspicious wallet enters a near-expiry market
+        - 3+ wallets converge on same market (new convergence signal)
         """
         if not self._prev_positions:
             return  # First scan, nothing to compare
@@ -373,13 +375,44 @@ class InsiderTracker:
                     }
                     new_alerts.append(alert)
 
+        # Whale convergence detection: 3+ wallets entering the same market
+        # in this scan window is a very strong directional signal
+        for cid, positions in self._insider_positions.items():
+            prev = self._prev_positions.get(cid, [])
+            prev_wallets = {p["wallet"] for p in prev}
+            new_entrants = [p for p in positions if p["wallet"] not in prev_wallets]
+            if len(new_entrants) >= CONVERGENCE_THRESHOLD:
+                direction = self._get_direction(new_entrants)
+                conviction_new = sum(
+                    1 for p in new_entrants
+                    if self._flagged_wallets.get(p.get("wallet", ""), {}).get("wallet_type") == "conviction"
+                )
+                total_value = sum(p.get("current_value", 0) for p in new_entrants)
+                alert = {
+                    "type": "whale_convergence",
+                    "condition_id": cid,
+                    "title": positions[0].get("title", "") if positions else "",
+                    "converging_wallets": len(new_entrants),
+                    "conviction_count": conviction_new,
+                    "total_value": round(total_value, 2),
+                    "direction": direction,
+                    "timestamp": time.time(),
+                    "auto_triggered": True,  # Convergence always triggers
+                }
+                new_alerts.append(alert)
+                logger.info("WHALE CONVERGENCE: %d wallets (%d conviction) entered %s (%s, $%.0f)",
+                            len(new_entrants), conviction_new, cid[:16],
+                            direction, total_value)
+
         self._movement_alerts.extend(new_alerts)
         # Keep only last 100 alerts
         self._movement_alerts = self._movement_alerts[-100:]
 
         if new_alerts:
-            logger.info("Insider movements: %d alerts (%d auto-triggered)",
-                        len(new_alerts), sum(1 for a in new_alerts if a.get("auto_triggered")))
+            convergence_count = sum(1 for a in new_alerts if a.get("type") == "whale_convergence")
+            logger.info("Insider movements: %d alerts (%d auto-triggered, %d convergence)",
+                        len(new_alerts), sum(1 for a in new_alerts if a.get("auto_triggered")),
+                        convergence_count)
 
     def _get_direction(self, positions: list[dict]) -> str:
         yes_count = sum(1 for p in positions if "YES" in (p.get("outcome", "") or p.get("asset", "")).upper())
@@ -465,6 +498,8 @@ class InsiderTracker:
                 "net_direction": "NONE",
                 "total_insider_value": 0,
                 "signal_strength": 0,
+                "has_convergence": False,
+                "convergence_wallets": 0,
                 "insiders": [],
             }
 
@@ -533,6 +568,21 @@ class InsiderTracker:
         strength = (count_score * 0.15 + value_score * 0.25 +
                     conviction_score * 0.35 + accuracy_score * 0.25)
 
+        # Whale convergence boost: 3+ wallets on same market = very strong signal
+        # Check recent convergence alerts for this condition_id
+        has_convergence = False
+        convergence_wallets = 0
+        for alert in self._movement_alerts[-20:]:  # Check recent alerts
+            if (alert.get("type") == "whale_convergence"
+                    and alert.get("condition_id") == condition_id
+                    and time.time() - alert.get("timestamp", 0) < SCAN_INTERVAL * 2):
+                has_convergence = True
+                convergence_wallets = alert.get("converging_wallets", 0)
+                # Convergence boost: +0.2 per converging wallet above threshold
+                convergence_boost = 0.2 * (convergence_wallets - CONVERGENCE_THRESHOLD + 1)
+                strength = min(1.0, strength + convergence_boost)
+                break
+
         return {
             "has_signal": non_mm_count > 0,
             "insider_count": non_mm_count,
@@ -544,6 +594,8 @@ class InsiderTracker:
             "no_value": round(no_value, 2),
             "total_insider_value": round(total_value, 2),
             "signal_strength": round(strength, 3),
+            "has_convergence": has_convergence,
+            "convergence_wallets": convergence_wallets,
             "insiders": [p for p in positions
                          if self._flagged_wallets.get(p.get("wallet", ""), {}).get("wallet_type") != "market_maker"],
         }
