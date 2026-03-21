@@ -462,7 +462,11 @@ class AutoTrader:
                                     pass
                             estimate = await self._llm_estimator.estimate(
                                 title=opp_title,
-                                platform_prices={"yes": opp.get("buy_yes_price", 0), "no": opp.get("buy_no_price", 0)},
+                                platform_prices=[{
+                                    "platform": opp.get("buy_yes_platform", "unknown"),
+                                    "yes_price": opp.get("buy_yes_price", 0),
+                                    "no_price": opp.get("buy_no_price", 0),
+                                }],
                                 news_headlines=news,
                             )
                             # Log estimate for calibration

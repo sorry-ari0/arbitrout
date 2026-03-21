@@ -159,8 +159,8 @@ class LLMEstimator:
             price_lines = []
             for p in platform_prices:
                 platform = p.get("platform", "unknown")
-                yes = p.get("yes_price", "?")
-                no = p.get("no_price", "?")
+                yes = p.get("yes_price", 0.0)
+                no = p.get("no_price", 0.0)
                 price_lines.append(f"  - {platform}: YES={yes:.2f}, NO={no:.2f}")
             platform_prices_formatted = "\n".join(price_lines)
         else:
