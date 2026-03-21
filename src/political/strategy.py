@@ -11,8 +11,9 @@ from political.models import (
 logger = logging.getLogger("political.strategy")
 
 
-def build_cluster_prompt(cluster: PoliticalCluster, relationships: list[dict]) -> str:
-    """Build LLM prompt for a single political cluster."""
+def build_cluster_prompt(cluster: PoliticalCluster, relationships: list[dict],
+                         spot_prices: dict[str, float] | None = None) -> str:
+    """Build LLM prompt for a single cluster (political or crypto)."""
     contracts_text = []
     for i, c in enumerate(cluster.contracts, 1):
         contracts_text.append(
@@ -25,14 +26,22 @@ def build_cluster_prompt(cluster: PoliticalCluster, relationships: list[dict]) -
         a, b = r["pair"]
         rels_text.append(f"  - ({a+1},{b+1}): {r['type']} — {r['details']}")
 
-    return f"""You are a political prediction market analyst. For each cluster below,
+    # Determine header: crypto uses asset name, political uses race/state
+    is_crypto = cluster.cluster_id.startswith("crypto-")
+    if is_crypto:
+        asset = cluster.cluster_id.split("-")[1].upper() if "-" in cluster.cluster_id else "CRYPTO"
+        header_line = f"Asset: {asset}"
+    else:
+        header_line = f"Race: {cluster.race} {cluster.state or ''}"
+
+    prompt = f"""You are a political prediction market analyst. For each cluster below,
 analyze the contracts and recommend optimal synthetic positions.
 
 IMPORTANT: All expected value and P&L figures must be AFTER platform fees.
 Fee rates (round-trip): Polymarket=2%, Kalshi=1.5%, PredictIt=10%, Limitless=2%.
 
 [CLUSTER:{cluster.cluster_id}]
-Race: {cluster.race} {cluster.state or ''}
+{header_line}
 Contracts:
 {chr(10).join(contracts_text)}
 
@@ -54,6 +63,42 @@ For each recommended position, respond with this exact JSON structure:
 }}
 
 Respond with ONLY valid JSON. No preamble, no explanation outside the JSON."""
+
+    # Append crypto market context for crypto clusters
+    if is_crypto:
+        prompt += _build_crypto_context(cluster, spot_prices=spot_prices)
+
+    return prompt
+
+
+def _build_crypto_context(cluster: PoliticalCluster,
+                          spot_prices: dict[str, float] | None = None) -> str:
+    """Build crypto market context block for the LLM prompt."""
+    assets = set()
+    for c in cluster.contracts:
+        if c.crypto_asset:
+            assets.add(c.crypto_asset)
+
+    price_lines = []
+    for asset in sorted(assets):
+        if spot_prices and asset in spot_prices:
+            price_lines.append(f"- {asset}: ${spot_prices[asset]:,.2f}")
+        else:
+            price_lines.append(f"- {asset}: (price unavailable)")
+
+    return f"""
+
+## Crypto Market Context
+Current spot prices:
+{chr(10).join(price_lines)}
+
+Annualized volatility: ~60% (crypto-wide assumption)
+
+Strategy guidance for crypto contracts:
+- Regulatory events (SEC, CFTC) typically cause 10-30% drawdowns on negative resolution
+- Price target contracts have implied probability based on distance from current price
+- Hedge legs should offset directional risk of other legs
+- Prefer strategies where at least one scenario is profitable even if crypto drops 20%"""
 
 
 def parse_strategy_response(response_text: str,

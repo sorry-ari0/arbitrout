@@ -123,3 +123,94 @@ class TestValidateStrategy:
     def test_low_confidence_rejected(self):
         s = self._make_strategy(confidence="low")
         assert validate_strategy(s) is False
+
+
+class TestCryptoPromptExtension:
+    """Tests for crypto market context in LLM prompt."""
+
+    def _make_crypto_cluster(self, contracts=None):
+        """Build a crypto cluster with 2 BTC contracts."""
+        from political.models import PoliticalCluster, PoliticalContractInfo
+        from adapters.models import NormalizedEvent
+
+        ev1 = NormalizedEvent(
+            platform="polymarket", event_id="btc-150k", title="BTC above $150K",
+            category="crypto", yes_price=0.35, no_price=0.65,
+            volume=50000, expiry="2026-12-31", url="https://polymarket.com/btc150k",
+        )
+        ev2 = NormalizedEvent(
+            platform="polymarket", event_id="btc-sec", title="SEC classifies BTC as security",
+            category="crypto", yes_price=0.15, no_price=0.85,
+            volume=30000, expiry="2026-12-31", url="https://polymarket.com/btcsec",
+        )
+        c1 = PoliticalContractInfo(
+            event=ev1, contract_type="crypto_event",
+            crypto_asset="BTC", event_category="price_target",
+            crypto_direction="positive", crypto_threshold=150000.0,
+        )
+        c2 = PoliticalContractInfo(
+            event=ev2, contract_type="crypto_event",
+            crypto_asset="BTC", event_category="regulatory",
+            crypto_direction="negative",
+        )
+        return PoliticalCluster(
+            cluster_id="crypto-btc-2026", race=None, state=None,
+            contracts=[c1, c2], matched_events=[ev1, ev2],
+        )
+
+    def _make_political_cluster(self):
+        """Build a political cluster (for comparison)."""
+        from political.models import PoliticalCluster, PoliticalContractInfo
+        from adapters.models import NormalizedEvent
+
+        ev1 = NormalizedEvent(
+            platform="polymarket", event_id="tx-1", title="Talarico wins TX Senate",
+            category="politics", yes_price=0.55, no_price=0.45,
+            volume=10000, expiry="2026-11-03", url="https://polymarket.com/tx1",
+        )
+        c1 = PoliticalContractInfo(
+            event=ev1, contract_type="candidate_win",
+            candidates=["Talarico"], race="TX Senate", state="TX",
+        )
+        ev2 = NormalizedEvent(
+            platform="polymarket", event_id="tx-2", title="Cruz wins TX Senate",
+            category="politics", yes_price=0.40, no_price=0.60,
+            volume=8000, expiry="2026-11-03", url="https://polymarket.com/tx2",
+        )
+        c2 = PoliticalContractInfo(
+            event=ev2, contract_type="candidate_win",
+            candidates=["Cruz"], race="TX Senate", state="TX",
+        )
+        return PoliticalCluster(
+            cluster_id="senate-tx-2026", race="TX Senate", state="TX",
+            contracts=[c1, c2], matched_events=[ev1, ev2],
+        )
+
+    def test_crypto_cluster_prompt_has_asset_header(self):
+        """Crypto cluster prompt uses 'Asset: BTC' instead of 'Race: ...'."""
+        cluster = self._make_crypto_cluster()
+        prompt = build_cluster_prompt(cluster, [])
+        assert "Asset: BTC" in prompt
+        assert "Race:" not in prompt
+
+    def test_crypto_cluster_prompt_has_context_block(self):
+        """Crypto cluster prompt includes crypto market context section."""
+        cluster = self._make_crypto_cluster()
+        prompt = build_cluster_prompt(cluster, [])
+        assert "Crypto Market Context" in prompt
+        assert "Annualized volatility" in prompt
+        assert "Regulatory events" in prompt
+
+    def test_political_cluster_no_crypto_context(self):
+        """Political cluster prompt does NOT include crypto context."""
+        cluster = self._make_political_cluster()
+        prompt = build_cluster_prompt(cluster, [])
+        assert "Crypto Market Context" not in prompt
+        assert "Race: TX Senate" in prompt
+
+    def test_political_cluster_prompt_unchanged(self):
+        """Political cluster prompt still works correctly."""
+        cluster = self._make_political_cluster()
+        prompt = build_cluster_prompt(cluster, [])
+        assert "CLUSTER:senate-tx-2026" in prompt
+        assert "Race: TX Senate" in prompt
