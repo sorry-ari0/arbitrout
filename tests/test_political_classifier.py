@@ -276,3 +276,32 @@ class TestClassifier:
         assert PLATFORM_FEES["kalshi"] == 1.5
         assert PLATFORM_FEES["predictit"] == 10.0
         assert PLATFORM_FEES["limitless"] == 2.0
+
+
+class TestCryptoModelFields:
+    """Tests for crypto fields on PoliticalContractInfo."""
+
+    def test_crypto_fields_default_none(self):
+        """Crypto fields default to None for political contracts."""
+        event = _make_event("Talarico wins TX Senate")
+        info = PoliticalContractInfo(
+            event=event, contract_type="candidate_win",
+            candidates=["Talarico"], race="TX Senate", state="TX",
+        )
+        assert info.crypto_asset is None
+        assert info.event_category is None
+        assert info.crypto_direction is None
+        assert info.crypto_threshold is None
+
+    def test_crypto_fields_populated(self):
+        """Crypto fields can be set for crypto_event contracts."""
+        event = _make_event("Bitcoin above $150K by end of 2026", platform="polymarket")
+        info = PoliticalContractInfo(
+            event=event, contract_type="crypto_event",
+            crypto_asset="BTC", event_category="price_target",
+            crypto_direction="positive", crypto_threshold=150000.0,
+        )
+        assert info.crypto_asset == "BTC"
+        assert info.event_category == "price_target"
+        assert info.crypto_direction == "positive"
+        assert info.crypto_threshold == 150000.0
