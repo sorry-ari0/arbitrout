@@ -79,3 +79,78 @@ class TestFavoriteLongshot:
         favorite_frac = 0.25
         assert longshot_frac < midrange_frac < favorite_frac
         assert longshot_frac <= favorite_frac * 0.5
+
+
+class TestTradeablePlatformFilter:
+    """Fix 2: _arb_to_opportunity should skip arbs on non-tradeable platforms."""
+
+    def _make_arb(self, yes_platform="polymarket", no_platform="kalshi"):
+        """Helper to build a minimal arb dict."""
+        return {
+            "matched_event": {
+                "canonical_title": "Will BTC exceed $100k?",
+                "category": "crypto",
+                "expiry": "2026-12-31",
+                "markets": [
+                    {"platform": yes_platform, "event_id": "evt_yes",
+                     "yes_price": 0.40, "no_price": 0.55, "volume": 50000},
+                    {"platform": no_platform, "event_id": "evt_no",
+                     "yes_price": 0.50, "no_price": 0.45, "volume": 40000},
+                ],
+            },
+            "buy_yes_platform": yes_platform,
+            "buy_no_platform": no_platform,
+            "buy_yes_price": 0.40,
+            "buy_no_price": 0.45,
+            "spread": 0.15,
+            "profit_pct": 15.0,
+            "net_profit_pct": 13.0,
+            "combined_volume": 90000,
+            "confidence": "high",
+        }
+
+    def test_predictit_arb_filtered_when_no_executor(self):
+        """PredictIt arb should return None when PredictIt executor is absent."""
+        from positions.auto_trader import AutoTrader
+        pm = MagicMock()
+        pm.list_packages = MagicMock(return_value=[])
+        pm.executors = {"polymarket": MagicMock(), "kalshi": MagicMock()}
+        trader = AutoTrader(pm)
+
+        arb = self._make_arb(yes_platform="predictit", no_platform="polymarket")
+        result = trader._arb_to_opportunity(arb)
+        assert result is None
+
+    def test_predictit_arb_passes_when_executor_present(self, caplog):
+        """PredictIt arb should NOT be filtered when PredictIt executor IS configured."""
+        import logging
+        from positions.auto_trader import AutoTrader
+        pm = MagicMock()
+        pm.list_packages = MagicMock(return_value=[])
+        pm.executors = {
+            "polymarket": MagicMock(),
+            "kalshi": MagicMock(),
+            "predictit": MagicMock(),
+        }
+        trader = AutoTrader(pm)
+
+        arb = self._make_arb(yes_platform="predictit", no_platform="polymarket")
+        with caplog.at_level(logging.DEBUG, logger="positions.auto_trader"):
+            trader._arb_to_opportunity(arb)
+        # The tradeable filter should NOT have triggered
+        assert "Skipping arb on non-tradeable platform" not in caplog.text
+
+    def test_polymarket_kalshi_arb_unaffected(self, caplog):
+        """Standard Polymarket/Kalshi arb should not trigger the tradeable filter."""
+        import logging
+        from positions.auto_trader import AutoTrader
+        pm = MagicMock()
+        pm.list_packages = MagicMock(return_value=[])
+        pm.executors = {"polymarket": MagicMock(), "kalshi": MagicMock()}
+        trader = AutoTrader(pm)
+
+        arb = self._make_arb(yes_platform="polymarket", no_platform="kalshi")
+        with caplog.at_level(logging.DEBUG, logger="positions.auto_trader"):
+            trader._arb_to_opportunity(arb)
+        # The tradeable filter should NOT have triggered
+        assert "Skipping arb on non-tradeable platform" not in caplog.text
