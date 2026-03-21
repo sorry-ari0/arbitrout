@@ -25,7 +25,7 @@ MAX_TRADE_SIZE = 50.0        # Ramped from $5-12 (Phase 3) toward $100 target
                              # Next step: $50 max until win rate exceeds 30% over 20+ trades
 MIN_TRADE_SIZE = 10.0        # Min $10 per trade (Phase 3's $5 was too small for meaningful P&L)
 MAX_CONCURRENT = 7           # Max 7 open packages (reserve 3 slots for news-driven trades)
-MAX_TOTAL_EXPOSURE = 700.0   # Reduced from $1400 to $700 (proportional to trade size cut)
+MAX_TOTAL_EXPOSURE = 350.0   # 7 slots * $50 max = $350 ceiling (was $700 when max was $100)
 PORTFOLIO_EXPOSURE_CAP = 0.40  # Kelly portfolio rule: never exceed 40% of total bankroll
 TOTAL_BANKROLL = 2000.0      # Total bankroll (auto_trader $1400 + news $600)
 SCAN_INTERVAL = 300          # 5 minutes between self-initiated scans (safety net)
@@ -39,6 +39,22 @@ MAX_LOSSES_PER_MARKET = 2    # Block market after 2 losses (prevents BTC-top-per
 MAX_NEW_TRADES_PER_DAY = 3          # Max new positions per calendar day
 MARKET_COOLDOWN_SECONDS = 172800    # 48h cooldown per market (was 86400)
 MIN_HOURS_TO_EXPIRY = 1.0  # Skip markets expiring within 1 hour (dynamic fees, bot dominance)
+
+# Market category keywords — shared with exit_engine.py for consistency
+# Journal analysis: sports -$91.99/10 trades (20% WR), commodities -$45.76/3 trades (0% WR)
+SPORTS_KEYWORDS = [
+    "score", "ncaa", "nba", "nfl", "nhl", "mlb", "epl", "la liga",
+    "bundesliga", "serie a", "ligue 1", "uefa", "champions league",
+    "premier league", "euroleague", "ufc", "mma", "fight night",
+    "boxing", "formula 1", "f1", "grand prix", "nascar",
+    "atp", "wta", "wimbledon", "tournament", "playoff",
+    "super bowl", "world cup", "world series", "vs.", "vs ",
+    "match", "game", "winner",
+]
+COMMODITIES_KEYWORDS = [
+    "crude oil", "wti", "brent", "natural gas", "gold price",
+    "silver price", "copper",
+]
 
 
 class AutoTrader:
@@ -351,15 +367,8 @@ class AutoTrader:
             # commodities -$45.76 (3 trades, 0% WR). Exact-score bets are worst.
             is_sports_exact_score = "exact score" in title
             is_ncaa = "ncaa" in title
-            is_sports = any(kw in title for kw in [
-                "score", "ncaa", "nba", "nfl", "nhl", "mlb", "epl", "la liga",
-                "bundesliga", "serie a", "ligue 1", "uefa", "champions league",
-                "premier league", "fulham", "osasuna", "partizan", "euroleague",
-            ])
-            is_commodities = any(kw in title for kw in [
-                "crude oil", "wti", "brent", "natural gas", "gold price",
-                "silver price", "copper",
-            ])
+            is_sports = any(kw in title for kw in SPORTS_KEYWORDS)
+            is_commodities = any(kw in title for kw in COMMODITIES_KEYWORDS)
 
             # Check expiry — parse with time precision when available
             expiry = opp.get("expiry") or opp.get("end_date") or ""

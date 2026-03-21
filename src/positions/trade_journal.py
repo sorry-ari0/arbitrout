@@ -101,8 +101,8 @@ class TradeJournal:
             "total_fees": round(total_fees, 4),
             "buy_fees": round(total_buy_fees, 4),
             "sell_fees": round(total_sell_fees, 4),
-            "pnl": round(pnl, 4),
-            "pnl_usd": round(pnl, 2),  # Explicit USD P&L for cross-referencing
+            "pnl": round(pnl, 4),  # 4-decimal for computation
+            "pnl_usd": round(pnl, 2),  # 2-decimal display value for cross-referencing
             "pnl_pct": round(pnl / total_cost * 100, 2) if total_cost > 0 else 0,
             "outcome": "win" if pnl > 0 else ("loss" if pnl < 0 else "flat"),
             "exit_trigger": exit_trigger,
