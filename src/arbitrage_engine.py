@@ -12,6 +12,9 @@ import time
 from pathlib import Path
 import asyncio
 import threading
+from dataclasses import dataclass
+from functools import lru_cache
+import string
 
 from adapters.models import NormalizedEvent, MatchedEvent, ArbitrageOpportunity
 from adapters.registry import AdapterRegistry
@@ -126,6 +129,108 @@ def _compute_fee_adjusted_profit(yes_price: float, no_price: float,
     net_pct = worst_profit * 100
 
     return net_pct, total_cost
+
+
+# ============================================================
+# RESOLUTION CRITERIA COMPARISON
+# ============================================================
+@dataclass
+class ResolutionMatch:
+    """Result of comparing resolution criteria between two markets."""
+    status: str          # "match", "divergent", "uncertain"
+    confidence: float    # 0.0-1.0
+    reasoning: str       # explanation
+
+
+def _normalize_title(title: str) -> str:
+    """Normalize a market title for comparison."""
+    t = title.lower().strip()
+    for prefix in ["will ", "will the ", "is ", "does ", "do "]:
+        if t.startswith(prefix):
+            t = t[len(prefix):]
+    t = t.translate(str.maketrans("", "", string.punctuation))
+    return " ".join(t.split())
+
+
+def _extract_key_terms(title: str) -> dict:
+    """Extract dates, dollar amounts, and named entities from a title."""
+    terms = {"dates": [], "amounts": [], "entities": []}
+    years = re.findall(r'\b(20[2-3]\d)\b', title)
+    terms["dates"].extend(years)
+    months = re.findall(r'\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b', title.lower())
+    terms["dates"].extend(months)
+    amounts = re.findall(r'\$[\d,]+(?:\.\d+)?[KkMmBb]?', title)
+    terms["amounts"].extend(amounts)
+    for entity in ["SEC", "Congress", "Fed", "FDA", "EPA", "Trump", "Biden", "NATO", "WHO", "UN"]:
+        if entity.lower() in title.lower():
+            terms["entities"].append(entity)
+    return terms
+
+
+def _jaccard_similarity(a: str, b: str) -> float:
+    """Compute Jaccard similarity on word tokens."""
+    tokens_a = set(a.split())
+    tokens_b = set(b.split())
+    if not tokens_a and not tokens_b:
+        return 1.0
+    intersection = tokens_a & tokens_b
+    union = tokens_a | tokens_b
+    return len(intersection) / len(union) if union else 0.0
+
+
+def _key_terms_conflict(terms_a: dict, terms_b: dict) -> bool:
+    """Check if key terms conflict between two titles."""
+    if terms_a["amounts"] and terms_b["amounts"]:
+        a_amounts = set(a.lower().replace(",", "").replace("$", "") for a in terms_a["amounts"])
+        b_amounts = set(a.lower().replace(",", "").replace("$", "") for a in terms_b["amounts"])
+        if a_amounts != b_amounts:
+            return True
+    a_years = set(terms_a["dates"]) & set(str(y) for y in range(2024, 2031))
+    b_years = set(terms_b["dates"]) & set(str(y) for y in range(2024, 2031))
+    if a_years and b_years and a_years != b_years:
+        return True
+    return False
+
+
+@lru_cache(maxsize=512)
+def _compare_resolution_cached(norm_a: str, norm_b: str, platform_a: str, platform_b: str,
+                                has_conflict: bool = False) -> tuple:
+    """Cached heuristic comparison.
+
+    Key-term conflict is pre-computed from the original (un-normalized) titles
+    and passed in so that punctuation stripping does not hide dollar signs or
+    commas that form part of an amount.
+    """
+    sim = _jaccard_similarity(norm_a, norm_b)
+    if sim > 0.90 and not has_conflict:
+        return ("match", 0.95, f"High similarity ({sim:.0%}), no key term conflicts")
+    if sim < 0.50 or has_conflict:
+        reason = f"Low similarity ({sim:.0%})" if sim < 0.50 else "Key term conflict detected"
+        return ("divergent", 0.85, reason)
+    return ("uncertain", 0.5, f"Moderate similarity ({sim:.0%}), needs review")
+
+
+def _compare_resolution(title_a: str, title_b: str,
+                         platform_a: str, platform_b: str) -> ResolutionMatch:
+    """Compare resolution criteria of two market titles. Heuristic only."""
+    # Extract key terms from original titles (before punctuation stripping)
+    # so that dollar signs and commas are preserved for amount detection.
+    terms_a = _extract_key_terms(title_a)
+    terms_b = _extract_key_terms(title_b)
+    has_conflict = _key_terms_conflict(terms_a, terms_b)
+
+    norm_a = _normalize_title(title_a)
+    norm_b = _normalize_title(title_b)
+    # Order-independent caching
+    if norm_a > norm_b:
+        norm_a, norm_b = norm_b, norm_a
+        platform_a, platform_b = platform_b, platform_a
+    status, confidence, reasoning = _compare_resolution_cached(
+        norm_a, norm_b, platform_a, platform_b, has_conflict
+    )
+    if status == "uncertain":
+        confidence = 0.4  # Conservative default
+    return ResolutionMatch(status=status, confidence=confidence, reasoning=reasoning)
 
 
 def _match_confidence(profit_pct: float) -> str:
@@ -806,6 +911,13 @@ def find_arbitrage(matched: list[MatchedEvent],
             else:
                 continue
 
+        # Resolution criteria comparison
+        resolution = _compare_resolution(
+            best_yes_market.title, best_no_market.title,
+            best_yes_market.platform, best_no_market.platform,
+        )
+        force_very_low = resolution.status == "divergent"
+
         total_cost = best_yes_market.yes_price + best_no_market.no_price
 
         if is_synthetic:
@@ -890,7 +1002,10 @@ def find_arbitrage(matched: list[MatchedEvent],
             if net_pct <= 0:
                 continue
 
-            confidence = _match_confidence(profit_pct)
+            if force_very_low:
+                confidence = "very_low"
+            else:
+                confidence = _match_confidence(profit_pct)
 
             # Drop very_low confidence — almost certainly false matches
             if confidence == "very_low":
