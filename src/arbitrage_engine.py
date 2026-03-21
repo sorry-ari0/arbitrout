@@ -39,9 +39,60 @@ _DEFAULT_TAKER_FEE = 0.02
 _PREDICTIT_PROFIT_TAX = 0.10  # 10% of profits at contract resolution
 _PREDICTIT_WITHDRAWAL_FEE = 0.05  # 5% of withdrawal amount
 
+# ============================================================
+# POLYMARKET DYNAMIC FEE MODEL
+# ============================================================
+# Polymarket uses a price-sensitive fee curve rather than a flat taker rate:
+#   effective_rate = fee_rate * (price * (1 - price)) ** exponent
+#
+# This is lower than the old flat 2% at every price point, which lets thin
+# spreads that would previously be rejected pass the profitability filter.
+# The existing MIN_SPREAD_PCT=12% in auto_trader provides a safety buffer.
+_POLYMARKET_FEE_PARAMS: dict[str, dict] = {
+    # Crypto: higher fee_rate but quadratic decay (exponent=2) → max 1.5625% at p=0.50
+    "crypto": {"fee_rate": 0.25, "exponent": 2},
+    # All other listed categories: lower fee_rate, linear decay → max 0.4375% at p=0.50
+    "politics": {"fee_rate": 0.0175, "exponent": 1},
+    "sports": {"fee_rate": 0.0175, "exponent": 1},
+    "economics": {"fee_rate": 0.0175, "exponent": 1},
+    "weather": {"fee_rate": 0.0175, "exponent": 1},
+    "culture": {"fee_rate": 0.0175, "exponent": 1},
+}
+_POLYMARKET_FEE_DEFAULT = "crypto"  # unknown categories fall back to most conservative
+
+
+def compute_taker_fee(platform: str, price: float, category: str) -> float:
+    """Return the effective taker fee rate for a given platform, price, and category.
+
+    For Polymarket: applies dynamic price-sensitive curve
+        effective_rate = fee_rate * (price * (1 - price)) ** exponent
+    For all other platforms: returns the flat rate from _TAKER_FEES regardless of
+    price or category.
+
+    Args:
+        platform: Platform identifier string (e.g. "polymarket", "kalshi").
+        price:    Contract price at entry, in [0, 1].
+        category: Market category string (e.g. "crypto", "politics"). Only used
+                  for Polymarket — unknown values fall back to crypto params.
+
+    Returns:
+        Effective fee rate as a decimal (e.g. 0.015625 = 1.5625%).
+    """
+    if platform != "polymarket":
+        return _TAKER_FEES.get(platform, _DEFAULT_TAKER_FEE)
+
+    params = _POLYMARKET_FEE_PARAMS.get(
+        category.lower() if category else "",
+        _POLYMARKET_FEE_PARAMS[_POLYMARKET_FEE_DEFAULT],
+    )
+    fee_rate = params["fee_rate"]
+    exponent = params["exponent"]
+    return fee_rate * (price * (1.0 - price)) ** exponent
+
 
 def _compute_fee_adjusted_profit(yes_price: float, no_price: float,
-                                  yes_platform: str, no_platform: str) -> tuple[float, float]:
+                                  yes_platform: str, no_platform: str,
+                                  category: str = "") -> tuple[float, float]:
     """Compute guaranteed profit after all platform fees.
 
     Returns (net_profit_pct, total_cost_with_fees).
@@ -50,10 +101,12 @@ def _compute_fee_adjusted_profit(yes_price: float, no_price: float,
     so 15.4 means 15.4 cents net profit per $1 payout.
 
     For PredictIt: 10% tax on profits + 5% withdrawal fee.
-    For others: taker_fee_rate * price at entry.
+    For others: taker_fee_rate * price at entry (dynamic for Polymarket).
+    The ``category`` param controls the Polymarket fee curve; has no effect on
+    other platforms.
     """
-    yes_fee = yes_price * _TAKER_FEES.get(yes_platform, _DEFAULT_TAKER_FEE)
-    no_fee = no_price * _TAKER_FEES.get(no_platform, _DEFAULT_TAKER_FEE)
+    yes_fee = yes_price * compute_taker_fee(yes_platform, yes_price, category)
+    no_fee = no_price * compute_taker_fee(no_platform, no_price, category)
     total_cost = yes_price + no_price + yes_fee + no_fee
 
     # Resolution payouts — PredictIt takes 10% of profits + 5% of withdrawal
@@ -793,6 +846,7 @@ def find_arbitrage(matched: list[MatchedEvent],
             net_pct, _ = _compute_fee_adjusted_profit(
                 best_yes_market.yes_price, best_no_market.no_price,
                 best_yes_market.platform, best_no_market.platform,
+                category=match.category,
             )
             net_effective = net_pct * (1.0 - loss_prob) if net_pct > 0 else net_pct
             if net_effective <= 0:
@@ -830,6 +884,7 @@ def find_arbitrage(matched: list[MatchedEvent],
             net_pct, _ = _compute_fee_adjusted_profit(
                 best_yes_market.yes_price, best_no_market.no_price,
                 best_yes_market.platform, best_no_market.platform,
+                category=match.category,
             )
             # Skip if guaranteed loss after fees
             if net_pct <= 0:
