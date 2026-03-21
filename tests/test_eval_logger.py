@@ -256,3 +256,31 @@ def test_get_unresolved_skips(tmp_path):
     unresolved = el.get_unresolved_skips()
     assert len(unresolved) == 1
     assert unresolved[0]["opportunity_id"] == "opp_u1"
+
+
+class TestLLMEstimateLogging:
+    def test_log_llm_estimate(self, tmp_path):
+        from eval_logger import EvalLogger
+        import json
+        path = str(tmp_path / "eval.jsonl")
+        el = EvalLogger(path=path)
+        el.log_llm_estimate(
+            market_id="test-123",
+            title="Will BTC exceed $100K?",
+            claude_prob=0.62,
+            gemini_prob=0.58,
+            consensus_prob=0.60,
+            market_price=0.50,
+            edge_pct=10.0,
+            should_boost=True,
+        )
+        with open(path) as f:
+            line = f.readline()
+            data = json.loads(line)
+            assert data["type"] == "llm_estimate"
+            assert data["market_id"] == "test-123"
+            assert data["claude_prob"] == 0.62
+            assert data["gemini_prob"] == 0.58
+            assert data["consensus_prob"] == 0.60
+            assert data["should_boost"] is True
+            assert "timestamp" in data

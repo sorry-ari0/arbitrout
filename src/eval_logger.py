@@ -75,6 +75,23 @@ class EvalLogger:
             entry["metadata"] = metadata
         self._write(entry)
 
+    def log_llm_estimate(self, market_id: str, title: str,
+                          claude_prob: float | None, gemini_prob: float | None,
+                          consensus_prob: float, market_price: float,
+                          edge_pct: float, should_boost: bool):
+        """Log an LLM probability estimate for calibration analysis."""
+        self._write({
+            "type": "llm_estimate",
+            "market_id": market_id,
+            "title": title,
+            "claude_prob": claude_prob,
+            "gemini_prob": gemini_prob,
+            "consensus_prob": consensus_prob,
+            "market_price": market_price,
+            "edge_pct": edge_pct,
+            "should_boost": should_boost,
+        })
+
     def backfill_outcome(
         self,
         opportunity_id: str,

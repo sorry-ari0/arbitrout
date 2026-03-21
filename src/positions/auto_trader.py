@@ -39,6 +39,7 @@ MAX_LOSSES_PER_MARKET = 2    # Block market after 2 losses (prevents BTC-top-per
 MAX_NEW_TRADES_PER_DAY = 3          # Max new positions per calendar day
 MARKET_COOLDOWN_SECONDS = 172800    # 48h cooldown per market (was 86400)
 MIN_HOURS_TO_EXPIRY = 1.0  # Skip markets expiring within 1 hour (dynamic fees, bot dominance)
+MIN_ARB_VOLUME = 50_000  # Skip arb opportunities below $50K daily volume (78% execution failure)
 
 
 class AutoTrader:
@@ -46,13 +47,17 @@ class AutoTrader:
 
     def __init__(self, position_manager, scanner=None, insider_tracker=None,
                  interval: float = SCAN_INTERVAL, decision_logger=None,
-                 probability_model=None):
+                 probability_model=None, llm_estimator=None):
         self.pm = position_manager
         self.scanner = scanner
         self.insider_tracker = insider_tracker
         self.interval = interval
         self.dlog = decision_logger
         self.probability_model = probability_model
+        self._llm_estimator = llm_estimator
+        self._news_scanner = None
+        self._eval_logger = None
+        self._llm_cycle_reset = False
         self._task = None
         self._running = False
         self._trades_opened = 0
@@ -74,6 +79,14 @@ class AutoTrader:
     def set_weather_scanner(self, scanner):
         """Set the weather scanner reference for opportunity consumption."""
         self._weather_scanner = scanner
+
+    def set_news_scanner(self, scanner):
+        """Set the news scanner reference for headline lookup (LLM context)."""
+        self._news_scanner = scanner
+
+    def set_eval_logger(self, eval_logger):
+        """Set the eval logger for LLM estimate calibration logging."""
+        self._eval_logger = eval_logger
 
     async def add_news_opportunity(self, opp: dict):
         """Called by NewsScanner to queue a normal-urgency signal."""
@@ -189,6 +202,7 @@ class AutoTrader:
         remaining_budget = min(MAX_TOTAL_EXPOSURE - total_exposure, kelly_cap - total_exposure)
         remaining_slots = MAX_CONCURRENT - len(open_pkgs)
         open_market_ids = self._get_open_market_ids(open_pkgs)
+        self._llm_cycle_reset = False  # Reset LLM cycle flag for this scan
 
         # Read opportunities from the arb scanner's cache (already scanned every 60s).
         # No need to trigger another scan — the _auto_scan_loop handles that.
@@ -326,6 +340,17 @@ class AutoTrader:
                     self.dlog.log_opportunity_skip(opp_title, "low_spread", spread_pct=spread_pct)
                 continue
 
+            # Volume filter for arb opportunities (78% execution failure below $50K daily volume)
+            # Exempt: directional strategies that don't require simultaneous cross-platform execution.
+            opp_type = opp.get("opportunity_type", "")
+            if opp_type not in ("political_synthetic", "crypto_synthetic", "weather", "multi_outcome_arb", "portfolio_no"):
+                arb_volume = opp.get("volume", opp.get("combined_volume", 0))
+                if arb_volume < MIN_ARB_VOLUME:
+                    self._trades_skipped += 1
+                    if self.dlog:
+                        self.dlog.log_opportunity_skip(opp_title, "low_volume", volume=arb_volume)
+                    continue
+
             # Skip markets we already have positions on (check BOTH sides, case-insensitive)
             # EXCEPTION: allow re-entry when news or insider signals provide new information
             has_signal = bool(opp.get("insider_signal") or opp.get("_news_driven") or opp.get("_insider_driven"))
@@ -415,12 +440,62 @@ class AutoTrader:
                     opp["insider_signal"] = insider_signal
                     opp["_insider_driven"] = conviction_count > 0
 
-            # Cross-platform disagreement boost: if platforms disagree >10%,
-            # there may be an informational edge worth capturing
+            # Reset LLM estimator rate limit once per scan cycle
+            if self._llm_estimator and not self._llm_cycle_reset:
+                self._llm_estimator.reset_cycle()
+                self._llm_cycle_reset = True
+
+            # Cross-platform disagreement: LLM boost (2.0x) replaces old 1.3x boost
             if self.probability_model:
                 consensus = self.probability_model.get_consensus(opp_title)
-                if consensus and consensus.get("max_deviation", 0) > 0.10:
-                    score *= 1.3
+                prob_deviation = consensus.get("max_deviation", 0) if consensus else 0
+                if prob_deviation > 0.10:
+                    if self._llm_estimator:
+                        # LLM path: 2.0x if models agree + edge, else NO boost
+                        try:
+                            condition_id = opp.get("buy_yes_market_id", "").split(":")[0]
+                            news = []
+                            if self._news_scanner and condition_id:
+                                try:
+                                    news = self._news_scanner.get_recent_headlines(condition_id, hours=24)
+                                except Exception:
+                                    pass
+                            estimate = await self._llm_estimator.estimate(
+                                title=opp_title,
+                                platform_prices=[{
+                                    "platform": opp.get("buy_yes_platform", "unknown"),
+                                    "yes_price": opp.get("buy_yes_price", 0),
+                                    "no_price": opp.get("buy_no_price", 0),
+                                }],
+                                news_headlines=news,
+                            )
+                            # Log estimate for calibration
+                            if estimate and self._eval_logger:
+                                try:
+                                    self._eval_logger.log_llm_estimate(
+                                        market_id=opp.get("buy_yes_market_id", ""),
+                                        title=opp_title,
+                                        claude_prob=estimate.models.get("claude"),
+                                        gemini_prob=estimate.models.get("gemini"),
+                                        consensus_prob=estimate.consensus_prob,
+                                        market_price=opp.get("buy_yes_price", 0),
+                                        edge_pct=estimate.edge_pct,
+                                        should_boost=estimate.should_boost,
+                                    )
+                                except Exception:
+                                    pass
+                            if estimate and estimate.should_boost:
+                                score *= 2.0
+                                logger.info("LLM mispricing boost: %s (edge=%.1f%%, consensus=%.2f)",
+                                             opp_title, estimate.edge_pct, estimate.consensus_prob)
+                            # If LLM doesn't boost: no boost at all (replaces 1.3x per spec)
+                        except Exception as e:
+                            logger.warning("LLM estimator error for %s: %s", opp_title, e)
+                            # LLM error: fall back to 1.3x (estimator unavailable, not disagreement)
+                            score *= 1.3
+                    else:
+                        # No LLM estimator available — use original 1.3x boost
+                        score *= 1.3
 
             # Skip low-score opportunities
             if score < MIN_SPREAD_PCT:

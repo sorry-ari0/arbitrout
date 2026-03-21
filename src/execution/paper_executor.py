@@ -1,6 +1,7 @@
 """Paper executor — wraps real executor for simulated trading. Real prices, fake money."""
 import logging, time, uuid
 from .base_executor import BaseExecutor, ExecutionResult, BalanceResult, PositionInfo
+from arbitrage_engine import compute_taker_fee
 
 logger = logging.getLogger("execution.paper")
 
@@ -33,6 +34,13 @@ TAKER_FEE_RATES = {
     "kraken": 0.0026,         # 0.26% taker
 }
 DEFAULT_FEE_RATE = 0.02  # 2% default (taker)
+
+
+def get_taker_fee_rate(platform: str, price: float = 0.5, category: str = "") -> float:
+    """Get taker fee rate, using dynamic formula for Polymarket."""
+    if platform == "polymarket":
+        return compute_taker_fee(platform, price, category)
+    return TAKER_FEE_RATES.get(platform, DEFAULT_FEE_RATE)
 
 
 class PaperExecutor:

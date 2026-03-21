@@ -95,6 +95,14 @@ except (ImportError, SyntaxError) as _pol_err:
     logger.warning("Political analysis not available: %s", _pol_err)
     _POLITICAL_AVAILABLE = False
 
+# --- LLM estimator for mispricing detection ---
+try:
+    from positions.llm_estimator import LLMEstimator
+    _LLM_ESTIMATOR_AVAILABLE = True
+except (ImportError, SyntaxError) as _llm_err:
+    logger.warning("LLM estimator not available: %s", _llm_err)
+    _LLM_ESTIMATOR_AVAILABLE = False
+
 # --- Eval logger ---
 try:
     from eval_logger import EvalLogger
@@ -330,9 +338,25 @@ async def lifespan(app: FastAPI):
             insider.start()
             global _auto_trader_ref, _probability_model
             _probability_model = ProbabilityModel()
+            # LLM mispricing estimator (optional — needs API keys)
+            _llm_estimator = None
+            if _LLM_ESTIMATOR_AVAILABLE:
+                anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+                gemini_key = os.environ.get("GEMINI_API_KEY", "")
+                if anthropic_key and gemini_key:
+                    _llm_estimator = LLMEstimator(
+                        anthropic_api_key=anthropic_key,
+                        gemini_api_key=gemini_key,
+                    )
+                    logger.info("LLM estimator initialized (Claude + Gemini)")
+                else:
+                    logger.info("LLM estimator skipped (missing API keys: ANTHROPIC=%s, GEMINI=%s)",
+                                "set" if anthropic_key else "missing",
+                                "set" if gemini_key else "missing")
             _auto_trader = AutoTrader(pm, scanner=arb_scanner, insider_tracker=insider,
                                        decision_logger=decision_log,
-                                       probability_model=_probability_model)
+                                       probability_model=_probability_model,
+                                       llm_estimator=_llm_estimator)
             _auto_trader.start()
             _auto_trader_ref = _auto_trader
             logger.info("Auto trader started — reacts to arb scanner within seconds, 5min safety-net fallback")
@@ -345,6 +369,7 @@ async def lifespan(app: FastAPI):
                 decision_logger=decision_log,
             )
             _news_scanner.start()
+            _auto_trader.set_news_scanner(_news_scanner)
             exit_engine._news_scanner = _news_scanner
             logger.info("News scanner started — will scan RSS feeds every 2.5 min")
             init_position_system(pm, exit_engine, ai, trade_journal=journal, auto_trader=_auto_trader, insider_tracker=insider)
@@ -454,6 +479,8 @@ async def lifespan(app: FastAPI):
     if _EVAL_AVAILABLE:
         _eval_log = EvalLogger()
         init_eval_router(_eval_log)
+        if _auto_trader:
+            _auto_trader.set_eval_logger(_eval_log)
         if _POLITICAL_AVAILABLE and _political_analyzer:
             from political.router import set_eval_logger
             set_eval_logger(_eval_log)

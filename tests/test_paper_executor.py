@@ -38,3 +38,15 @@ class TestPaperSell:
     def test_sell_no_position(self, paper):
         r = _run(paper.sell("BTC", 1.0))
         assert not r.success
+
+
+class TestDynamicFees:
+    def test_polymarket_taker_fee_uses_dynamic(self):
+        from execution.paper_executor import get_taker_fee_rate
+        fee = get_taker_fee_rate("polymarket", 0.50, "crypto")
+        assert abs(fee - 0.015625) < 1e-6
+
+    def test_kalshi_taker_fee_unchanged(self):
+        from execution.paper_executor import get_taker_fee_rate
+        fee = get_taker_fee_rate("kalshi", 0.50, "politics")
+        assert fee == 0.01
