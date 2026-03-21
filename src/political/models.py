@@ -171,7 +171,7 @@ class PoliticalOpportunity:
             buy_no_market_id = primary.event.event_id
 
         return {
-            "opportunity_type": "political_synthetic",
+            "opportunity_type": "crypto_synthetic" if self.cluster_id.startswith("crypto-") else "political_synthetic",
             "title": title,
             "canonical_title": canonical_title,
             "profit_pct": round(self.net_expected_value_pct, 2),

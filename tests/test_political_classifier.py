@@ -408,3 +408,62 @@ class TestCryptoEventClassifier:
             info = classify_contract(event)
             assert info.contract_type == "crypto_event", f"Failed for: {title}"
             assert info.crypto_asset == expected_asset, f"Expected {expected_asset} for: {title}"
+
+
+class TestCryptoOpportunityType:
+    """Tests for PoliticalOpportunity.to_dict() type awareness."""
+
+    def test_political_opportunity_type(self):
+        """Political cluster → opportunity_type 'political_synthetic'."""
+        from political.models import (
+            PoliticalOpportunity, PoliticalSyntheticStrategy,
+            PoliticalLeg, SyntheticLeg, Scenario,
+        )
+        event = _make_event("Talarico wins TX Senate")
+        info = PoliticalContractInfo(
+            event=event, contract_type="candidate_win",
+            candidates=["Talarico"], race="TX Senate", state="TX",
+        )
+        strategy = PoliticalSyntheticStrategy(
+            cluster_id="senate-tx-2026", strategy_name="Test",
+            legs=[SyntheticLeg(contract_idx=1, event_id=event.event_id, side="yes", weight=1.0)],
+            scenarios=[Scenario(outcome="Win", probability=0.6, pnl_pct=10.0)],
+            expected_value_pct=6.0, win_probability=0.6,
+            max_loss_pct=-40.0, confidence=0.7,
+        )
+        leg = PoliticalLeg(event=event, contract_info=info, side="yes", weight=1.0, platform_fee_pct=2.0)
+        opp = PoliticalOpportunity(
+            cluster_id="senate-tx-2026", strategy=strategy,
+            legs=[leg], total_fee_pct=2.0, net_expected_value_pct=4.0,
+            platforms=["polymarket"],
+        )
+        d = opp.to_dict()
+        assert d["opportunity_type"] == "political_synthetic"
+
+    def test_crypto_opportunity_type(self):
+        """Crypto cluster → opportunity_type 'crypto_synthetic'."""
+        from political.models import (
+            PoliticalOpportunity, PoliticalSyntheticStrategy,
+            PoliticalLeg, SyntheticLeg, Scenario,
+        )
+        event = _make_event("BTC above $150K", platform="polymarket")
+        info = PoliticalContractInfo(
+            event=event, contract_type="crypto_event",
+            crypto_asset="BTC", event_category="price_target",
+            crypto_direction="positive", crypto_threshold=150000.0,
+        )
+        strategy = PoliticalSyntheticStrategy(
+            cluster_id="crypto-btc-2026", strategy_name="BTC Hedge",
+            legs=[SyntheticLeg(contract_idx=1, event_id=event.event_id, side="yes", weight=1.0)],
+            scenarios=[Scenario(outcome="BTC up", probability=0.5, pnl_pct=15.0)],
+            expected_value_pct=7.0, win_probability=0.5,
+            max_loss_pct=-45.0, confidence=0.65,
+        )
+        leg = PoliticalLeg(event=event, contract_info=info, side="yes", weight=1.0, platform_fee_pct=2.0)
+        opp = PoliticalOpportunity(
+            cluster_id="crypto-btc-2026", strategy=strategy,
+            legs=[leg], total_fee_pct=2.0, net_expected_value_pct=5.0,
+            platforms=["polymarket"],
+        )
+        d = opp.to_dict()
+        assert d["opportunity_type"] == "crypto_synthetic"

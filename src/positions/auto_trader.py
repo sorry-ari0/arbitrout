@@ -819,6 +819,74 @@ class AutoTrader:
                         self.dlog.log_trade_failed(opp_title, str(e))
                 continue
 
+            # Crypto synthetic: same structure as political_synthetic, different exit rules
+            if opp.get("opportunity_type") == "crypto_synthetic":
+                try:
+                    pkg = create_package(f"Auto: {trade_title[:60]}", "crypto_synthetic")
+                except ValueError:
+                    continue
+
+                opp_legs = opp.get("legs", [])
+                if not opp_legs:
+                    continue
+
+                for opp_leg in opp_legs:
+                    leg_cost = round(trade_size * opp_leg.get("weight", 1.0 / len(opp_legs)), 2)
+                    leg_cost = max(MIN_TRADE_SIZE, leg_cost)
+                    side = opp_leg.get("side", "YES")
+                    leg_type = "prediction_yes" if side == "YES" else "prediction_no"
+                    price = opp_leg.get("yes_price", 0.5) if side == "YES" else opp_leg.get("no_price", 0.5)
+                    pkg["legs"].append(create_leg(
+                        platform=opp_leg.get("platform", "polymarket"),
+                        leg_type=leg_type,
+                        asset_id=f"{opp_leg['event_id']}:{side}",
+                        asset_label=f"{side} @ {opp_leg.get('platform', '?')}: {opp_leg.get('title', '?')[:40]}",
+                        entry_price=price if price > 0 else 0.5,
+                        cost=leg_cost,
+                        expiry=opp.get("expiry", "2026-12-31")[:10],
+                    ))
+
+                pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 50}))
+                pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -40}))
+                pkg["exit_rules"].append(create_exit_rule("trailing_stop", {"current": 35, "bound_min": 15, "bound_max": 50}))
+                pkg["_use_brackets"] = True
+
+                if not pkg["legs"]:
+                    self._trades_skipped += 1
+                    continue
+
+                pkg["_use_limit_orders"] = True
+                pkg_name = pkg.get("name", opp_title)
+                bet_side = "CRYPTO"
+                bet_conviction = 0.0
+                entry_price = 0.5
+                try:
+                    result = await self.pm.execute_package(pkg)
+                    if result.get("success"):
+                        trades_this_cycle += 1
+                        self._trades_opened += 1
+                        self._daily_trade_count += 1
+                        remaining_budget -= trade_size
+                        for leg in pkg.get("legs", []):
+                            cid = leg.get("asset_id", "").split(":")[0]
+                            if cid:
+                                open_market_ids.add(cid)
+                        logger.info("Auto trader OPENED crypto synthetic: %s (ev=%.1f%%, size=$%.2f)",
+                                    pkg_name, spread_pct, trade_size)
+                        if self.dlog:
+                            self.dlog.log_trade_opened(
+                                pkg_id=pkg.get("id", ""), title=pkg_name,
+                                strategy="crypto_synthetic",
+                                side=bet_side, price=entry_price,
+                                size=trade_size, score=score, spread_pct=spread_pct,
+                                conviction=bet_conviction,
+                                days_to_expiry=days_to_expiry, volume=opp.get("volume", 0))
+                except Exception as e:
+                    logger.warning("Auto trader: crypto trade failed: %s", e)
+                    if self.dlog:
+                        self.dlog.log_trade_failed(opp_title, str(e))
+                continue
+
             # Determine strategy:
             # - synthetic_derivative: related markets with different price targets
             #   Can be same-platform (e.g., BTC >$90K YES + BTC >$100K NO = bull spread)
