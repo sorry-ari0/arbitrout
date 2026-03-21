@@ -2,7 +2,7 @@
 
 ## Goal
 
-Fix three bugs identified from trade journal analysis: duplicate journal entries from missing idempotency guards, phantom PredictIt arbitrage opportunities that can't be executed, and multi-close exit paths that fire on already-closed packages. All changes are to existing modules — no new files.
+Fix two bugs identified from trade journal analysis: duplicate journal entries from missing idempotency guards, and phantom PredictIt arbitrage opportunities that can't be executed. All changes are to existing modules — no new files.
 
 ## Problem Summary
 
@@ -10,7 +10,6 @@ Fix three bugs identified from trade journal analysis: duplicate journal entries
 |---|-----|-----------|--------|
 | 1 | Journal records 33 entries from 23 packages | `record_close()` has no idempotency guard; multiple exit paths call it on the same package | All per-trade analytics are wrong. Loss counts inflated 1.4x. |
 | 2 | 4,831 phantom PredictIt arb opportunities (25% of total) | `find_arbitrage()` and `_arb_to_opportunity()` don't filter by tradeable platform | Wastes scoring cycles. 2 failed trades ("No executor for platform: predictit"). |
-| 3 | Exit engine fires triggers on already-journaled packages | `_resolve_bracket_fills()` iterates multiple fills per package; each fill re-checks "all legs closed" and re-calls `record_close()` | Creates 2-5 duplicate journal entries per multi-fill close. |
 
 ## Fix 1: Journal Idempotency Guard
 
@@ -23,7 +22,7 @@ Fix three bugs identified from trade journal analysis: duplicate journal entries
 3. `position_manager._finalize_exit()` (line 590) — limit order fills
 4. `exit_engine._resolve_bracket_fills()` (line 423) — bracket order fills
 
-When multiple bracket fills arrive in the same tick, the for-fill loop at exit_engine.py line 387 processes each fill, marks the leg closed, checks if all legs are now closed, and calls `record_close()` each time the check passes. After fill #1 closes the last open leg, fills #2-#5 each see "all legs closed = True" and create duplicate entries.
+The duplicate journal entries arise from **cross-site races**: when a package closes, multiple call sites may detect the close independently and each call `record_close()`. For example, bracket fills at exit_engine.py line 423 close the package, and then `_exit_leg_locked()` at position_manager.py line 435 also detects "all legs closed" and calls `record_close()` again. Note: the "all legs closed" check in `_resolve_bracket_fills()` at line 414 is **outside** the fill loop (line 387) — it runs once per package per tick, not per fill. The duplicates come from different call sites, not from within the fill loop.
 
 ### Fix
 
@@ -63,13 +62,15 @@ Existing duplicate entries in `trade_journal.json` are NOT cleaned up by this fi
 
 The arb scanner matches events across all platforms including PredictIt. `find_arbitrage()` in `arbitrage_engine.py` computes spreads for PredictIt pairs — 4,831 opportunities with 30%+ spreads and volume=0. These are almost certainly stale prices or resolution mismatches.
 
-The auto-trader's `_arb_to_opportunity()` (line 1175) converts these into tradeable opportunities without checking whether executors exist for both platforms. When the auto-trader tries to execute, `position_manager.execute_package()` fails with "No executor for platform: predictit" because the PredictIt executor only initializes when `PREDICTIT_SESSION` env var is set.
+The auto-trader's `_arb_to_opportunity()` (line 1250) converts these into tradeable opportunities without checking whether executors exist for both platforms. When the auto-trader tries to execute, `position_manager.execute_package()` fails with "No executor for platform: predictit" because the PredictIt executor only initializes when `PREDICTIT_SESSION` env var is set.
+
+Note: `_events_to_opportunities()` (line 1349) already has a `tradeable_platforms` filter using the same executor registry pattern. Fix 2 applies the same proven pattern to the arb conversion path, which was missing it.
 
 ### Fix
 
 Filter in `_arb_to_opportunity()` using the executor registry — don't hardcode platform names:
 
-**In `auto_trader.py` `_arb_to_opportunity()`**, after determining `buy_yes_platform` and `buy_no_platform` (around line 1190):
+**In `auto_trader.py` `_arb_to_opportunity()`**, after determining `buy_yes_platform` and `buy_no_platform` (around line 1264):
 ```python
 # Skip opportunities on platforms we can't trade on
 tradeable = set(self.pm.executors.keys()) if hasattr(self.pm, 'executors') else set()
@@ -89,27 +90,9 @@ This is superior to a hardcoded `_NO_TRADE_PLATFORMS` set because:
 
 This removes ~4,831 opportunities per scan from the scoring pipeline. The remaining ~14,000 opportunities are all on tradeable platforms (Polymarket, Kalshi, Limitless). Scan time should decrease as fewer opportunities are scored.
 
-## Fix 3: Multi-Close Guard in Exit Engine
+## Why Fix 3 (Multi-Close Guard) Was Dropped
 
-### Root Cause Detail
-
-`_resolve_bracket_fills()` at exit_engine.py line 379 processes bracket order fills. When multiple legs fill in the same tick, the inner loop (line 387: `for fill in fills`) marks each leg closed and checks if all legs are now closed. After the first fill closes the last open leg, every subsequent fill re-enters the "all legs closed" branch and calls `record_close()` again.
-
-Additionally, `_resolve_bracket_fills()` runs at line 464 of `_tick()`, BEFORE the main trigger evaluation loop at line 473. If bracket fills close a package at line 464, the package status is set to "closed" and `save()` is called. The subsequent `list_packages("open")` at line 469 should then exclude it. This path is safe.
-
-The unsafe path is within `_resolve_bracket_fills` itself: the for-fill loop at line 387 processes all fills for one package sequentially, and the "all legs closed" check at line 415 doesn't short-circuit after the first successful close.
-
-### Fix
-
-**In `exit_engine.py` `_resolve_bracket_fills()`**, after the first successful close, break out of the fill loop or skip subsequent close attempts:
-
-```python
-# After line 415-425 block
-if pkg.get("status") == "closed":
-    break  # All legs closed, no need to process more fills
-```
-
-This is in addition to the `_journal_recorded` flag from Fix 1, which provides defense-in-depth.
+Initial analysis hypothesized that the fill loop in `_resolve_bracket_fills()` re-entered the "all legs closed" branch per fill. Code review revealed the all-legs-closed check (line 414) is a **sibling** of the fill loop (line 387), not nested inside it — it runs once per package per tick. The duplicates come from cross-site races (multiple call sites detecting the same close), which Fix 1's `_journal_recorded` flag already handles completely.
 
 ## Testing
 
@@ -117,15 +100,12 @@ This is in addition to the `_journal_recorded` flag from Fix 1, which provides d
 - Call `record_close()` twice with the same package → only one entry created
 - Call `record_close()` with different packages → both entries created
 - Verify `_journal_recorded` flag is set on package after first call
+- Cross-site test: simulate `record_close()` from two different call sites (e.g., exit_engine + position_manager) → only one entry
 
 **Fix 2 tests** (`tests/test_auto_trader_improvements.py`):
 - Mock `pm.executors` without predictit → PredictIt arb returns None from `_arb_to_opportunity`
 - Mock `pm.executors` with predictit → PredictIt arb proceeds normally
 - Non-PredictIt arb unaffected regardless of executor config
-
-**Fix 3 tests** (`tests/test_exit_engine.py` or new test file):
-- Simulate multiple bracket fills for same package in one tick → `record_close` called exactly once
-- Verify break after package closes prevents processing remaining fills
 
 ## What This Does NOT Include
 
