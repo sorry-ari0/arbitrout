@@ -255,6 +255,10 @@ class PaperExecutor:
 
     def is_configured(self) -> bool: return True
 
+    def set_journal(self, journal):
+        """Set trade journal reference for persistent PnL tracking across restarts."""
+        self._journal = journal
+
     def get_stats(self) -> dict:
         pnl = self.balance - self.starting_balance
         sells = [t for t in self.trade_history if t["action"] == "sell"]
@@ -264,7 +268,16 @@ class PaperExecutor:
             buys = [b for b in self.trade_history if b["action"] == "buy" and b["asset_id"] == s["asset_id"]]
             if buys and s.get("price", 0) > buys[-1].get("price", 0):
                 wins += 1
-        return {"mode":"paper","starting_balance":self.starting_balance,"current_balance":round(self.balance,2),
+        stats = {"mode":"paper","starting_balance":self.starting_balance,"current_balance":round(self.balance,2),
                 "total_pnl":round(pnl,2),"total_fees_paid":round(self.total_fees_paid,2),
                 "fee_rate":self.fee_rate,"order_type":self.order_type,"total_trades":len(self.trade_history),
                 "win_rate":round(wins/len(sells),2) if sells else 0,"open_positions":len(self.positions)}
+        # Include persistent journal PnL (survives restarts)
+        journal = getattr(self, "_journal", None)
+        if journal:
+            equity = journal.get_equity_curve(mode="paper")
+            stats["journal_pnl_usd"] = equity.get("cumulative_pnl_usd", 0)
+            stats["journal_fees_usd"] = equity.get("cumulative_fees_usd", 0)
+            stats["journal_trades"] = equity.get("total_trades", 0)
+            stats["journal_max_drawdown_usd"] = equity.get("max_drawdown_usd", 0)
+        return stats
