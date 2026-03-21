@@ -9,6 +9,11 @@ RELATIONSHIP_SCORES = {
     "conditional_hedge": 1.5,
     "bracket_spread": 1.5,
     "matchup_arbitrage": 2.0,
+    # Crypto relationship types
+    "crypto_regulatory_hedge": 3.0,
+    "crypto_event_catalyst": 2.5,
+    "cross_crypto_correlation": 2.0,
+    "crypto_price_spread": 1.5,
 }
 
 MIN_RELATIONSHIP_SCORE = 1.5
@@ -116,6 +121,58 @@ def _classify_pair(a: PoliticalContractInfo, b: PoliticalContractInfo,
                 "pair": (idx_a, idx_b),
                 "score": RELATIONSHIP_SCORES["matchup_arbitrage"],
                 "details": "Matchup price should equal conditional win probability",
+            }
+
+    # --- Crypto relationship types ---
+    # Only apply when both contracts are crypto_event
+    if a.contract_type == "crypto_event" and b.contract_type == "crypto_event":
+
+        # 7. crypto_regulatory_hedge: price_target+positive vs regulatory+negative, same asset
+        if (a.crypto_asset and a.crypto_asset == b.crypto_asset):
+            a_cat, b_cat = a.event_category, b.event_category
+
+            if ({a_cat, b_cat} == {"price_target", "regulatory"}):
+                pt = a if a_cat == "price_target" else b
+                rg = b if a_cat == "price_target" else a
+                if pt.crypto_direction == "positive" and rg.crypto_direction == "negative":
+                    return {
+                        "type": "crypto_regulatory_hedge",
+                        "pair": (idx_a, idx_b),
+                        "score": RELATIONSHIP_SCORES["crypto_regulatory_hedge"],
+                        "details": f"{a.crypto_asset} price target vs regulatory risk",
+                    }
+
+            # 8. crypto_event_catalyst: regulatory/technical + price_target, same asset
+            if ("price_target" in {a_cat, b_cat}
+                    and {a_cat, b_cat} & {"regulatory", "technical"}
+                    and a_cat != b_cat):
+                return {
+                    "type": "crypto_event_catalyst",
+                    "pair": (idx_a, idx_b),
+                    "score": RELATIONSHIP_SCORES["crypto_event_catalyst"],
+                    "details": f"{a.crypto_asset} event catalyst → price impact",
+                }
+
+            # 9. crypto_price_spread: both price_target, same asset, different thresholds
+            if (a_cat == "price_target" and b_cat == "price_target"
+                    and a.crypto_threshold is not None and b.crypto_threshold is not None
+                    and a.crypto_threshold != b.crypto_threshold):
+                return {
+                    "type": "crypto_price_spread",
+                    "pair": (idx_a, idx_b),
+                    "score": RELATIONSHIP_SCORES["crypto_price_spread"],
+                    "details": f"{a.crypto_asset} spread: ${a.crypto_threshold:,.0f} vs ${b.crypto_threshold:,.0f}",
+                }
+
+        # 10. cross_crypto_correlation: different assets, same event_category
+        if (a.crypto_asset and b.crypto_asset
+                and a.crypto_asset != b.crypto_asset
+                and a.event_category == b.event_category):
+            return {
+                "type": "cross_crypto_correlation",
+                "pair": (idx_a, idx_b),
+                "score": RELATIONSHIP_SCORES["cross_crypto_correlation"],
+                "details": f"{a.crypto_asset}/{b.crypto_asset} correlated {a.event_category}",
             }
 
     return None
