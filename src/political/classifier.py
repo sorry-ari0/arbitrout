@@ -1,6 +1,6 @@
 """Rule-based contract classifier for political prediction markets.
 
-Classifies NormalizedEvent titles into one of 6 contract types using regex
+Classifies NormalizedEvent titles into one of 7 contract types using regex
 patterns. Political contract titles are formulaic across Polymarket/Kalshi/
 PredictIt, making regex reliable for structured extraction.
 
@@ -91,6 +91,125 @@ _CANDIDATE_WIN_RE = re.compile(
 
 
 # ============================================================
+# CRYPTO EVENT DETECTION
+# ============================================================
+
+_CRYPTO_ASSET_RE = re.compile(
+    r"\b(bitcoin|btc|ethereum|eth|ether|solana|sol|xrp|ripple|"
+    r"dogecoin|doge|cardano|ada|avalanche|avax|chainlink|link|"
+    r"polkadot|dot|polygon|pol|crypto(?:currency)?)\b",
+    re.IGNORECASE,
+)
+
+_CRYPTO_TICKER_MAP: dict[str, str] = {
+    "bitcoin": "BTC", "btc": "BTC",
+    "ethereum": "ETH", "eth": "ETH", "ether": "ETH",
+    "solana": "SOL", "sol": "SOL",
+    "xrp": "XRP", "ripple": "XRP",
+    "dogecoin": "DOGE", "doge": "DOGE",
+    "cardano": "ADA", "ada": "ADA",
+    "avalanche": "AVAX", "avax": "AVAX",
+    "chainlink": "LINK", "link": "LINK",
+    "polkadot": "DOT", "dot": "DOT",
+    "polygon": "POL", "pol": "POL",
+}
+
+_CRYPTO_REGULATORY_RE = re.compile(
+    r"\b(sec|cftc|regulat\w*|classify|classifies|security|securities|"
+    r"etf|ban|bans|banned|restrict\w*)\b",
+    re.IGNORECASE,
+)
+
+_CRYPTO_PRICE_RE = re.compile(
+    r"\b(above|below|reach|reaches|hit|hits|exceed|exceeds)\b.*?"
+    r"\$[\d,]+",
+    re.IGNORECASE,
+)
+
+_DOLLAR_AMOUNT_RE = re.compile(r"\$([\d,]+(?:\.\d+)?)")
+
+_CRYPTO_TECHNICAL_RE = re.compile(
+    r"\b(hack|hacked|exploit|exploited|upgrade|fork|forked|"
+    r"halving|merge|merged)\b",
+    re.IGNORECASE,
+)
+
+_ETF_APPROVAL_RE = re.compile(
+    r"\betf\b.*?\b(approv\w*|reject\w*|denied|deny)\b",
+    re.IGNORECASE,
+)
+
+
+def _classify_crypto(title: str) -> dict | None:
+    """Check if title is a crypto_event. Returns extracted fields or None."""
+    asset_matches = _CRYPTO_ASSET_RE.findall(title)
+    if not asset_matches:
+        return None
+
+    ticker = None
+    for match in asset_matches:
+        t = _CRYPTO_TICKER_MAP.get(match.lower())
+        if t:
+            ticker = t
+            break
+
+    if not ticker:
+        return None
+
+    is_regulatory = bool(_CRYPTO_REGULATORY_RE.search(title))
+    is_price = bool(_CRYPTO_PRICE_RE.search(title))
+    is_technical = bool(_CRYPTO_TECHNICAL_RE.search(title))
+
+    if not (is_regulatory or is_price or is_technical):
+        return None
+
+    if is_price:
+        event_category = "price_target"
+    elif is_regulatory:
+        event_category = "regulatory"
+    else:
+        event_category = "technical"
+
+    threshold = None
+    if is_price:
+        dollar_match = _DOLLAR_AMOUNT_RE.search(title)
+        if dollar_match:
+            threshold = float(dollar_match.group(1).replace(",", ""))
+
+    direction = "neutral"
+    title_lower = title.lower()
+    etf_match = _ETF_APPROVAL_RE.search(title)
+    if etf_match:
+        verb = etf_match.group(1).lower()
+        if verb.startswith("approv"):
+            direction = "positive"
+        else:
+            direction = "negative"
+    elif event_category == "price_target":
+        if re.search(r"\b(above|reach|reaches|hit|hits|exceed|exceeds)\b", title_lower):
+            direction = "positive"
+        elif re.search(r"\b(below|drop|drops|fall|falls)\b", title_lower):
+            direction = "negative"
+    elif event_category == "regulatory":
+        if re.search(r"\b(ban|bans|banned|restrict|classif(?:y|ies))\b", title_lower):
+            direction = "negative"
+        elif re.search(r"\b(approv\w*)\b", title_lower):
+            direction = "positive"
+    elif event_category == "technical":
+        if re.search(r"\b(hack|hacked|exploit|exploited)\b", title_lower):
+            direction = "negative"
+        elif re.search(r"\b(upgrade|merge|merged|halving)\b", title_lower):
+            direction = "positive"
+
+    return {
+        "crypto_asset": ticker,
+        "event_category": event_category,
+        "crypto_direction": direction,
+        "crypto_threshold": threshold,
+    }
+
+
+# ============================================================
 # HELPER FUNCTIONS
 # ============================================================
 
@@ -157,7 +276,8 @@ def classify_contract(event: NormalizedEvent) -> PoliticalContractInfo:
     3. matchup         — "Name vs Name"
     4. party_outcome   — "Democratic candidate wins TX Senate"
     5. candidate_win   — "Name wins Race"
-    6. yes_no_binary   — fallback for anything unclassifiable
+    6. crypto_event    — "Bitcoin above $150K", "SEC classify Ethereum"
+    7. yes_no_binary   — fallback for anything unclassifiable
 
     Args:
         event: A NormalizedEvent with a political contract title.
@@ -295,7 +415,25 @@ def classify_contract(event: NormalizedEvent) -> PoliticalContractInfo:
             direction=None,
         )
 
-    # 6. yes_no_binary — fallback
+    # 6. crypto_event — crypto asset + actionable keyword
+    crypto = _classify_crypto(title)
+    if crypto:
+        return PoliticalContractInfo(
+            event=event,
+            contract_type="crypto_event",
+            candidates=[],
+            party=party,
+            race=None,
+            state=state,
+            threshold=crypto["crypto_threshold"],
+            direction=crypto.get("crypto_direction"),
+            crypto_asset=crypto["crypto_asset"],
+            event_category=crypto["event_category"],
+            crypto_direction=crypto["crypto_direction"],
+            crypto_threshold=crypto["crypto_threshold"],
+        )
+
+    # 7. yes_no_binary — fallback
     return PoliticalContractInfo(
         event=event,
         contract_type="yes_no_binary",
