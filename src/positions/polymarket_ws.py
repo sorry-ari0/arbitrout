@@ -35,7 +35,7 @@ class PolymarketPriceFeed:
         self._ws = None
         self._reconnect_delay = RECONNECT_BASE_DELAY
         self._on_price_callbacks: list = []
-        self._on_trade_callbacks: list = []  # NEW: trade-level callbacks
+        self._on_trade_callbacks: list = []
 
     def get_price(self, asset_id: str) -> float | None:
         """Get latest price for an asset. Returns None if not tracked or stale."""

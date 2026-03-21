@@ -1,4 +1,8 @@
 """Tests for Kyle's lambda estimator and trade callback infrastructure."""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
 import time
 import pytest
 from unittest.mock import MagicMock
