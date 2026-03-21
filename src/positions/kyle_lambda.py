@@ -38,13 +38,11 @@ class KyleLambdaEstimator:
         self._trades: dict[str, deque] = defaultdict(
             lambda: deque(maxlen=MAX_TRADES_PER_MARKET)
         )
-        self._last_price: dict[str, float] = {}
 
     def on_trade(self, asset_id: str, price: float, size: float,
                  timestamp: float, side: str):
         """Trade callback — registered with PolymarketPriceFeed.on_trade()."""
         self._trades[asset_id].append((timestamp, price, size, side))
-        self._last_price[asset_id] = price
 
     def _prune_old(self, asset_id: str):
         """Remove trades older than LONG_WINDOW_SECONDS."""
@@ -52,15 +50,11 @@ class KyleLambdaEstimator:
         if not trades:
             return
         cutoff = time.time() - LONG_WINDOW_SECONDS
-        # Support both deque (popleft) and plain list (assigned in tests)
-        if isinstance(trades, deque):
-            while trades and trades[0][0] < cutoff:
-                trades.popleft()
-        else:
-            while trades and trades[0][0] < cutoff:
-                trades.pop(0)
+        while trades and trades[0][0] < cutoff:
+            trades.popleft()
 
-    def _compute_lambda(self, asset_id: str, window_seconds: int) -> "tuple[float, int] | None":
+    def _compute_lambda(self, asset_id: str, window_seconds: int,
+                        min_trades: int = MIN_TRADES_SHORT) -> "tuple[float, int] | None":
         """Compute λ via OLS: λ = Σ(Q_t · Δp_t) / Σ(Q_t²). Returns (λ, n) or None."""
         self._prune_old(asset_id)
         trades = self._trades.get(asset_id)
@@ -70,7 +64,7 @@ class KyleLambdaEstimator:
         cutoff = time.time() - window_seconds
         window_trades = [(ts, p, s, side) for ts, p, s, side in trades if ts >= cutoff]
 
-        if len(window_trades) < MIN_TRADES_SHORT:
+        if len(window_trades) < min_trades:
             return None
 
         sum_qd = 0.0
@@ -155,8 +149,8 @@ class KyleLambdaEstimator:
         if asset_id is None:
             return neutral
 
-        short_result = self._compute_lambda(asset_id, SHORT_WINDOW_SECONDS)
-        long_result = self._compute_lambda(asset_id, LONG_WINDOW_SECONDS)
+        short_result = self._compute_lambda(asset_id, SHORT_WINDOW_SECONDS, MIN_TRADES_SHORT)
+        long_result = self._compute_lambda(asset_id, LONG_WINDOW_SECONDS, MIN_TRADES_LONG)
 
         if short_result is None or long_result is None:
             n_short = short_result[1] if short_result else 0
