@@ -90,7 +90,9 @@ class InsiderTracker:
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
                 if data.get("wallets") and data.get("updated_at", 0) > 0:
-                    self._conviction_watchlist = data["wallets"]
+                    merged = dict(HIGH_CONVICTION_WATCHLIST)
+                    merged.update(data["wallets"])
+                    self._conviction_watchlist = merged
                     logger.info("Loaded refreshed watchlist: %d wallets (updated %s)",
                                 len(self._conviction_watchlist),
                                 data.get("updated_at_str", "unknown"))

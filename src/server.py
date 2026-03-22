@@ -240,9 +240,9 @@ def _migrate_legacy_packages(pm):
         # Adjust exit rules for realistic ceilings on high-entry NO contracts
         for rule in pkg.get("exit_rules", []):
             if rule["type"] == "target_profit":
-                rule["params"]["threshold"] = 10  # was 25%, realistic for >$0.85 NO
+                rule["params"]["target_pct"] = 10  # was 25%, realistic for >$0.85 NO
             elif rule["type"] == "stop_loss":
-                rule["params"]["threshold"] = -60  # was -40%, avoid premature exit
+                rule["params"]["stop_pct"] = -60  # was -40%, avoid premature exit
             elif rule["type"] == "trailing_stop":
                 rule["active"] = False  # trailing stops wrong for binary instruments
 
@@ -550,8 +550,9 @@ async def lifespan(app: FastAPI):
                                     if await _eval_log.resolve_via_polymarket(entry, client):
                                         resolved_count += 1
                                     await asyncio.sleep(0.5)  # Rate limit: 2 req/s
-                                except Exception:
-                                    pass
+                                except Exception as exc:
+                                    logger.debug("Backfill entry %s failed: %s",
+                                                 entry.get("opportunity_id", "?"), exc)
                         logger.info("Eval backfill: checked %d/%d unresolved, resolved %d",
                                      min(50, len(unresolved)), len(unresolved), resolved_count)
                 except Exception as e:
