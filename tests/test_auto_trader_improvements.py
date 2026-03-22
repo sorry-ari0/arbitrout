@@ -847,3 +847,25 @@ class TestNewsThresholds:
     def test_news_daily_cap_exists(self):
         from positions.news_scanner import DAILY_TRADE_CAP
         assert DAILY_TRADE_CAP == 5
+
+
+class TestMultiOutcomeArbHoldToResolution:
+    """multi_outcome_arb is guaranteed profit — should hold to resolution."""
+
+    def test_multi_outcome_arb_has_hold_to_resolution(self):
+        """multi_outcome_arb handler must set _hold_to_resolution = True."""
+        from positions.auto_trader import AutoTrader
+        import inspect
+        source = inspect.getsource(AutoTrader._scan_and_trade)
+        lines = source.split("\n")
+        in_multi_outcome = False
+        found_hold = False
+        for line in lines:
+            if "multi-outcome arb" in line.lower() and "guaranteed" in line.lower():
+                in_multi_outcome = True
+            if in_multi_outcome and "_hold_to_resolution" in line:
+                found_hold = True
+                break
+            if in_multi_outcome and "execute_package" in line:
+                break
+        assert found_hold, "multi_outcome_arb handler must set _hold_to_resolution = True"

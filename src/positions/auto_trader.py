@@ -873,10 +873,11 @@ class AutoTrader:
                         expiry=opp.get("expiry", "2026-12-31")[:10],
                     ))
 
-                # Multi-outcome arb: guaranteed profit — only exit on safety
+                # Multi-outcome arb: guaranteed profit — hold to resolution
                 # Widened from -15% to -35%: trade journal showed tight stops
                 # cut arb positions before resolution (88.6% loss rate)
                 pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -35}))
+                pkg["_hold_to_resolution"] = True
 
                 if not pkg["legs"]:
                     self._trades_skipped += 1
