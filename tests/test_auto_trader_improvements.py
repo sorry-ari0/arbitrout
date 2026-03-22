@@ -620,13 +620,13 @@ class TestPortfolioCorrelation:
         assert trader._check_concentration("BTC price", 50.0, 0.0, {}) is True
 
     def test_concentration_blocks_overweight(self):
-        """If crypto is already 30%, adding more crypto should be blocked."""
+        """If crypto is already 50%, adding more crypto should be blocked."""
         from positions.auto_trader import AutoTrader
         pm = _make_mock_pm()
         trader = AutoTrader(pm)
-        # 100 total, 30 in crypto = 30%. Adding 10 more crypto = 40/110 = 36% > 30%
+        # 100 total, 50 in crypto = 50%. Adding 10 more crypto = 60/110 = 54.5% > 50%
         assert trader._check_concentration(
-            "BTC target $200k", 10.0, 100.0, {"crypto": 30.0}
+            "BTC target $200k", 10.0, 100.0, {"crypto": 50.0}
         ) is False
 
     def test_concentration_allows_different_category(self):
@@ -640,7 +640,7 @@ class TestPortfolioCorrelation:
 
     def test_max_concentration_constant(self):
         from positions.auto_trader import MAX_CATEGORY_CONCENTRATION
-        assert MAX_CATEGORY_CONCENTRATION == 0.30
+        assert MAX_CATEGORY_CONCENTRATION == 0.50
 
 
 class TestSignalDecay:
