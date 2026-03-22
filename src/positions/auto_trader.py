@@ -1526,6 +1526,22 @@ class AutoTrader:
                         pkg["exit_rules"].append(create_exit_rule("trailing_stop", {"current": 35, "bound_min": 15, "bound_max": 50}))
                     pkg["_min_hold_until"] = time.time() + 86400
 
+            # Hold to resolution for short-expiry prediction markets.
+            # Research: trailing stops (-$98) and time exits (-$39) destroyed value.
+            # Markets with <14 days to expiry should resolve naturally.
+            HOLD_TO_RESOLUTION_MAX_DAYS = 14
+            if days_to_expiry <= HOLD_TO_RESOLUTION_MAX_DAYS:
+                pkg["_hold_to_resolution"] = True
+            # Also hold favorites (>$0.85) regardless of expiry.
+            # For pure_prediction, side_price is the directional entry price.
+            # For cross_platform_arb/synthetic, those are already hold-to-resolution
+            # above, but we check buy_yes_price as a reasonable proxy.
+            _entry_for_favorite_check = (
+                side_price if strategy == "pure_prediction" else buy_yes_price
+            )
+            if _entry_for_favorite_check >= 0.85:
+                pkg["_hold_to_resolution"] = True
+
             # Use limit orders for 0% maker fees on entry
             pkg["_use_limit_orders"] = True
             pkg["_category"] = self._detect_category(opp_title)
