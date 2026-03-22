@@ -2,7 +2,7 @@
 
 **Goal:** Eliminate fee drag (currently $57.40 on $25.02 net loss — fees are 2.3x the actual losses) by switching all exits to 0% maker GTC limit orders, removing premature exit triggers, and defaulting to hold-to-resolution for binary prediction markets.
 
-**Architecture:** Bracket-only exits + hold-to-resolution default. Every package gets GTC limit sell brackets at entry. No trailing stops, no AI exits, no mechanical price-based triggers. Safety overrides use limit orders first. Per-category fee model replaces the hardcoded 2% taker assumption.
+**Architecture:** Bracket-only exits + hold-to-resolution default. Standard prediction packages get GTC limit sell brackets at entry. Guaranteed-profit strategies (arb, synthetic, high-probability) use hold-to-resolution. No trailing stops, no AI exits, no mechanical price-based triggers besides target_hit. Safety overrides use limit orders first. Per-category fee model replaces the hardcoded 2% taker assumption.
 
 **Tech Stack:** Python, existing modules (no new files or classes).
 
@@ -15,20 +15,22 @@ Strip exit logic down to three paths:
 | Exit Path | Trigger | Order Type | Fee |
 |---|---|---|---|
 | Bracket target | Price hits GTC limit sell | Maker | 0% |
-| Safety override | Spread inversion, political resolution, expired contract | GTC limit (fallback to FOK for expiry) | 0% (2% fallback) |
+| Bracket stop (monitored) | Price drops to stop level, places limit sell | Maker | 0% |
+| Safety override | Spread inversion, political resolution | GTC limit (fallback to FOK after timeout) | 0% (2% fallback) |
 | Resolution | Contract settles at $0/$1 | N/A | 0% |
 
 ### What gets removed/disabled
 
-- `trailing_stop` removed from `_auto_execute_triggers` mechanical execution list — the one-line change from `("target_hit", "stop_loss", "trailing_stop")` to `("target_hit",)`
-- `stop_loss` removed from mechanical execution — no longer auto-executes
+- `trailing_stop` removed from `_auto_execute_triggers` mechanical execution list — the one-line change from `("target_hit", "stop_loss", "trailing_stop")` to `("target_hit",)`. Note: trailing_stop is already functionally disabled via `_AI_EXIT_TRIGGERS` when `AI_EXITS_ENABLED = False` (line 19). This change is defense-in-depth.
+- `stop_loss` removed from mechanical (heuristic-driven FOK) execution — no longer auto-executes via the exit engine's `_auto_execute_triggers`. However, bracket_manager's monitored stop level still functions (places a 0% maker limit sell, not a 2% taker FOK).
 - AI exits remain `AI_EXITS_ENABLED=False` (already done, unchanged)
 - `time_decay`, `negative_drift` triggers still evaluate for logging/monitoring but never execute
 
 ### What stays
 
 - `target_hit` via bracket GTC orders (0% maker fee)
-- Safety overrides: `spread_inversion`, `political_event_resolved` (all legs), `expired_contract`
+- Bracket-level monitored stops — `bracket_manager.check_brackets()` still monitors stop price levels and places maker limit sells (0% fee) when triggered. This is different from the heuristic `stop_loss` which used FOK (2% taker).
+- Safety overrides: `spread_inversion`, `political_event_resolved` (all legs)
 - 24h minimum hold period (already implemented, unchanged)
 - Bracket trail adjustment — rolls target up as price rises (already implemented in bracket_manager)
 - `evaluate_heuristics()` continues running — triggers are logged/suppressed, not executed
@@ -57,37 +59,43 @@ Replace the hardcoded 0% maker / 2% taker assumption with category-aware fee rat
 
 ### Polymarket fee curve formula
 
+The fee **rate** (dimensionless) for a given price:
 ```
-fee = quantity * price * feeRate * (price * (1 - price))^exponent
+taker_fee_rate = feeRate * (price * (1 - price))^exponent
 ```
 
-Peak fee at price=0.50, drops to near-zero at extremes ($0.01, $0.99).
+The actual dollar fee when selling: `fee = quantity * price * taker_fee_rate`
+
+Peak fee rate at price=0.50, drops to near-zero at extremes ($0.01, $0.99). Verified: crypto at p=0.50 → `0.25 * (0.25)^2 = 1.5625%`, crypto at p=0.10 → `0.25 * (0.09)^2 = 0.2025%`. These match Polymarket's published rates. The auto_trader's `_detect_category()` returns generic "crypto" or "sports" — we use a single feeRate/exponent pair per category (no sub-category detection needed since the auto_trader doesn't distinguish 5-min from 15-min crypto markets).
 
 ### Implementation
 
-Add a `get_taker_fee_rate(category: str, price: float) -> float` function to `paper_executor.py`. The auto_trader already classifies markets via `_detect_category()` — pass category through the package to the executor.
+Add a `get_taker_fee_rate(category: str, price: float) -> float` function to `paper_executor.py` that returns the dimensionless rate. The auto_trader already classifies markets via `_detect_category()` — store category on the package dict at creation time (`pkg["_category"] = self._detect_category(opp_title)`). The position_manager reads it from the package when calling executor.sell() for FOK fallbacks.
 
 Since we're moving to all-maker exits, taker fees only matter for:
-- The rare FOK safety fallback on expired contracts
+- The rare FOK safety fallback on safety overrides
 - Trade selection math (deciding whether spread > fee threshold)
 
 `ROUND_TRIP_FEE_PCT = 0.0` in auto_trader remains correct for maker-only round trips on non-crypto markets. For crypto markets, the auto_trader should compute the actual taker fee cost when evaluating whether a spread is profitable enough.
 
 ---
 
-## 3. Bracket Orders for All Packages
+## 3. Bracket Orders & Hold-to-Resolution
 
 ### Current state
 
-Only some strategy types get `_use_brackets = True`: `portfolio_no`, `multi_outcome_arb`, `weather_forecast`, `political_synthetic`. Pure prediction and `cross_platform_arb` packages often miss brackets.
+Standard prediction packages (lines 1462-1465) already get `_use_brackets = True` when `_hold_to_resolution` is not set. Hold-to-resolution packages (cross_platform_arb, synthetic_derivative, high-probability pure_prediction) intentionally skip brackets and resolve at $0/$1.
+
+The gap: `multi_outcome_arb` handler (line 876-885) has neither `_use_brackets` nor `_hold_to_resolution`. It also has no `target_profit` exit rule — only `stop_loss`. Since multi_outcome_arb is a guaranteed-profit strategy (sum of outcomes < $1), it should use hold-to-resolution.
 
 ### New behavior
 
-Every package gets bracket orders at creation:
+Two categories:
 
-1. **Target bracket** — GTC limit sell at `entry_price * (1 + target_pct)`. For a 50% target on $0.60 entry, limit sell sits at $0.90. Fills at 0% maker fee.
-2. **No stop bracket** — Stops removed entirely. If thesis is wrong, contract resolves at $0. Better than paying 2% taker to exit early on a binary instrument that might still resolve in our favor.
-3. **Trail adjustment** — Existing bracket_manager logic rolls target up as price rises. Unchanged.
+1. **Standard prediction packages** — Already get `_use_brackets = True` (line 1464). Bracket target GTC sell at `entry_price * (1 + target_pct)`. Bracket-level monitored stop places a maker limit sell (0% fee) if price drops to stop level. Trail adjustment rolls target up as price rises. **No change needed.**
+2. **Guaranteed-profit packages** (multi_outcome_arb) — Add `_hold_to_resolution = True`. These resolve naturally at $0/$1 with zero fees. bracket_manager.place_brackets() already skips hold_to_resolution packages (line 34-36).
+
+Hold-to-resolution packages: cross_platform_arb, synthetic_derivative, high-probability pure_prediction (already set), and now multi_outcome_arb.
 
 ### When brackets don't fill
 
@@ -96,9 +104,9 @@ Every package gets bracket orders at creation:
 
 ### Changes
 
-- `auto_trader.py`: Set `_use_brackets = True` on ALL packages in every strategy handler, not just selected ones
+- `auto_trader.py` line 879 (multi_outcome_arb handler): Add `pkg["_hold_to_resolution"] = True` — guaranteed profit resolves at $1, no bracket needed
 - `exit_engine.py`: Already skips heuristic-driven exits for bracketed packages (line 596: `if pkg.get("_brackets"): continue`)
-- `position_manager.py`: Ensure `execute_package()` always invokes bracket_manager when `_use_brackets` is set (already does at lines 256-260, just needs all packages to have the flag)
+- `position_manager.py`: No changes — `execute_package()` already calls bracket_manager when `_use_brackets` is set (lines 256-260), and bracket_manager already skips hold_to_resolution
 
 ---
 
@@ -110,45 +118,47 @@ Safety overrides execute via `exit_leg()` with FOK (2% taker fee).
 
 ### New behavior
 
-Safety overrides try GTC limit first, fall back to FOK only if time-critical:
+Safety overrides try GTC limit first, fall back to FOK after timeout:
 
 | Safety Trigger | Order Type | Rationale |
 |---|---|---|
 | `spread_inversion` | GTC limit, 5min timeout then FOK | Mispricing — resting sell may fill quickly |
 | `political_event_resolved` (all legs) | GTC limit, 5min timeout then FOK | Known prices — limit at $0.99/$0.01 fills fast |
-| `expired_contract` | FOK direct | Contract about to delist — no time for limit |
+
+Note: `expired_contract` does not exist as a trigger in the codebase. The existing expiry triggers (`time_24h` #10, `time_6h` #11) are intentionally soft review triggers, not safety overrides — force-exiting before expiry lost $38.88 across 25 trades (per exit_engine docstring). No change to expiry behavior.
 
 ### Implementation
 
 Modify safety override loop in `exit_engine.py` (lines 583-593):
-- For non-expiry safety triggers: call `exit_leg(use_limit=True)` instead of `exit_leg()`
-- Add a timeout mechanism: if pending limit order hasn't filled within 5 minutes, cancel and FOK
+- For safety triggers: call `exit_leg(use_limit=True)` instead of `exit_leg()`
 - The existing `_place_limit_sell` → `resolve_pending_order` path handles the limit logic
-- `expired_contract` continues using FOK (no change)
+- **Timeout:** The existing `resolve_pending_order` has a hardcoded 60-second timeout at line 555 of `position_manager.py`. Change this to accept a `timeout` parameter: default 60s for normal exits, 300s (5 minutes) for safety overrides. Pass the timeout through the pending order metadata (`pending["timeout"] = 300` for safety, `60` for normal).
 
 ---
 
 ## 5. File Changes
 
 ### `exit_engine.py`
-- Line 697: Change `("target_hit", "stop_loss", "trailing_stop")` to `("target_hit",)` — removes mechanical trailing_stop and stop_loss execution
-- Lines 583-593: Safety overrides pass `use_limit=True` for non-expiry triggers
-- Add 5-minute timeout check for pending safety limit orders (new logic in the scan loop)
+- Line 697: Change `("target_hit", "stop_loss", "trailing_stop")` to `("target_hit",)` — removes mechanical trailing_stop and stop_loss execution from `_auto_execute_triggers`. Defense-in-depth: trailing_stop is already blocked by `_AI_EXIT_TRIGGERS` when `AI_EXITS_ENABLED = False`, but this ensures it stays disabled even if AI exits are re-enabled later.
+- Lines 583-593: Safety overrides pass `use_limit=True` for all safety triggers (`spread_inversion`, `political_event_resolved`)
 
 ### `auto_trader.py`
-- Every strategy handler: ensure `pkg["_use_brackets"] = True` is set. Several handlers already do this; the remaining ones (pure_prediction at line 885, cross_platform_arb at line 1462) need it added.
+- Line 879 (multi_outcome_arb handler): Add `pkg["_hold_to_resolution"] = True` — guaranteed arb profit resolves at $1
+- All strategy handlers: Add `pkg["_category"] = self._detect_category(opp_title)` to store category on the package for fee model lookups
 
 ### `paper_executor.py`
-- Add `get_taker_fee_rate(category: str, price: float) -> float` function implementing the Polymarket fee curve
+- Add `get_taker_fee_rate(category: str, price: float) -> float` function returning the dimensionless fee rate using the Polymarket fee curve
 - Update `sell()` method to accept optional `category` parameter and use category-aware fee rates instead of the flat `self.sell_fee_rate`
 - `sell_limit()` unchanged — already returns 0% maker fee
 
 ### `position_manager.py`
-- Pass market category through to executor sell calls (for the rare FOK fallback)
+- `_exit_leg_locked()`: Read `pkg.get("_category")` and pass to `executor.sell(category=...)` for FOK exits
+- `resolve_pending_order()` line 555: Change hardcoded `> 60` timeout to read from `pending.get("timeout", 60)` — allows safety overrides to set 300s timeout
+- `_place_limit_sell()`: Accept optional `timeout` param and store in pending order metadata
 - No structural changes — `execute_package` already calls bracket_manager when `_use_brackets` is set
 
 ### No changes needed
-- `bracket_manager.py` — already handles GTC target placement, trail adjustment, and fill resolution correctly
+- `bracket_manager.py` — already handles GTC target placement, monitored stop levels (0% maker), trail adjustment, and fill resolution correctly. Bracket-level stops (monitored price → maker limit sell) remain active — these are distinct from heuristic stop_loss (FOK taker) which is being removed.
 - `trade_journal.py` — records whatever fees come through, no changes
 - `news_scanner.py` — uses same position_manager path, benefits automatically
 - `btc_sniper.py` — separate crypto system, not affected
