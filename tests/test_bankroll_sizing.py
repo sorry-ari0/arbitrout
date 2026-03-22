@@ -134,3 +134,34 @@ class TestBankrollDerivedLimits:
         # Kelly returns min_trade_size since floor > max at small bankrolls
         assert sized >= trader._min_trade_size
         assert sized == trader._min_trade_size
+
+
+class TestNewsScannerBankroll:
+    def _make_scanner(self, bankroll=20.0, pnl=0.0):
+        from positions.news_scanner import NewsScanner
+        pm = MagicMock()
+        journal = MagicMock()
+        journal.get_cumulative_pnl = MagicMock(return_value=pnl)
+        pm.trade_journal = journal
+        pm.list_packages = MagicMock(return_value=[])
+        news_ai = MagicMock()
+        scanner = NewsScanner(position_manager=pm, news_ai=news_ai,
+                              initial_bankroll=bankroll)
+        return scanner
+
+    def test_news_max_trade_scales(self):
+        scanner = self._make_scanner(bankroll=20.0)
+        assert scanner._max_trade_size == pytest.approx(2.0)
+
+    def test_news_min_trade_has_floor(self):
+        scanner = self._make_scanner(bankroll=20.0)
+        assert scanner._min_trade_size == 0.50
+
+    def test_news_max_exposure_is_full_bankroll(self):
+        scanner = self._make_scanner(bankroll=20.0)
+        assert scanner._max_total_exposure == pytest.approx(20.0)
+
+    def test_news_limits_grow_with_bankroll(self):
+        scanner = self._make_scanner(bankroll=20.0, pnl=80.0)
+        scanner._refresh_limits()
+        assert scanner._max_trade_size == pytest.approx(10.0)

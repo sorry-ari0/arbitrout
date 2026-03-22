@@ -32,15 +32,13 @@ from .position_manager import create_package, create_leg, create_exit_rule
 
 logger = logging.getLogger("positions.news_scanner")
 
-# ── Position limits ───────────────────────────────────────────────────────────
-# Global cap: $2000 total across auto_trader + news scanner combined.
-# News scanner reserves 3 slots and $600 from the global $2000 budget.
-# These limits are checked against the SHARED position_manager, so the
-# effective news budget is: min(MAX_TOTAL_EXPOSURE, global_cap - auto_exposure)
-MAX_TRADE_SIZE = 200.0
-MIN_TRADE_SIZE = 5.0
-MAX_CONCURRENT = 10          # Global max (auto_trader capped at 7)
-MAX_TOTAL_EXPOSURE = 2000.0  # Global max (auto_trader capped at $1400)
+# ── Position limits (bankroll-relative) ────────────────────────────────────────
+# Ratios derived from the original $2000 defaults so limits scale with bankroll.
+_NEWS_RATIO_MAX_TRADE = 0.10      # $200 / $2000
+_NEWS_RATIO_MIN_TRADE = 0.0025    # $5 / $2000
+_NEWS_MIN_TRADE_FLOOR = 0.50
+_NEWS_RATIO_MAX_EXPOSURE = 1.0    # Global cap = full bankroll
+MAX_CONCURRENT = 10               # Global max (auto_trader capped at 7)
 
 # ── Timing ───────────────────────────────────────────────────────────────────
 COOLDOWN_SECONDS = 15 * 60      # 15 min per-market cooldown
@@ -82,12 +80,14 @@ class NewsScanner:
     """Background news scanner that monitors RSS feeds and triggers AI-driven trades."""
 
     def __init__(self, position_manager, news_ai, auto_trader=None,
-                 decision_logger=None, interval: float = 150.0):
+                 decision_logger=None, interval: float = 150.0,
+                 initial_bankroll: float = 2000.0):
         self.pm = position_manager
         self.news_ai = news_ai
         self.auto_trader = auto_trader
         self.dlog = decision_logger
         self.interval = interval
+        self._initial_bankroll = initial_bankroll
 
         self._task: asyncio.Task | None = None
         self._running = False
@@ -111,8 +111,26 @@ class NewsScanner:
         self._trades_executed = 0
         self._cycles_run = 0
 
+        # Bankroll-derived limits (refreshed each cycle)
+        self._refresh_limits()
+
         # Load persisted state
         self._load_cache()
+
+    # ── Bankroll ───────────────────────────────────────────────────────────
+
+    def _get_current_bankroll(self) -> float:
+        """Return initial bankroll + cumulative P&L from the trade journal."""
+        if self.pm.trade_journal:
+            return self._initial_bankroll + self.pm.trade_journal.get_cumulative_pnl()
+        return self._initial_bankroll
+
+    def _refresh_limits(self):
+        """Recompute position limits from the current bankroll."""
+        bankroll = self._get_current_bankroll()
+        self._max_trade_size = round(bankroll * _NEWS_RATIO_MAX_TRADE, 2)
+        self._min_trade_size = round(max(_NEWS_MIN_TRADE_FLOOR, bankroll * _NEWS_RATIO_MIN_TRADE), 2)
+        self._max_total_exposure = round(bankroll * _NEWS_RATIO_MAX_EXPOSURE, 2)
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -162,6 +180,8 @@ class NewsScanner:
 
     async def _scan_cycle(self):
         """One full scan cycle: fetch RSS → dedup → AI pass 1 → AI pass 2 → execute."""
+        self._refresh_limits()
+
         if not feedparser:
             logger.warning("News scanner: feedparser not installed, skipping")
             return
@@ -365,7 +385,7 @@ class NewsScanner:
             portfolio_state = {
                 "open_positions": len(open_pkgs),
                 "total_exposure": round(sum(p.get("total_cost", 0) for p in open_pkgs), 2),
-                "max_exposure": MAX_TOTAL_EXPOSURE,
+                "max_exposure": self._max_total_exposure,
                 "max_concurrent": MAX_CONCURRENT,
                 "daily_trades_today": self.daily_trades.get(self._today_str(), 0),
                 "daily_cap": DAILY_TRADE_CAP,
@@ -518,16 +538,16 @@ class NewsScanner:
         if market_id:
             self.cooldowns[market_id] = time.time()
 
-        # Size: confidence/10 * MAX_TRADE_SIZE
-        trade_size = (confidence / 10) * MAX_TRADE_SIZE
-        trade_size = max(MIN_TRADE_SIZE, min(trade_size, MAX_TRADE_SIZE))
+        # Size: confidence/10 * max_trade_size
+        trade_size = (confidence / 10) * self._max_trade_size
+        trade_size = max(self._min_trade_size, min(trade_size, self._max_trade_size))
 
         # Clamp to remaining budget
         open_pkgs = self.pm.list_packages("open")
         total_exposure = sum(p.get("total_cost", 0) for p in open_pkgs)
-        remaining_budget = MAX_TOTAL_EXPOSURE - total_exposure
+        remaining_budget = self._max_total_exposure - total_exposure
         trade_size = min(trade_size, remaining_budget)
-        if trade_size < MIN_TRADE_SIZE:
+        if trade_size < self._min_trade_size:
             logger.info("News scanner: insufficient budget ($%.2f remaining)", remaining_budget)
             return
 
@@ -771,7 +791,7 @@ class NewsScanner:
         if len(open_pkgs) >= MAX_CONCURRENT:
             return True
         total_exposure = sum(p.get("total_cost", 0) for p in open_pkgs)
-        if total_exposure >= MAX_TOTAL_EXPOSURE:
+        if total_exposure >= self._max_total_exposure:
             return True
         return False
 
