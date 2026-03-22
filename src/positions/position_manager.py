@@ -379,12 +379,13 @@ class PositionManager:
         return None  # Success — caller finalizes
 
     async def exit_leg(self, pkg_id: str, leg_id: str, trigger: str = "manual",
-                       use_limit: bool = False) -> dict:
+                       use_limit: bool = False, timeout: int = 60) -> dict:
         """Exit (sell) a single leg. If use_limit=True, places a GTC limit order
-        and returns {"pending": True, "order_id": ...} — caller resolves later."""
+        and returns {"pending": True, "order_id": ...} — caller resolves later.
+        timeout: seconds before falling back to FOK (60s normal, 300s safety)."""
         async with self._lock:
             if use_limit:
-                return await self._place_limit_sell(pkg_id, leg_id, trigger)
+                return await self._place_limit_sell(pkg_id, leg_id, trigger, timeout=timeout)
             return await self._exit_leg_locked(pkg_id, leg_id, trigger)
 
     async def _exit_leg_locked(self, pkg_id: str, leg_id: str, trigger: str = "manual") -> dict:
@@ -445,7 +446,8 @@ class PositionManager:
             return {"success": True, "tx_id": result.tx_id}
         return {"success": False, "error": result.error}
 
-    async def _place_limit_sell(self, pkg_id: str, leg_id: str, trigger: str) -> dict:
+    async def _place_limit_sell(self, pkg_id: str, leg_id: str, trigger: str,
+                                timeout: int = 60) -> dict:
         """Place a GTC limit sell order. Does NOT finalize the exit — returns pending."""
         pkg = self.packages.get(pkg_id)
         if not pkg:
@@ -487,6 +489,7 @@ class PositionManager:
             "platform": leg["platform"],
             "trigger": trigger,
             "limit_price": limit_price,
+            "timeout": timeout,
         }
         self.save()
         logger.info("Placed limit sell for %s @ %.4f (order %s)", leg_id, limit_price, result.tx_id)
@@ -554,7 +557,7 @@ class PositionManager:
                 self.save()
                 return {"success": True, "exit_order_type": "limit_partial_fok"}
 
-            elif time.time() - pending["placed_at"] > 60:
+            elif time.time() - pending["placed_at"] > pending.get("timeout", 60):
                 await executor.cancel_order(order_id)
                 del pkg["_pending_limit_orders"][leg_id]
                 if not pkg["_pending_limit_orders"]:

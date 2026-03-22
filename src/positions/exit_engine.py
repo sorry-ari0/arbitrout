@@ -588,7 +588,9 @@ class ExitEngine:
                 try:
                     for leg in pkg["legs"]:
                         if leg["status"] == "open":
-                            await self.pm.exit_leg(pkg["id"], leg["leg_id"], trigger=trigger["name"])
+                            await self.pm.exit_leg(pkg["id"], leg["leg_id"],
+                                                   trigger=trigger["name"], use_limit=True,
+                                                   timeout=300)
                 finally:
                     pkg.pop("_exiting", None)
 
@@ -694,20 +696,18 @@ class ExitEngine:
     async def _auto_execute_triggers(self, pkg: dict, triggers: list[dict]):
         """Auto-execute mechanical triggers when AI is unavailable."""
         for trigger in triggers:
-            if trigger["name"] in ("target_hit", "stop_loss", "trailing_stop"):
+            if trigger["name"] in ("target_hit",):
                 logger.info("Auto-executing %s on %s: %s",
                             trigger["name"], pkg["id"], trigger["details"])
                 if self.dlog:
                     self.dlog.log_auto_execute(pkg["id"], trigger["name"],
                                                trigger.get("action", "full_exit"), trigger["details"])
                 if trigger.get("action") == "full_exit":
-                    # Use maker (limit) orders for non-stop exits (0% fee)
-                    is_stop = trigger["name"] == "stop_loss"
                     for leg in pkg["legs"]:
                         if leg["status"] == "open":
                             await self.pm.exit_leg(pkg["id"], leg["leg_id"],
                                 trigger=f"auto:{trigger['name']}",
-                                use_limit=not is_stop)
+                                use_limit=True)
             elif trigger["name"] == "partial_profit":
                 logger.info("Auto-executing partial_profit on %s: %s", pkg["id"], trigger["details"])
                 if self.dlog:
