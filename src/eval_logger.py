@@ -248,3 +248,71 @@ class EvalLogger:
             if e.get("opportunity_id") not in backfills:
                 unresolved.append(e)
         return unresolved
+
+    async def resolve_via_polymarket(self, entry: dict, http_client) -> bool:
+        """Check if a skipped opportunity's market has resolved on Polymarket.
+
+        Queries Polymarket Gamma API for the condition. If resolved, calls
+        backfill_outcome with the actual result.
+
+        Returns True if resolved and backfilled, False otherwise.
+        """
+        markets = entry.get("markets") or []
+        if not markets:
+            return False
+
+        condition_id = None
+        for m in markets:
+            if m.get("platform") == "polymarket":
+                condition_id = m.get("condition_id") or m.get("asset_id", "").split(":")[0]
+                break
+        if not condition_id:
+            return False
+
+        try:
+            resp = await http_client.get(
+                f"https://gamma-api.polymarket.com/markets",
+                params={"condition_id": condition_id},
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                return False
+
+            data = resp.json()
+            if not data:
+                return False
+
+            market = data[0] if isinstance(data, list) else data
+            if not market.get("closed"):
+                return False
+
+            try:
+                outcome_prices = json.loads(market.get("outcomePrices", "[0,0]"))
+                resolution_price = float(outcome_prices[0])
+            except (json.JSONDecodeError, IndexError, TypeError):
+                return False
+
+            prices_at_decision = entry.get("prices_at_decision", {})
+            entry_yes = prices_at_decision.get("yes", 0.5)
+
+            if entry_yes < 0.5:
+                pnl_pct = round((resolution_price - entry_yes) / entry_yes * 100, 2) if entry_yes > 0 else 0
+            else:
+                entry_no = 1 - entry_yes
+                resolution_no = 1 - resolution_price
+                pnl_pct = round((resolution_no - entry_no) / entry_no * 100, 2) if entry_no > 0 else 0
+
+            outcome = "win" if pnl_pct > 0 else ("loss" if pnl_pct < 0 else "flat")
+
+            self.backfill_outcome(
+                opportunity_id=entry["opportunity_id"],
+                actual_pnl_pct=pnl_pct,
+                actual_outcome=outcome,
+                resolution_date=market.get("endDate", ""),
+                prices_at_resolution={"resolution_price": resolution_price},
+            )
+            return True
+        except Exception as e:
+            logger.debug("Polymarket resolution check failed for %s: %s",
+                         entry.get("opportunity_id"), e)
+            return False

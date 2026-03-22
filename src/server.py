@@ -208,6 +208,54 @@ async def _auto_scan_loop():
         await asyncio.sleep(10)
 
 
+def _migrate_legacy_packages(pm):
+    """One-time startup migration for packages created before the fee-elimination overhaul.
+
+    Legacy packages lack _category, _hold_to_resolution, and _use_limit_orders flags.
+    They also have exit rules tuned for the old fee model (25% target, -40% stop, active
+    trailing stop) which are unrealistic for >$0.85 NO contracts with max 9-12% upside.
+    """
+    try:
+        from positions.auto_trader import CATEGORY_KEYWORDS
+    except ImportError:
+        CATEGORY_KEYWORDS = {}
+
+    def detect_category(title: str) -> str:
+        title_lower = title.lower()
+        for category, keywords in CATEGORY_KEYWORDS.items():
+            if any(kw in title_lower for kw in keywords):
+                return category
+        return "other"
+
+    migrated = 0
+    for pkg in pm.list_packages("open"):
+        if pkg.get("_hold_to_resolution") is not None:
+            continue  # Already has new flags — skip
+
+        name = pkg.get("name", "")
+        pkg["_category"] = detect_category(name)
+        pkg["_hold_to_resolution"] = True
+        pkg["_use_limit_orders"] = True
+
+        # Adjust exit rules for realistic ceilings on high-entry NO contracts
+        for rule in pkg.get("exit_rules", []):
+            if rule["type"] == "target_profit":
+                rule["params"]["threshold"] = 10  # was 25%, realistic for >$0.85 NO
+            elif rule["type"] == "stop_loss":
+                rule["params"]["threshold"] = -60  # was -40%, avoid premature exit
+            elif rule["type"] == "trailing_stop":
+                rule["active"] = False  # trailing stops wrong for binary instruments
+
+        pkg["updated_at"] = time.time()
+        migrated += 1
+        logger.info("Migrated legacy package %s (%s): category=%s, hold_to_resolution=True",
+                     pkg["id"], name, pkg["_category"])
+
+    if migrated:
+        pm.save()
+        logger.info("Migrated %d legacy packages to post-fee-fix format", migrated)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -326,6 +374,9 @@ async def lifespan(app: FastAPI):
                                 executor.balance -= leg_cost
                 rebuilt = sum(len(e.positions) for e in executors.values() if hasattr(e, 'positions'))
                 logger.info("Rebuilt %d paper positions from %d open packages", rebuilt, len(pm.list_packages("open")))
+
+            # Migrate legacy packages missing post-fee-fix flags (2026-03-22)
+            _migrate_legacy_packages(pm)
 
             # AI advisor always created — checks for API keys dynamically
             # Live: Anthropic → Groq → Gemini → OpenRouter
@@ -492,7 +543,17 @@ async def lifespan(app: FastAPI):
                 try:
                     unresolved = _eval_log.get_unresolved_skips()
                     if unresolved:
-                        logger.info("Eval backfill: %d unresolved skipped opportunities", len(unresolved))
+                        resolved_count = 0
+                        async with httpx.AsyncClient() as client:
+                            for entry in unresolved[:50]:  # Batch limit: 50 per hour
+                                try:
+                                    if await _eval_log.resolve_via_polymarket(entry, client):
+                                        resolved_count += 1
+                                    await asyncio.sleep(0.5)  # Rate limit: 2 req/s
+                                except Exception:
+                                    pass
+                        logger.info("Eval backfill: checked %d/%d unresolved, resolved %d",
+                                     min(50, len(unresolved)), len(unresolved), resolved_count)
                 except Exception as e:
                     logger.warning("Eval backfill error: %s", e)
         _backfill_task = asyncio.create_task(_backfill_loop())
