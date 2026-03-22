@@ -25,7 +25,7 @@ PORTFOLIO_EXPOSURE_CAP = 0.40  # Kelly portfolio rule: never exceed 40% of total
 
 # Bankroll -> dollar limit ratios
 _RATIO_MAX_TRADE = 0.025       # $50 / $2000
-_RATIO_MIN_TRADE = 0.05        # With $1.00 floor for Polymarket practicality
+_RATIO_MIN_TRADE = 0.005       # $10 / $2000, with $1.00 floor for Polymarket practicality
 _RATIO_MAX_EXPOSURE = 0.175    # $350 / $2000
 _MIN_TRADE_FLOOR = 1.0         # Polymarket practical minimum
 SCAN_INTERVAL = 300          # 5 minutes between self-initiated scans (safety net)

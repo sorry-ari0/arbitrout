@@ -96,7 +96,7 @@ class TestBankrollDerivedLimits:
     def test_min_trade_size_has_floor(self):
         trader = self._make_trader(initial_bankroll=20.0, cumulative_pnl=0.0)
         bankroll = trader._get_current_bankroll()
-        assert max(1.0, bankroll * 0.05) == 1.0
+        assert max(1.0, bankroll * 0.005) == 1.0
 
     def test_max_total_exposure_scales(self):
         trader = self._make_trader(initial_bankroll=20.0, cumulative_pnl=0.0)
