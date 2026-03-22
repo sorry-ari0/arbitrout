@@ -163,36 +163,42 @@ class KalshiAdapter(BaseAdapter):
                 except Exception:
                     return
 
+                # Pre-process market metadata, then batch-fetch all orderbooks
+                market_infos = []
                 for m in markets:
                     ticker = m.get("ticker", "")
                     title = m.get("title") or m.get("subtitle") or event_title
-                    # Skip multi-outcome combo titles (comma-separated)
                     if title.count(",") >= 2 and title.startswith(("yes ", "no ")):
                         continue
-
-                    # If market has sub_title, use "Event: Sub" format
                     sub = m.get("subtitle") or m.get("sub_title", "")
                     if sub and sub != title:
                         display_title = f"{event_title}: {sub}" if event_title != title else f"{title}: {sub}"
                     else:
                         display_title = title
-
                     expiry = m.get("expiration_time", m.get("close_time", "ongoing"))
                     if expiry and "T" in str(expiry):
                         expiry = str(expiry)[:10]
+                    market_infos.append((ticker, display_title, _map_category(category),
+                                        int(m.get("volume", 0) or 0), expiry or "ongoing"))
 
-                    # Try to get price from orderbook
-                    yes_price, no_price = await self._get_orderbook_price(client, ticker)
+                # Fetch all orderbooks for this event in parallel
+                ob_tasks = [self._get_orderbook_price(client, mi[0]) for mi in market_infos]
+                ob_results = await asyncio.gather(*ob_tasks, return_exceptions=True)
 
+                for (ticker, display_title, cat, vol, expiry), ob_result in zip(market_infos, ob_results):
+                    if isinstance(ob_result, Exception):
+                        yes_price, no_price = 0.0, 0.0
+                    else:
+                        yes_price, no_price = ob_result
                     normalized.append(NormalizedEvent(
                         platform="kalshi",
                         event_id=ticker,
                         title=display_title,
-                        category=_map_category(category),
+                        category=cat,
                         yes_price=round(yes_price, 4),
                         no_price=round(no_price, 4),
-                        volume=int(m.get("volume", 0) or 0),
-                        expiry=expiry or "ongoing",
+                        volume=vol,
+                        expiry=expiry,
                         url=f"https://kalshi.com/markets/{ticker}",
                     ))
 
