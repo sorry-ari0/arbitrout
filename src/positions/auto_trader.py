@@ -633,10 +633,10 @@ class AutoTrader:
 
             # Score: crypto near-expiry > crypto > near-expiry > other
             score = spread_pct
-            if is_crypto:
-                score *= 2.0
-            if is_near_expiry:
-                score *= 1.5
+            crypto_mult = 2.0 if is_crypto else 1.0
+            score *= crypto_mult
+            expiry_mult = 1.5 if is_near_expiry else 1.0
+            score *= expiry_mult
 
             # Market category penalties (journal-driven)
             if is_sports_exact_score:
@@ -665,20 +665,24 @@ class AutoTrader:
             # underprice favorites. This is a documented, persistent edge.
             favored = min(buy_yes_price, buy_no_price) if buy_no_price > 0 else buy_yes_price
             if favored >= 0.80:
-                score *= 3.0  # Strong favorite — strongest documented edge
+                favorite_mult = 3.0  # Strong favorite — strongest documented edge
             elif favored >= 0.70:
-                score *= 2.2  # Moderate favorite — solid edge
+                favorite_mult = 2.2  # Moderate favorite — solid edge
             elif favored >= 0.60:
-                score *= 1.4  # Mild favorite — still has bias edge
+                favorite_mult = 1.4  # Mild favorite — still has bias edge
             elif favored <= 0.15:
-                score *= 0.1  # Extreme longshot — near-zero expected value
+                favorite_mult = 0.1  # Extreme longshot — near-zero expected value
             elif favored <= 0.20:
-                score *= 0.2  # Severe longshot penalty
+                favorite_mult = 0.2  # Severe longshot penalty
             elif favored <= 0.30:
-                score *= 0.5  # Longshot penalty
+                favorite_mult = 0.5  # Longshot penalty
+            else:
+                favorite_mult = 1.0  # Neutral zone (0.30 < favored < 0.60)
+            score *= favorite_mult
 
             # Insider signal boost: conviction traders get massive boost, market makers ignored
             insider_signal = None
+            insider_mult = 1.0
             market_id = opp.get("buy_yes_market_id", "")
             if self.insider_tracker and market_id:
                 insider_signal = self.insider_tracker.get_insider_signal(market_id)
@@ -687,12 +691,15 @@ class AutoTrader:
                     conviction_count = insider_signal.get("conviction_count", 0)
                     if conviction_count > 0:
                         # Conviction traders (Theo4, Fredi9999, etc.) = strong directional signal
-                        score *= (1.0 + strength * 3.0)  # Up to 4x base boost
+                        insider_mult = (1.0 + strength * 3.0)  # Up to 4x base boost
+                        score *= insider_mult
                         if conviction_count >= 2:
                             score *= 1.5  # Multiple conviction traders agree = very high signal
+                            insider_mult *= 1.5
                     else:
                         # Unknown wallets only — weaker signal
-                        score *= (1.0 + strength * 1.5)
+                        insider_mult = (1.0 + strength * 1.5)
+                        score *= insider_mult
                     opp["insider_signal"] = insider_signal
                     opp["_insider_driven"] = conviction_count > 0
 
@@ -704,6 +711,7 @@ class AutoTrader:
                     score *= 1.3
 
             # Kyle's lambda: adverse selection / informed flow signal
+            kyle_mult = 1.0
             if self.kyle_estimator and market_id:
                 poly_platform = opp.get("buy_yes_platform", "")
                 if poly_platform == "polymarket":
@@ -717,8 +725,21 @@ class AutoTrader:
                     kyle_market_id = market_id
                 kyle_signal = self.kyle_estimator.get_lambda_signal(kyle_market_id, kyle_direction)
                 if kyle_signal:
-                    score *= kyle_signal["multiplier"]
+                    kyle_mult = kyle_signal["multiplier"]
+                    score *= kyle_mult
                     opp["kyle_signal"] = kyle_signal
+
+            # Log score components for post-hoc analysis (favorite bias audit)
+            score_metadata = {
+                "raw_spread": spread_pct,
+                "crypto_mult": crypto_mult,
+                "expiry_mult": expiry_mult,
+                "favorite_mult": favorite_mult,
+                "insider_mult": round(insider_mult, 4),
+                "kyle_mult": round(kyle_mult, 4),
+                "entry_price": favored,
+                "side": "YES" if buy_yes_price <= buy_no_price else "NO",
+            }
 
             # Skip low-score opportunities
             if score < MIN_SPREAD_PCT:
@@ -1551,6 +1572,7 @@ class AutoTrader:
                             days_to_expiry=days_to_expiry,
                             volume=opp.get("volume", 0),
                             insider_signal=opp.get("insider_signal"),
+                            score_metadata=score_metadata,
                         )
                 else:
                     self._trades_skipped += 1
