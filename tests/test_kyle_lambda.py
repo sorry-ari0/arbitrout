@@ -349,6 +349,8 @@ class TestAutoTraderIntegration:
         """AutoTrader should accept a kyle_estimator via setter."""
         from positions.auto_trader import AutoTrader
         pm = MagicMock()
+        pm.trade_journal = MagicMock()
+        pm.trade_journal.get_cumulative_pnl = MagicMock(return_value=0.0)
         pm.list_packages = MagicMock(return_value=[])
         pm.executors = {"polymarket": MagicMock(), "kalshi": MagicMock()}
         trader = AutoTrader(pm)
@@ -362,6 +364,8 @@ class TestAutoTraderIntegration:
         """The scoring loop should multiply score by kyle_signal['multiplier']."""
         from positions.auto_trader import AutoTrader
         pm = MagicMock()
+        pm.trade_journal = MagicMock()
+        pm.trade_journal.get_cumulative_pnl = MagicMock(return_value=0.0)
         pm.list_packages = MagicMock(return_value=[])
         pm.executors = {"polymarket": MagicMock(), "kalshi": MagicMock()}
         trader = AutoTrader(pm)
@@ -410,6 +414,8 @@ class TestAutoTraderIntegration:
         """When Polymarket is the buy_no_platform, direction should be NO."""
         from positions.auto_trader import AutoTrader
         pm = MagicMock()
+        pm.trade_journal = MagicMock()
+        pm.trade_journal.get_cumulative_pnl = MagicMock(return_value=0.0)
         pm.list_packages = MagicMock(return_value=[])
         pm.executors = {"polymarket": MagicMock(), "kalshi": MagicMock()}
         trader = AutoTrader(pm)
