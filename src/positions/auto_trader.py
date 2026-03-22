@@ -257,7 +257,8 @@ class AutoTrader:
             self._regime_penalty = 1.0
 
     def _kelly_size(self, strategy: str, remaining_budget: float,
-                    implied_prob: float = 0.0, spread_pct: float = 0.0) -> float:
+                    implied_prob: float = 0.0, spread_pct: float = 0.0,
+                    bypass_regime: bool = False) -> float:
         """Calculate Kelly-optimal position size for any strategy type.
 
         Research: Half Kelly = 75% growth with 50% less drawdown.
@@ -282,8 +283,11 @@ class AutoTrader:
 
         kelly_sized = max(0.0, kelly_full * frac)
         sized = round(min(self._max_trade_size, remaining_budget * kelly_sized), 2)
-        # Apply regime penalty (5-loss rule: reduce by 50% during bad streaks)
-        sized = round(sized * self._regime_penalty, 2)
+        # Bad regime (5+ consecutive losses): skip entirely instead of limping
+        # in with min-size bets that waste concurrent slots and can't produce
+        # meaningful returns. Resume trading when streak breaks.
+        if self._regime_penalty < 1.0 and not bypass_regime:
+            return 0
         return max(self._min_trade_size, min(sized, self._max_trade_size))
 
     async def add_news_opportunity(self, opp: dict):
@@ -856,7 +860,9 @@ class AutoTrader:
 
                 # Kelly-sized trade (Half Kelly for near-guaranteed arb)
                 trade_size = self._kelly_size("multi_outcome_arb", remaining_budget,
-                                              spread_pct=spread_pct)
+                                              spread_pct=spread_pct, bypass_regime=True)
+                if trade_size <= 0:
+                    continue
 
                 for outcome in outcomes:
                     leg_price = outcome.get("yes_price", 0)
@@ -932,7 +938,9 @@ class AutoTrader:
 
                 # Kelly-sized trade (Half Kelly for near-guaranteed profit)
                 trade_size = self._kelly_size("portfolio_no", remaining_budget,
-                                              spread_pct=spread_pct)
+                                              spread_pct=spread_pct, bypass_regime=True)
+                if trade_size <= 0:
+                    continue
 
                 # Allocate proportionally to each NO price
                 total_no_cost = sum(o.get("no_price", 0) for o in no_targets)
@@ -1014,6 +1022,8 @@ class AutoTrader:
                 trade_size = self._kelly_size("weather_forecast", remaining_budget,
                                               implied_prob=entry_price,
                                               spread_pct=opp.get("edge", 0) * 100)
+                if trade_size <= 0:
+                    continue
 
                 leg_type = "prediction_yes" if side == "YES" else "prediction_no"
                 market_id = opp.get("market_ticker", opp.get("buy_yes_market_id", ""))
@@ -1079,6 +1089,8 @@ class AutoTrader:
                 # Kelly-sized trade (1/5 Kelly — LLM-derived edge)
                 trade_size = self._kelly_size("political_synthetic", remaining_budget,
                                               spread_pct=spread_pct)
+                if trade_size <= 0:
+                    continue
 
                 for opp_leg in opp_legs:
                     leg_cost = round(trade_size * opp_leg.get("weight", 1.0 / len(opp_legs)), 2)
@@ -1158,6 +1170,8 @@ class AutoTrader:
                 # Kelly-sized trade (1/5 Kelly — LLM-derived edge)
                 trade_size = self._kelly_size("crypto_synthetic", remaining_budget,
                                               spread_pct=spread_pct)
+                if trade_size <= 0:
+                    continue
 
                 for opp_leg in opp_legs:
                     leg_cost = round(trade_size * opp_leg.get("weight", 1.0 / len(opp_legs)), 2)
@@ -1251,7 +1265,10 @@ class AutoTrader:
             if is_cross_platform or is_synthetic:
                 # Kelly size for arb/synthetic strategies
                 trade_size = self._kelly_size(strategy, remaining_budget,
-                                              spread_pct=spread_pct)
+                                              spread_pct=spread_pct,
+                                              bypass_regime=is_cross_platform)
+                if trade_size <= 0:
+                    continue
                 # Multi-leg trade: cross-platform arb OR synthetic derivative
                 # Both require buying YES on one market/platform and NO on another
                 #
@@ -1389,9 +1406,14 @@ class AutoTrader:
                     kelly_frac = 0.20   # 1/5 Kelly for mid-range
                 kelly_quarter = max(0.0, kelly_full * kelly_frac)
 
+                # Bad regime: skip speculative directional bets entirely
+                if self._regime_penalty < 1.0:
+                    if self.dlog:
+                        self.dlog.log_opportunity_skip(opp_title, "bad_regime")
+                    continue
+
                 # Apply Kelly fraction to remaining budget, capped at _max_trade_size
-                # Apply regime penalty (5-loss rule: reduce by 50% during bad streaks)
-                sized_trade = round(min(self._max_trade_size, remaining_budget * kelly_quarter) * self._regime_penalty, 2)
+                sized_trade = round(min(self._max_trade_size, remaining_budget * kelly_quarter), 2)
                 sized_trade = max(self._min_trade_size, min(sized_trade, trade_size))
 
                 pkg["legs"].append(create_leg(
