@@ -78,7 +78,45 @@ class InsiderTracker:
         self._last_scan: float = 0
         self._task = None
         self._running = False
+        # Conviction watchlist: start with hardcoded defaults, then override from disk
+        self._conviction_watchlist: dict[str, str] = dict(HIGH_CONVICTION_WATCHLIST)
+        self._load_watchlist()
         self._load_cache()
+
+    def _load_watchlist(self):
+        """Load refreshed watchlist from disk, falling back to hardcoded."""
+        path = self.data_dir / "conviction_watchlist.json"
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if data.get("wallets") and data.get("updated_at", 0) > 0:
+                    self._conviction_watchlist = data["wallets"]
+                    logger.info("Loaded refreshed watchlist: %d wallets (updated %s)",
+                                len(self._conviction_watchlist),
+                                data.get("updated_at_str", "unknown"))
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("Failed to load watchlist: %s", e)
+
+    def update_watchlist(self, wallets: dict[str, str]):
+        """Update the conviction watchlist and persist to disk.
+
+        wallets: {address: display_name} dict
+        Merges with hardcoded defaults — never shrinks below the base set.
+        """
+        merged = dict(HIGH_CONVICTION_WATCHLIST)
+        merged.update(wallets)
+        self._conviction_watchlist = merged
+
+        path = self.data_dir / "conviction_watchlist.json"
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        data = {
+            "wallets": merged,
+            "updated_at": time.time(),
+            "updated_at_str": time.strftime("%Y-%m-%d %H:%M"),
+        }
+        with open(str(path), "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        logger.info("Updated conviction watchlist: %d wallets", len(merged))
 
     def _load_cache(self):
         """Load cached insider data from disk."""
@@ -215,7 +253,7 @@ class InsiderTracker:
             # Classify wallet type
             # Priority: watchlist > known MM > ROI-based classification
             # Conviction = consistently winning at high rates (ROI), regardless of volume
-            if wallet.lower() in {k.lower() for k in HIGH_CONVICTION_WATCHLIST}:
+            if wallet.lower() in {k.lower() for k in self._conviction_watchlist}:
                 wallet_type = "conviction"
                 signal_weight = 5.0  # Watchlist wallets get 5x weight
             elif wallet.lower() in {k.lower() for k in KNOWN_MARKET_MAKERS}:

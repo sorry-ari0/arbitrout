@@ -38,6 +38,7 @@ class KyleLambdaEstimator:
         self._trades: dict[str, deque] = defaultdict(
             lambda: deque(maxlen=MAX_TRADES_PER_MARKET)
         )
+        self.ab_test_enabled = True  # Set False to disable kyle scoring (A/B test)
 
     def on_trade(self, asset_id: str, price: float, size: float,
                  timestamp: float, side: str):
@@ -137,6 +138,10 @@ class KyleLambdaEstimator:
 
     def get_lambda_signal(self, market_id: str, our_direction: str) -> dict:
         """Get λ-based directional multiplier for scoring."""
+        if not self.ab_test_enabled:
+            return {"multiplier": 1.0, "short_lambda": None, "long_lambda": None,
+                    "lambda_ratio": None, "flow_direction": None, "ab_disabled": True}
+
         asset_id = self._resolve_asset_id(market_id)
 
         neutral = {
