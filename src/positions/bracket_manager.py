@@ -241,34 +241,9 @@ class BracketManager:
     def _compute_trail_price(self, pkg: dict, leg_id: str) -> float | None:
         """Compute the trailing stop price based on leg-level peak price.
 
-        Uses the same adaptive trail logic as exit_engine.evaluate_heuristics.
-        Returns the new stop price, or None if no trailing stop rule.
+        DISABLED: Trailing stops cause massive losses on binary prediction markets.
+        Phase 1 journal showed 0/8 trailing stop wins. Prices are inherently volatile
+        between $0-$1 and trailing stops cut winners early on normal noise.
+        Returns None always — trailing stops should not fire.
         """
-        rules = pkg.get("exit_rules", [])
-        trail_rule = next((r for r in rules if r.get("type") == "trailing_stop" and r.get("active")), None)
-        if not trail_rule:
-            return None
-
-        trail_pct = trail_rule["params"].get("current", 35) / 100.0
-
-        # Get leg-level data from bracket info (not package-level peak_value)
-        brackets = pkg.get("_brackets", {})
-        info = brackets.get(leg_id)
-        if not info:
-            return None
-
-        entry = info.get("entry_price", 0.5)
-
-        # Adapt trail by entry price (same logic as exit_engine)
-        if entry <= 0.30:
-            trail_pct *= 2.0  # Longshots: very wide
-        elif entry >= 0.60:
-            trail_pct *= 0.7  # Favorites: tighter
-
-        # Use leg-level peak price (tracked by update_peak)
-        peak_price = info.get("peak_price", entry)
-        if peak_price <= 0:
-            return None
-
-        new_stop = round(peak_price * (1 - trail_pct), 4)
-        return max(new_stop, MIN_SELL_PRICE)
+        return None
