@@ -629,10 +629,12 @@ class AutoTrader:
             elif is_sports:
                 # Other sports: -$92 total, 20% win rate. Discount heavily.
                 score *= 0.3
+            # Hard skip — 0% WR across 3 trades, -$46
             if is_commodities:
-                # Commodities: -$46 from 3 trades, 0% WR. All closed by AI negative_drift.
-                # Now that AI exits are off, may perform better — moderate penalty.
-                score *= 0.4
+                self._trades_skipped += 1
+                if self.dlog:
+                    self.dlog.log_opportunity_skip(opp_title, "commodities_market")
+                continue
 
             # Favorite-longshot bias (research-validated):
             # Research: longshots lose ~40%, favorites lose ~5%
