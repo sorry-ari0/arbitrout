@@ -48,7 +48,7 @@ HIGH_CONVICTION_WATCHLIST = {
     "0x863134d00841b2e200492805a01e1e2f5defaa53": "RepTrump",     # $7.5M PNL, 54% ROI
     "0x78b9ac44a6d7d7a076c14e0ad518b301b63c6b76": "Len9311238",   # $8.7M PNL, 53% ROI
     "0x885783a5e42d297c3532081ebf5c14ba0e9b0a44": "BetTom42",     # $5.6M PNL, 50% ROI
-    "0x23786fdd7bf5a6fa7c249a3b tried1ff4c6b2f01": "mikatrade77",  # $5.2M PNL, 47% ROI
+    "0x23786fdad0073692157c6d7dc81f281843a35fcb": "mikatrade77",  # $5.2M PNL, 47% ROI
     "0xd0c042f8ac8f16a957f75de8c2e1e64e30e625c1": "alexmulti",    # $4.8M PNL, 48% ROI
     "0x16f91d4d0c17c5de07d2f01bceac542c4e4a05a8": "Jenzigo",      # $4.1M PNL, 43% ROI
 }

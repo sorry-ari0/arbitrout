@@ -13,7 +13,7 @@ STATUS_OPEN = "open"
 STATUS_CLOSED = "closed"
 STATUS_PARTIAL = "partial_exit"
 
-STRATEGY_TYPES = ("spot_plus_hedge", "cross_platform_arb", "synthetic_derivative", "pure_prediction", "news_driven", "political_synthetic", "btc_sniper", "multi_outcome_arb", "market_making", "portfolio_no", "weather_forecast")
+STRATEGY_TYPES = ("spot_plus_hedge", "cross_platform_arb", "synthetic_derivative", "pure_prediction", "news_driven", "political_synthetic", "btc_sniper", "multi_outcome_arb", "market_making", "portfolio_no", "weather_forecast", "crypto_synthetic")
 
 
 def create_package(name: str, strategy_type: str) -> dict:
@@ -87,21 +87,39 @@ class PositionManager:
         self._load()
 
     def _load(self):
-        """Load packages from positions.json."""
+        """Load packages from positions.json with backup recovery."""
         path = self.data_dir / "positions.json"
-        if path.exists():
+        backup = self.data_dir / "positions.json.backup"
+        self._load_failed = False
+
+        for source in [path, backup]:
+            if not source.exists():
+                continue
             try:
-                data = json.loads(path.read_text(encoding="utf-8"))
+                data = json.loads(source.read_text(encoding="utf-8"))
                 if isinstance(data, dict) and "packages" in data:
                     self.packages = {p["id"]: p for p in data["packages"]}
                     self.alerts = data.get("alerts", [])
+                    if source == backup:
+                        logger.warning("Loaded positions from BACKUP (primary was corrupt)")
+                    return
             except (json.JSONDecodeError, OSError, KeyError) as e:
-                logger.warning("Failed to load positions: %s", e)
+                logger.error("Failed to load %s: %s", source.name, e)
+
+        if path.exists():
+            # Primary exists but is corrupt and no backup worked
+            self._load_failed = True
+            logger.error("All position sources corrupt — save() blocked until manual fix")
 
     def save(self):
-        """Atomic save to positions.json."""
+        """Atomic save to positions.json with backup rotation."""
+        if getattr(self, "_load_failed", False):
+            logger.error("Refusing to save — load failed, would overwrite corrupt data")
+            return
+
         self.data_dir.mkdir(parents=True, exist_ok=True)
         path = self.data_dir / "positions.json"
+        backup = self.data_dir / "positions.json.backup"
         tmp = str(path) + ".tmp"
         data = {
             "packages": list(self.packages.values()),
@@ -110,6 +128,13 @@ class PositionManager:
         }
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
+        # Rotate: current → backup before overwriting
+        if path.exists():
+            try:
+                import shutil
+                shutil.copy2(str(path), str(backup))
+            except OSError:
+                pass  # Best effort — don't block save
         os.replace(tmp, str(path))
 
     def add_package(self, pkg: dict):
@@ -163,15 +188,17 @@ class PositionManager:
         for leg in pkg["legs"]:
             # Always include cost from all legs (open or closed)
             total_cost += leg["cost"]
+            total_buy_fees += leg.get("buy_fees", 0)
+
             if leg["status"] != "open":
+                # Include closed legs' realized exit value so partial-exit P&L is correct
+                current_value += leg.get("exit_value", leg.get("current_value", 0))
                 continue
             cur_price = leg.get("current_price", leg["entry_price"])
             leg_val = leg["quantity"] * cur_price
             leg["current_value"] = round(leg_val, 4)
             current_value += leg_val
 
-            # Track fees
-            total_buy_fees += leg.get("buy_fees", 0)
             # Sell fees: 0% maker (GTC limit orders used for all exits)
             estimated_sell_fees += 0
 
@@ -189,7 +216,7 @@ class PositionManager:
         pkg["current_value"] = round(current_value, 4)
         pkg["total_buy_fees"] = round(total_buy_fees, 4)
         pkg["estimated_sell_fees"] = round(estimated_sell_fees, 4)
-        pkg["unrealized_pnl"] = round(net_value - total_cost, 4)
+        pkg["unrealized_pnl"] = round(net_value - total_cost - total_buy_fees, 4)
         pkg["unrealized_pnl_pct"] = round((pkg["unrealized_pnl"] / total_cost * 100), 2) if total_cost > 0 else 0
         pkg["peak_value"] = max(pkg.get("peak_value", 0), net_value)
 
@@ -291,6 +318,9 @@ class PositionManager:
         tasks = [_exec_one(leg) for leg in pkg["legs"]]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
+        # Process ALL results first to build complete executed list,
+        # then check for failures. This prevents orphaning successful legs
+        # that appear after a failed leg in the results list.
         executed = []
         failed = False
         error_msg = ""
@@ -298,12 +328,12 @@ class PositionManager:
             if isinstance(item, Exception):
                 failed = True
                 error_msg = str(item)
-                break
+                continue  # don't break — process remaining results
             leg, result, err = item
             if err:
                 failed = True
                 error_msg = err
-                break
+                continue  # don't break — process remaining results
             if result is None:
                 continue  # advisory leg
             if result.success:
@@ -322,7 +352,7 @@ class PositionManager:
             else:
                 failed = True
                 error_msg = f"Leg {leg['leg_id']} failed: {result.error}"
-                break
+                continue  # don't break — collect all successful legs for rollback
 
         if failed:
             logger.error("Parallel execution failed: %s", error_msg)
