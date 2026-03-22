@@ -5,8 +5,12 @@ import pytest
 def make_news_scanner():
     from unittest.mock import MagicMock
     from positions.news_scanner import NewsScanner
+    pm = MagicMock()
+    pm.trade_journal = MagicMock()
+    pm.trade_journal.get_cumulative_pnl = MagicMock(return_value=0.0)
+    pm.list_packages = MagicMock(return_value=[])
     ns = NewsScanner(
-        position_manager=MagicMock(),
+        position_manager=pm,
         news_ai=MagicMock(),
     )
     return ns

@@ -8,7 +8,8 @@ from positions.price_feed import BinancePriceFeed, WindowState, SniperSignal
 from positions.btc_sniper import (
     BtcSniper, SniperStats, AssetSniperState,
     MIN_CONFIDENCE, MAKER_PRICE_HIGH, MAKER_PRICE_LOW,
-    DEFAULT_BANKROLL, MIN_BET, SAFE_BET_FRACTION, TAKER_FEE_PCT,
+    _SNIPER_BANKROLL_RATIO, _SNIPER_MIN_BET_FLOOR, _SNIPER_PAPER_BET_RATIO,
+    SAFE_BET_FRACTION, TAKER_FEE_PCT,
 )
 
 
@@ -37,13 +38,14 @@ class TestSniperInit:
     def test_default_bankroll(self):
         feed = BinancePriceFeed()
         sniper = BtcSniper(feed)
-        assert sniper.bankroll == DEFAULT_BANKROLL
-        assert sniper.initial_bankroll == DEFAULT_BANKROLL
+        expected_sniper_bankroll = 2000.0 * _SNIPER_BANKROLL_RATIO  # 500.0
+        assert sniper.bankroll == expected_sniper_bankroll
+        assert sniper._initial_sniper_bankroll == expected_sniper_bankroll
 
     def test_custom_bankroll(self):
         feed = BinancePriceFeed()
-        sniper = BtcSniper(feed, bankroll=1000.0)
-        assert sniper.bankroll == 1000.0
+        sniper = BtcSniper(feed, main_bankroll=4000.0)
+        assert sniper.bankroll == 1000.0  # 4000 * 0.25
 
     def test_paper_mode(self):
         feed = BinancePriceFeed()
@@ -76,48 +78,51 @@ class TestTickCallback:
 class TestBetSizing:
     def test_safe_mode(self):
         feed = BinancePriceFeed()
-        sniper = BtcSniper(feed, bankroll=100.0, mode="safe")
+        sniper = BtcSniper(feed, main_bankroll=400.0, mode="safe")
         bet = sniper._calculate_bet_size()
-        assert bet == 25.0  # 25% of $100
+        assert bet == 25.0  # 25% of sniper bankroll $100
 
     def test_safe_mode_min_bet(self):
         feed = BinancePriceFeed()
-        sniper = BtcSniper(feed, bankroll=2.0, mode="safe")
+        sniper = BtcSniper(feed, main_bankroll=8.0, mode="safe")
         bet = sniper._calculate_bet_size()
-        assert bet == MIN_BET
+        assert bet == sniper._min_bet
 
     def test_safe_mode_capped_at_bankroll(self):
         feed = BinancePriceFeed()
-        sniper = BtcSniper(feed, bankroll=3.0, mode="safe")
+        sniper = BtcSniper(feed, main_bankroll=12.0, mode="safe")
         bet = sniper._calculate_bet_size()
         assert bet <= sniper.bankroll
 
-    def test_paper_mode_fixed_10(self):
+    def test_paper_mode_proportional(self):
         feed = BinancePriceFeed()
-        sniper = BtcSniper(feed, bankroll=500.0, mode="paper")
+        sniper = BtcSniper(feed, main_bankroll=2000.0, mode="paper")
         bet = sniper._calculate_bet_size()
-        assert bet == 10.0
+        # sniper_bankroll = 500, paper_bet = 500 * 0.02 = 10.0
+        assert bet == 500.0 * _SNIPER_PAPER_BET_RATIO  # 10.0
 
     def test_paper_mode_capped_at_bankroll(self):
         feed = BinancePriceFeed()
-        sniper = BtcSniper(feed, bankroll=5.0, mode="paper")
+        sniper = BtcSniper(feed, main_bankroll=20.0, mode="paper")
         bet = sniper._calculate_bet_size()
-        assert bet == 5.0
+        # sniper_bankroll=5, paper=max(0.50, 5*0.02)=max(0.50, 0.10)=0.50
+        assert bet == _SNIPER_MIN_BET_FLOOR  # 0.50
 
     def test_aggressive_mode_uses_gains(self):
         feed = BinancePriceFeed()
-        sniper = BtcSniper(feed, bankroll=600.0, mode="aggressive")
-        sniper.initial_bankroll = 500.0
+        sniper = BtcSniper(feed, main_bankroll=2400.0, mode="aggressive")
+        # sniper bankroll = 600
+        sniper._initial_sniper_bankroll = 500.0  # Simulate initial was 500
         bet = sniper._calculate_bet_size()
         assert bet == 100.0  # $600 - $500 = $100 gains
 
     def test_aggressive_mode_no_gains(self):
         feed = BinancePriceFeed()
-        sniper = BtcSniper(feed, bankroll=500.0, mode="aggressive")
-        sniper.initial_bankroll = 500.0
+        sniper = BtcSniper(feed, main_bankroll=2000.0, mode="aggressive")
+        # sniper bankroll = 500, initial_sniper_bankroll = 500
         bet = sniper._calculate_bet_size()
         # No gains → falls back to 10% of bankroll
-        assert bet == max(MIN_BET, 500.0 * 0.10)
+        assert bet == max(sniper._min_bet, 500.0 * 0.10)
 
 
 # ── Decision logging ─────────────────────────────────────────────
@@ -156,7 +161,7 @@ class TestResolutionAccounting:
     @pytest.fixture
     def sniper(self):
         feed = BinancePriceFeed()
-        return BtcSniper(feed, bankroll=100.0, mode="paper")
+        return BtcSniper(feed, main_bankroll=400.0, mode="paper")
 
     def test_win_deducts_taker_fee(self, sniper):
         """Verify that wins account for taker fees in profit calculation."""
@@ -220,7 +225,8 @@ class TestPaperOrder:
     @pytest.mark.asyncio
     async def test_paper_order_deducts_bankroll(self):
         feed = BinancePriceFeed()
-        sniper = BtcSniper(feed, bankroll=100.0, mode="paper")
+        sniper = BtcSniper(feed, main_bankroll=400.0, mode="paper")
+        # sniper bankroll = 100
         result = await sniper._place_sniper_order(1000, "UP", 10.0, 0.90, "BTC")
         assert result["success"] is True
         assert result["mode"] == "paper"
@@ -229,8 +235,8 @@ class TestPaperOrder:
     @pytest.mark.asyncio
     async def test_paper_order_without_pm(self):
         feed = BinancePriceFeed()
-        sniper = BtcSniper(feed, bankroll=100.0, mode="safe")
-        # No position_manager → falls back to paper
+        sniper = BtcSniper(feed, main_bankroll=400.0, mode="safe")
+        # sniper bankroll = 100, No position_manager → falls back to paper
         result = await sniper._place_sniper_order(1000, "DOWN", 5.0, 0.92, "ETH")
         assert result["success"] is True
         assert sniper.bankroll == 95.0
