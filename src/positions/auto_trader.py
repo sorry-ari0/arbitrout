@@ -19,15 +19,15 @@ except ImportError:
 
 logger = logging.getLogger("positions.auto_trader")
 
-# Position limits
-MAX_TRADE_SIZE = 50.0        # Ramped from $5-12 (Phase 3) toward $100 target
-                             # Phase 3 bracket wins proved the system works at small sizes
-                             # Next step: $50 max until win rate exceeds 30% over 20+ trades
-MIN_TRADE_SIZE = 10.0        # Min $10 per trade (Phase 3's $5 was too small for meaningful P&L)
+# Position limits — derived from bankroll at runtime
 MAX_CONCURRENT = 7           # Max 7 open packages (reserve 3 slots for news-driven trades)
-MAX_TOTAL_EXPOSURE = 350.0   # 7 slots * $50 max = $350 ceiling (was $700 when max was $100)
 PORTFOLIO_EXPOSURE_CAP = 0.40  # Kelly portfolio rule: never exceed 40% of total bankroll
-TOTAL_BANKROLL = 2000.0      # Total bankroll (auto_trader $1400 + news $600)
+
+# Bankroll -> dollar limit ratios
+_RATIO_MAX_TRADE = 0.025       # $50 / $2000
+_RATIO_MIN_TRADE = 0.05        # With $1.00 floor for Polymarket practicality
+_RATIO_MAX_EXPOSURE = 0.175    # $350 / $2000
+_MIN_TRADE_FLOOR = 1.0         # Polymarket practical minimum
 SCAN_INTERVAL = 300          # 5 minutes between self-initiated scans (safety net)
 MIN_SPREAD_PCT = 8.0         # Minimum 8% spread (reduced: 0% maker fees both sides)
 # Polymarket: 0% maker fee on GTC limit orders for BOTH entry and exit.
@@ -119,13 +119,14 @@ class AutoTrader:
 
     def __init__(self, position_manager, scanner=None, insider_tracker=None,
                  interval: float = SCAN_INTERVAL, decision_logger=None,
-                 probability_model=None):
+                 probability_model=None, initial_bankroll: float = 2000.0):
         self.pm = position_manager
         self.scanner = scanner
         self.insider_tracker = insider_tracker
         self.interval = interval
         self.dlog = decision_logger
         self.probability_model = probability_model
+        self._initial_bankroll = initial_bankroll
         self._task = None
         self._running = False
         self._trades_opened = 0
@@ -142,6 +143,22 @@ class AutoTrader:
         self.kyle_estimator = None
         self._loss_streak = 0         # Current consecutive losses
         self._regime_penalty = 1.0    # 1.0 = normal, 0.5 = bad regime
+        self._refresh_limits()
+
+    def _get_current_bankroll(self) -> float:
+        """Current bankroll = initial + cumulative P&L from journal."""
+        pnl = 0.0
+        if self.pm.trade_journal:
+            pnl = self.pm.trade_journal.get_cumulative_pnl()
+        return self._initial_bankroll + pnl
+
+    def _refresh_limits(self):
+        """Recompute dollar-denominated limits from current bankroll."""
+        bankroll = self._get_current_bankroll()
+        self._max_trade_size = round(bankroll * _RATIO_MAX_TRADE, 2)
+        self._min_trade_size = round(max(_MIN_TRADE_FLOOR, bankroll * _RATIO_MIN_TRADE), 2)
+        self._max_total_exposure = round(bankroll * _RATIO_MAX_EXPOSURE, 2)
+        self._total_bankroll = bankroll
 
     def set_political_analyzer(self, analyzer):
         """Set the political analyzer reference for opportunity consumption."""
@@ -184,7 +201,7 @@ class AutoTrader:
             return True
         # Allow trades when portfolio is small (< 3 positions worth)
         # — can't diversify a near-empty portfolio
-        if total_exposure < MIN_TRADE_SIZE * 3:
+        if total_exposure < self._min_trade_size * 3:
             return True
         cat = self._detect_category(title)
         new_cat_exposure = category_exposure.get(cat, 0) + trade_size
@@ -244,7 +261,7 @@ class AutoTrader:
         """Calculate Kelly-optimal position size for any strategy type.
 
         Research: Half Kelly = 75% growth with 50% less drawdown.
-        Returns sized trade amount capped at MAX_TRADE_SIZE, floored at MIN_TRADE_SIZE.
+        Returns sized trade amount capped at self._max_trade_size, floored at self._min_trade_size.
         """
         edge = KELLY_EDGE_BY_STRATEGY.get(strategy, 0.02)
         frac = KELLY_FRACTION_BY_STRATEGY.get(strategy, 0.25)
@@ -264,10 +281,10 @@ class AutoTrader:
             kelly_full = edge
 
         kelly_sized = max(0.0, kelly_full * frac)
-        sized = round(min(MAX_TRADE_SIZE, remaining_budget * kelly_sized), 2)
+        sized = round(min(self._max_trade_size, remaining_budget * kelly_sized), 2)
         # Apply regime penalty (5-loss rule: reduce by 50% during bad streaks)
         sized = round(sized * self._regime_penalty, 2)
-        return max(MIN_TRADE_SIZE, min(sized, MAX_TRADE_SIZE))
+        return max(self._min_trade_size, min(sized, self._max_trade_size))
 
     async def add_news_opportunity(self, opp: dict):
         """Called by NewsScanner to queue a normal-urgency signal."""
@@ -286,7 +303,7 @@ class AutoTrader:
             return
         self._running = True
         self._task = asyncio.ensure_future(self._loop())
-        logger.info("Auto trader started (interval=%.0fs, max_exposure=$%.0f)", self.interval, MAX_TOTAL_EXPOSURE)
+        logger.info("Auto trader started (interval=%.0fs, max_exposure=$%.0f)", self.interval, self._max_total_exposure)
 
     def stop(self):
         self._running = False
@@ -350,6 +367,8 @@ class AutoTrader:
         """One scan cycle: find opportunities, filter, create packages."""
         # Update regime state from trade journal (5-loss rule)
         self._update_regime()
+        # Recompute dollar limits from current bankroll (initial + P&L)
+        self._refresh_limits()
 
         open_pkgs = self.pm.list_packages("open")
         if len(open_pkgs) >= MAX_CONCURRENT:
@@ -359,7 +378,7 @@ class AutoTrader:
             return
 
         total_exposure = sum(p.get("total_cost", 0) for p in open_pkgs)
-        if total_exposure >= MAX_TOTAL_EXPOSURE:
+        if total_exposure >= self._max_total_exposure:
             logger.info("Auto trader: at max exposure ($%.2f), skipping", total_exposure)
             if self.dlog:
                 self.dlog.log_scan_skip("max_exposure", exposure=round(total_exposure, 2))
@@ -369,7 +388,7 @@ class AutoTrader:
         # 40% of bankroll. This prevents over-concentration even when individual
         # Kelly fractions are correct. (Research: reduces 80% drawdown probability
         # from 1-in-5 to 1-in-213 at 30% Kelly, we use 40% as generous cap.)
-        kelly_cap = TOTAL_BANKROLL * PORTFOLIO_EXPOSURE_CAP
+        kelly_cap = self._total_bankroll * PORTFOLIO_EXPOSURE_CAP
         if total_exposure >= kelly_cap:
             logger.info("Auto trader: at Kelly portfolio cap ($%.2f / $%.2f), skipping",
                         total_exposure, kelly_cap)
@@ -384,7 +403,7 @@ class AutoTrader:
                 self.dlog.log_scan_skip("daily_limit", trades_today=self._daily_trade_count)
             return
 
-        remaining_budget = min(MAX_TOTAL_EXPOSURE - total_exposure, kelly_cap - total_exposure)
+        remaining_budget = min(self._max_total_exposure - total_exposure, kelly_cap - total_exposure)
         remaining_slots = MAX_CONCURRENT - len(open_pkgs)
         open_market_ids = self._get_open_market_ids(open_pkgs)
 
@@ -513,7 +532,7 @@ class AutoTrader:
             opp_title = (opp.get("title") or opp.get("canonical_title") or "?")[:100]
             if trades_this_cycle >= remaining_slots:
                 break
-            if remaining_budget < MIN_TRADE_SIZE:
+            if remaining_budget < self._min_trade_size:
                 break
 
             # Filter: skip zero-price markets (no liquidity, phantom opportunities)
@@ -687,7 +706,7 @@ class AutoTrader:
 
             # Portfolio concentration check: skip if adding this trade
             # would put >30% of total exposure in one category
-            if not self._check_concentration(opp_title, MIN_TRADE_SIZE,
+            if not self._check_concentration(opp_title, self._min_trade_size,
                                              total_exposure, category_exposure):
                 self._trades_skipped += 1
                 cat = self._detect_category(opp_title)
@@ -697,8 +716,8 @@ class AutoTrader:
                 continue
 
             # Size the trade — Kelly for arb/synthetic, pure_prediction uses its own Kelly below
-            trade_size = min(MAX_TRADE_SIZE, remaining_budget / 2, remaining_budget)
-            trade_size = max(MIN_TRADE_SIZE, trade_size)
+            trade_size = min(self._max_trade_size, remaining_budget / 2, remaining_budget)
+            trade_size = max(self._min_trade_size, trade_size)
 
             # Extract market details from opportunity
             buy_yes_platform = opp.get("buy_yes_platform", "polymarket")
@@ -842,7 +861,7 @@ class AutoTrader:
                     if leg_price <= 0:
                         continue
                     leg_cost = round(trade_size * (leg_price / total_price), 2)
-                    leg_cost = max(MIN_TRADE_SIZE, leg_cost)
+                    leg_cost = max(self._min_trade_size, leg_cost)
 
                     pkg["legs"].append(create_leg(
                         platform="polymarket",
@@ -921,7 +940,7 @@ class AutoTrader:
                     if no_price <= 0:
                         continue
                     leg_cost = round(trade_size * (no_price / total_no_cost), 2)
-                    leg_cost = max(MIN_TRADE_SIZE, leg_cost)
+                    leg_cost = max(self._min_trade_size, leg_cost)
 
                     pkg["legs"].append(create_leg(
                         platform="polymarket",
@@ -1059,7 +1078,7 @@ class AutoTrader:
 
                 for opp_leg in opp_legs:
                     leg_cost = round(trade_size * opp_leg.get("weight", 1.0 / len(opp_legs)), 2)
-                    leg_cost = max(MIN_TRADE_SIZE, leg_cost)
+                    leg_cost = max(self._min_trade_size, leg_cost)
                     side = opp_leg.get("side", "YES")
                     leg_type = "prediction_yes" if side == "YES" else "prediction_no"
                     price = opp_leg.get("yes_price", 0.5) if side == "YES" else opp_leg.get("no_price", 0.5)
@@ -1138,7 +1157,7 @@ class AutoTrader:
 
                 for opp_leg in opp_legs:
                     leg_cost = round(trade_size * opp_leg.get("weight", 1.0 / len(opp_legs)), 2)
-                    leg_cost = max(MIN_TRADE_SIZE, leg_cost)
+                    leg_cost = max(self._min_trade_size, leg_cost)
                     side = opp_leg.get("side", "YES")
                     leg_type = "prediction_yes" if side == "YES" else "prediction_no"
                     price = opp_leg.get("yes_price", 0.5) if side == "YES" else opp_leg.get("no_price", 0.5)
@@ -1366,10 +1385,10 @@ class AutoTrader:
                     kelly_frac = 0.20   # 1/5 Kelly for mid-range
                 kelly_quarter = max(0.0, kelly_full * kelly_frac)
 
-                # Apply Kelly fraction to remaining budget, capped at MAX_TRADE_SIZE
+                # Apply Kelly fraction to remaining budget, capped at _max_trade_size
                 # Apply regime penalty (5-loss rule: reduce by 50% during bad streaks)
-                sized_trade = round(min(MAX_TRADE_SIZE, remaining_budget * kelly_quarter) * self._regime_penalty, 2)
-                sized_trade = max(MIN_TRADE_SIZE, min(sized_trade, trade_size))
+                sized_trade = round(min(self._max_trade_size, remaining_budget * kelly_quarter) * self._regime_penalty, 2)
+                sized_trade = max(self._min_trade_size, min(sized_trade, trade_size))
 
                 pkg["legs"].append(create_leg(
                     platform=buy_yes_platform if side == "YES" else buy_no_platform,
@@ -1894,7 +1913,7 @@ class AutoTrader:
             "trades_skipped": self._trades_skipped,
             "open_positions": len(open_pkgs),
             "total_exposure": round(sum(p.get("total_cost", 0) for p in open_pkgs), 2),
-            "max_exposure": MAX_TOTAL_EXPOSURE,
+            "max_exposure": self._max_total_exposure,
             "scan_interval_sec": self.interval,
             "trades_today": self._daily_trade_count,
             "max_trades_per_day": MAX_NEW_TRADES_PER_DAY,
