@@ -489,44 +489,34 @@ class AutoTrader:
             decayed = sum(1 for o in news_opps if o.get("_signal_decay", 1.0) < 1.0)
             logger.info("Auto trader: merged %d news opportunities (%d decayed)", len(news_opps), decayed)
 
-        # Merge multi-outcome arbitrage opportunities
+        # Merge multi-outcome, portfolio NO, and weather scans in parallel
+        parallel_tasks = []
+        task_labels = []
         if self.scanner:
-            try:
-                multi_opps = await self.scanner.scan_multi_outcome()
-                for mo in multi_opps:
-                    # Multi-outcome arb is guaranteed profit — high priority
-                    mo["_score"] = mo.get("profit_pct", 0) * 5.0  # 5x arb premium
-                    opportunities.append(mo)
-                if multi_opps:
-                    logger.info("Auto trader: merged %d multi-outcome arb opportunities", len(multi_opps))
-            except Exception as e:
-                logger.warning("Auto trader: multi-outcome scan failed: %s", e)
-
-        # Merge portfolio NO opportunities
-        if self.scanner:
-            try:
-                pno_opps = await self.scanner.scan_portfolio_no()
-                for pno in pno_opps:
-                    # Portfolio NO is near-guaranteed profit — high priority
-                    pno["_score"] = pno.get("profit_pct", 0) * 4.0  # 4x premium
-                    opportunities.append(pno)
-                if pno_opps:
-                    logger.info("Auto trader: merged %d portfolio NO opportunities", len(pno_opps))
-            except Exception as e:
-                logger.warning("Auto trader: portfolio NO scan failed: %s", e)
-
-        # Merge weather forecast opportunities
+            parallel_tasks.append(self.scanner.scan_multi_outcome())
+            task_labels.append("multi_outcome")
+            parallel_tasks.append(self.scanner.scan_portfolio_no())
+            task_labels.append("portfolio_no")
         if self._weather_scanner:
-            try:
-                weather_opps = await self._weather_scanner.scan()
-                for wo in weather_opps:
-                    # Weather edge from NWS forecast — good signal
-                    wo["_score"] = wo.get("edge", 0) * 100 * 3.0  # 3x edge premium
-                    opportunities.append(wo)
-                if weather_opps:
-                    logger.info("Auto trader: merged %d weather opportunities", len(weather_opps))
-            except Exception as e:
-                logger.warning("Auto trader: weather scan failed: %s", e)
+            parallel_tasks.append(self._weather_scanner.scan())
+            task_labels.append("weather")
+
+        if parallel_tasks:
+            results = await asyncio.gather(*parallel_tasks, return_exceptions=True)
+            for label, result in zip(task_labels, results):
+                if isinstance(result, Exception):
+                    logger.warning("Auto trader: %s scan failed: %s", label, result)
+                    continue
+                for opp in result:
+                    if label == "multi_outcome":
+                        opp["_score"] = opp.get("profit_pct", 0) * 5.0
+                    elif label == "portfolio_no":
+                        opp["_score"] = opp.get("profit_pct", 0) * 4.0
+                    elif label == "weather":
+                        opp["_score"] = opp.get("edge", 0) * 100 * 3.0
+                    opportunities.append(opp)
+                if result:
+                    logger.info("Auto trader: merged %d %s opportunities", len(result), label)
 
         # Merge political synthetic opportunities
         if self._political_analyzer:
