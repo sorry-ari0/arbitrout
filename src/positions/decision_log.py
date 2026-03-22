@@ -58,8 +58,9 @@ class DecisionLogger:
                          side: str, price: float, size: float,
                          score: float, spread_pct: float, conviction: float,
                          days_to_expiry: int, volume: float,
-                         insider_signal: dict | None = None):
-        self._write({
+                         insider_signal: dict | None = None,
+                         score_metadata: dict | None = None):
+        entry = {
             "type": "trade_opened",
             "pkg_id": pkg_id,
             "title": title[:100],
@@ -73,7 +74,10 @@ class DecisionLogger:
             "days_to_expiry": days_to_expiry,
             "volume": round(volume, 0),
             "insider_signal": bool(insider_signal),
-        })
+        }
+        if score_metadata is not None:
+            entry["score_metadata"] = score_metadata
+        self._write(entry)
 
     def log_trade_failed(self, title: str, error: str):
         self._write({"type": "trade_failed", "title": title[:100], "error": error})
