@@ -45,6 +45,10 @@ MIN_HOURS_TO_EXPIRY = 1.0  # Skip markets expiring within 1 hour (dynamic fees, 
 # that the decision log showed: 30-43% spread arbs repeatedly blocked.
 ARB_BUDGET_RESERVE_PCT = 0.40
 
+# Hold to resolution for short-expiry prediction markets (<= this many days).
+# Research: trailing stops (-$98) and time exits (-$39) destroyed value.
+HOLD_TO_RESOLUTION_MAX_DAYS = 14
+
 # ── Portfolio correlation / concentration limits ──────────────────────────────
 # Research: max 20-30% in one sector. Count correlated positions as single exposure.
 MAX_CATEGORY_CONCENTRATION = 0.30  # No more than 30% of total exposure in one category
@@ -1527,9 +1531,6 @@ class AutoTrader:
                     pkg["_min_hold_until"] = time.time() + 86400
 
             # Hold to resolution for short-expiry prediction markets.
-            # Research: trailing stops (-$98) and time exits (-$39) destroyed value.
-            # Markets with <14 days to expiry should resolve naturally.
-            HOLD_TO_RESOLUTION_MAX_DAYS = 14
             if days_to_expiry <= HOLD_TO_RESOLUTION_MAX_DAYS:
                 pkg["_hold_to_resolution"] = True
             # Also hold favorites (>$0.85) regardless of expiry.
