@@ -97,6 +97,9 @@ class TestHeuristics:
         import time
         pkg = _make_pkg(strategy="pure_prediction")
         pkg["_min_hold_until"] = time.time() - 1  # already expired
+        # Set entry prices >= 0.60 so trailing stop is eligible (entries < 0.60 skip it)
+        for leg in pkg["legs"]:
+            leg["entry_price"] = 0.70
         pkg["peak_value"] = 20.0
         pkg["current_value"] = 5.0
         triggers = evaluate_heuristics(pkg)
