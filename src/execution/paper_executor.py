@@ -34,6 +34,30 @@ TAKER_FEE_RATES = {
 }
 DEFAULT_FEE_RATE = 0.0  # 0% default (maker — all orders now use GTC limit)
 
+# ── Per-category Polymarket fee curve ─────────────────────────────────────────
+# Rate = feeRate * (price * (1 - price))^exponent
+# Crypto: feeRate=0.25, exponent=2 → peak 1.5625% at p=0.50
+# Sports: feeRate=0.0175, exponent=1 → peak 0.4375% at p=0.50
+# Politics/entertainment/other: 0% on Polymarket
+_POLY_FEE_PARAMS = {
+    "crypto": (0.25, 2),
+    "sports": (0.0175, 1),
+}
+
+
+def get_taker_fee_rate(category: str, price: float) -> float:
+    """Return the dimensionless taker fee rate for a Polymarket category at a given price.
+
+    Non-Polymarket platforms (Kalshi, Coinbase, etc.) use their own flat rates
+    in TAKER_FEE_RATES — this function is only for Polymarket's price curve.
+    """
+    params = _POLY_FEE_PARAMS.get(category)
+    if not params:
+        return 0.0
+    fee_rate, exponent = params
+    p = max(0.0, min(1.0, price))
+    return fee_rate * (p * (1 - p)) ** exponent
+
 
 class PaperExecutor:
     """NOT a BaseExecutor subclass — uses composition, not inheritance.
@@ -93,7 +117,8 @@ class PaperExecutor:
         self.trade_history.append({"action":"buy","asset_id":asset_id,"price":price,"quantity":qty,"amount_usd":amount_usd,"fee":fee,"tx_id":tx_id})
         return ExecutionResult(True, tx_id, price, qty, fee, None)
 
-    async def sell(self, asset_id: str, quantity: float, last_known_price: float = 0) -> ExecutionResult:
+    async def sell(self, asset_id: str, quantity: float, last_known_price: float = 0,
+                   category: str = "") -> ExecutionResult:
         pos = self.positions.get(asset_id)
         if not pos or pos["quantity"] < quantity * 0.999:
             return ExecutionResult(False, None, 0, 0, 0, f"No position or insufficient quantity for {asset_id}")
@@ -105,7 +130,10 @@ class PaperExecutor:
             price = pos["avg_entry_price"]
             logger.warning("Using entry price fallback %.4f for sell of %s (no real price available)", price, asset_id)
         proceeds = quantity * price
-        fee = round(proceeds * self.sell_fee_rate, 4)
+        if category:
+            fee = round(proceeds * get_taker_fee_rate(category, price), 4)
+        else:
+            fee = round(proceeds * self.sell_fee_rate, 4)
         net_proceeds = proceeds - fee
         self.balance += net_proceeds
         self.total_fees_paid += fee

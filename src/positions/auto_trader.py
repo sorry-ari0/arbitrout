@@ -883,6 +883,7 @@ class AutoTrader:
                     continue
 
                 pkg["_use_limit_orders"] = True
+                pkg["_category"] = self._detect_category(opp_title)
                 pkg_name = pkg.get("name", opp_title)
                 try:
                     result = await self.pm.execute_package(pkg)
@@ -1461,6 +1462,7 @@ class AutoTrader:
 
             # Use limit orders for 0% maker fees on entry
             pkg["_use_limit_orders"] = True
+            pkg["_category"] = self._detect_category(opp_title)
             if not pkg.get("_hold_to_resolution"):
                 pkg["_use_brackets"] = True
 

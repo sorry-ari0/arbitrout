@@ -400,10 +400,12 @@ class PositionManager:
         if not executor:
             return {"success": False, "error": f"No executor for {leg['platform']}"}
 
-        # Pass last known price for paper executor fallback
+        # Pass last known price for paper executor fallback + category for fee model
+        category = pkg.get("_category", "")
         if hasattr(executor, 'real'):
             result = await executor.sell(leg["asset_id"], leg["quantity"],
-                                         last_known_price=leg.get("current_price", 0))
+                                         last_known_price=leg.get("current_price", 0),
+                                         category=category)
         else:
             result = await executor.sell(leg["asset_id"], leg["quantity"])
         if result.success:
