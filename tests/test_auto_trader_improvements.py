@@ -4,6 +4,15 @@ from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock
 
 
+def _make_mock_pm():
+    """Create a MagicMock position_manager with journal that returns 0.0 PnL."""
+    pm = MagicMock()
+    pm.trade_journal = MagicMock()
+    pm.trade_journal.get_cumulative_pnl = MagicMock(return_value=0.0)
+    pm.list_packages = MagicMock(return_value=[])
+    return pm
+
+
 class TestChurnReduction:
     def test_min_spread_is_8(self):
         """MIN_SPREAD_PCT lowered to 8% (0% maker fees both sides)."""
@@ -21,8 +30,7 @@ class TestChurnReduction:
     def test_daily_limit_blocks_after_3(self):
         """_check_daily_limit should return False after 3 trades."""
         from positions.auto_trader import AutoTrader
-        pm = MagicMock()
-        pm.list_packages = MagicMock(return_value=[])
+        pm = _make_mock_pm()
         trader = AutoTrader(pm)
         assert trader._check_daily_limit() is True
         trader._daily_trade_count = 1
@@ -35,8 +43,7 @@ class TestChurnReduction:
     def test_daily_limit_resets_on_new_day(self):
         """Counter should reset when the date changes."""
         from positions.auto_trader import AutoTrader
-        pm = MagicMock()
-        pm.list_packages = MagicMock(return_value=[])
+        pm = _make_mock_pm()
         trader = AutoTrader(pm)
         trader._daily_trade_count = 3
         trader._daily_trade_date = "2020-01-01"
@@ -125,8 +132,7 @@ class TestTradeablePlatformFilter:
     def test_predictit_arb_filtered_when_no_executor(self):
         """PredictIt arb should return None when PredictIt executor is absent."""
         from positions.auto_trader import AutoTrader
-        pm = MagicMock()
-        pm.list_packages = MagicMock(return_value=[])
+        pm = _make_mock_pm()
         pm.executors = {"polymarket": MagicMock(), "kalshi": MagicMock()}
         trader = AutoTrader(pm)
 
@@ -138,8 +144,7 @@ class TestTradeablePlatformFilter:
         """PredictIt arb should NOT be filtered when PredictIt executor IS configured."""
         import logging
         from positions.auto_trader import AutoTrader
-        pm = MagicMock()
-        pm.list_packages = MagicMock(return_value=[])
+        pm = _make_mock_pm()
         pm.executors = {
             "polymarket": MagicMock(),
             "kalshi": MagicMock(),
@@ -157,8 +162,7 @@ class TestTradeablePlatformFilter:
         """Standard Polymarket/Kalshi arb should not trigger the tradeable filter."""
         import logging
         from positions.auto_trader import AutoTrader
-        pm = MagicMock()
-        pm.list_packages = MagicMock(return_value=[])
+        pm = _make_mock_pm()
         pm.executors = {"polymarket": MagicMock(), "kalshi": MagicMock()}
         trader = AutoTrader(pm)
 
@@ -203,11 +207,11 @@ class TestMarketCategoryFilter:
         title = "Will Crude Oil (CL) settle over $70 by Friday?".lower()
         assert any(kw in title for kw in COMMODITIES_KEYWORDS)
 
-    def test_position_size_constants(self):
-        from positions.auto_trader import MAX_TRADE_SIZE, MIN_TRADE_SIZE, MAX_TOTAL_EXPOSURE
-        assert MAX_TRADE_SIZE == 50.0
-        assert MIN_TRADE_SIZE == 10.0
-        assert MAX_TOTAL_EXPOSURE == 350.0
+    def test_position_size_ratios(self):
+        from positions.auto_trader import _RATIO_MAX_TRADE, _RATIO_MIN_TRADE, _RATIO_MAX_EXPOSURE
+        assert _RATIO_MAX_TRADE == 0.025
+        assert _RATIO_MIN_TRADE == 0.005
+        assert _RATIO_MAX_EXPOSURE == 0.175
 
 
 class TestTrailingStopCalibration:
@@ -475,18 +479,16 @@ class TestKellySizing:
 
     def test_kelly_size_respects_bounds(self):
         """Kelly size should be between MIN_TRADE_SIZE and MAX_TRADE_SIZE."""
-        from positions.auto_trader import AutoTrader, MIN_TRADE_SIZE, MAX_TRADE_SIZE
-        pm = MagicMock()
-        pm.list_packages = MagicMock(return_value=[])
+        from positions.auto_trader import AutoTrader
+        pm = _make_mock_pm()
         trader = AutoTrader(pm)
         size = trader._kelly_size("multi_outcome_arb", 500.0, spread_pct=15.0)
-        assert MIN_TRADE_SIZE <= size <= MAX_TRADE_SIZE
+        assert trader._min_trade_size <= size <= trader._max_trade_size
 
     def test_kelly_size_arb_larger_than_synthetic(self):
         """Arb (high confidence) should size larger than synthetic (uncertain)."""
         from positions.auto_trader import AutoTrader
-        pm = MagicMock()
-        pm.list_packages = MagicMock(return_value=[])
+        pm = _make_mock_pm()
         trader = AutoTrader(pm)
         arb_size = trader._kelly_size("cross_platform_arb", 500.0, spread_pct=15.0)
         synth_size = trader._kelly_size("political_synthetic", 500.0, spread_pct=15.0)
@@ -494,12 +496,11 @@ class TestKellySizing:
 
     def test_kelly_size_small_budget_floors_at_min(self):
         """With tiny budget, should floor at MIN_TRADE_SIZE."""
-        from positions.auto_trader import AutoTrader, MIN_TRADE_SIZE
-        pm = MagicMock()
-        pm.list_packages = MagicMock(return_value=[])
+        from positions.auto_trader import AutoTrader
+        pm = _make_mock_pm()
         trader = AutoTrader(pm)
         size = trader._kelly_size("political_synthetic", 15.0, spread_pct=5.0)
-        assert size == MIN_TRADE_SIZE
+        assert size == trader._min_trade_size
 
     def test_half_kelly_fractions(self):
         """Multi-outcome arb and portfolio NO should use Half Kelly (0.50)."""
@@ -520,8 +521,7 @@ class TestRegimeDetection:
     def test_regime_penalty_after_5_losses(self):
         """After 5 consecutive losses, regime_penalty should be 0.50."""
         from positions.auto_trader import AutoTrader
-        pm = MagicMock()
-        pm.list_packages = MagicMock(return_value=[])
+        pm = _make_mock_pm()
         journal = MagicMock()
         journal.get_recent = MagicMock(return_value=[
             {"outcome": "loss", "closed_at": 100},
@@ -531,6 +531,7 @@ class TestRegimeDetection:
             {"outcome": "loss", "closed_at": 96},
             {"outcome": "win", "closed_at": 95},
         ])
+        journal.get_cumulative_pnl = MagicMock(return_value=0.0)
         pm.trade_journal = journal
         trader = AutoTrader(pm)
         trader._update_regime()
@@ -540,14 +541,14 @@ class TestRegimeDetection:
     def test_regime_normal_after_win(self):
         """If most recent trade is a win, regime should be normal."""
         from positions.auto_trader import AutoTrader
-        pm = MagicMock()
-        pm.list_packages = MagicMock(return_value=[])
+        pm = _make_mock_pm()
         journal = MagicMock()
         journal.get_recent = MagicMock(return_value=[
             {"outcome": "win", "closed_at": 100},
             {"outcome": "loss", "closed_at": 99},
             {"outcome": "loss", "closed_at": 98},
         ])
+        journal.get_cumulative_pnl = MagicMock(return_value=0.0)
         pm.trade_journal = journal
         trader = AutoTrader(pm)
         trader._update_regime()
@@ -557,8 +558,7 @@ class TestRegimeDetection:
     def test_regime_4_losses_still_normal(self):
         """4 consecutive losses should NOT trigger regime reduction."""
         from positions.auto_trader import AutoTrader
-        pm = MagicMock()
-        pm.list_packages = MagicMock(return_value=[])
+        pm = _make_mock_pm()
         journal = MagicMock()
         journal.get_recent = MagicMock(return_value=[
             {"outcome": "loss", "closed_at": 100},
@@ -567,6 +567,7 @@ class TestRegimeDetection:
             {"outcome": "loss", "closed_at": 97},
             {"outcome": "win", "closed_at": 96},
         ])
+        journal.get_cumulative_pnl = MagicMock(return_value=0.0)
         pm.trade_journal = journal
         trader = AutoTrader(pm)
         trader._update_regime()
@@ -576,8 +577,7 @@ class TestRegimeDetection:
     def test_kelly_size_reduced_in_bad_regime(self):
         """Kelly sizing should be halved during bad regime."""
         from positions.auto_trader import AutoTrader
-        pm = MagicMock()
-        pm.list_packages = MagicMock(return_value=[])
+        pm = _make_mock_pm()
         trader = AutoTrader(pm)
         # Normal regime
         trader._regime_penalty = 1.0
@@ -615,16 +615,14 @@ class TestPortfolioCorrelation:
     def test_concentration_allows_first_trade(self):
         """First trade in empty portfolio should always be allowed."""
         from positions.auto_trader import AutoTrader
-        pm = MagicMock()
-        pm.list_packages = MagicMock(return_value=[])
+        pm = _make_mock_pm()
         trader = AutoTrader(pm)
         assert trader._check_concentration("BTC price", 50.0, 0.0, {}) is True
 
     def test_concentration_blocks_overweight(self):
         """If crypto is already 30%, adding more crypto should be blocked."""
         from positions.auto_trader import AutoTrader
-        pm = MagicMock()
-        pm.list_packages = MagicMock(return_value=[])
+        pm = _make_mock_pm()
         trader = AutoTrader(pm)
         # 100 total, 30 in crypto = 30%. Adding 10 more crypto = 40/110 = 36% > 30%
         assert trader._check_concentration(
@@ -634,8 +632,7 @@ class TestPortfolioCorrelation:
     def test_concentration_allows_different_category(self):
         """Adding politics trade when crypto is heavy should be fine."""
         from positions.auto_trader import AutoTrader
-        pm = MagicMock()
-        pm.list_packages = MagicMock(return_value=[])
+        pm = _make_mock_pm()
         trader = AutoTrader(pm)
         assert trader._check_concentration(
             "Will election happen?", 10.0, 100.0, {"crypto": 30.0}
