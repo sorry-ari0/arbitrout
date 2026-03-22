@@ -281,8 +281,13 @@ async def lifespan(app: FastAPI):
                 executors = paper_executors
                 logger.info("Position system running in PAPER TRADING mode (balance=$%.2f)", get_paper_balance())
 
+            # Bankroll: $20 live, $2000 paper
+            LIVE_BANKROLL = float(os.environ.get("BANKROLL", "20"))
+            _initial_bankroll = LIVE_BANKROLL if not is_paper_mode() else 2000.0
+            _journal_mode = "live" if not is_paper_mode() else "paper"
+
             bracket_manager = BracketManager(executors)
-            journal = TradeJournal(data_dir=DATA_DIR / "positions")
+            journal = TradeJournal(data_dir=DATA_DIR / "positions", mode=_journal_mode)
             pm = PositionManager(data_dir=DATA_DIR / "positions", executors=executors, trade_journal=journal, bracket_manager=bracket_manager)
 
             # Wire journal into paper executors for persistent PnL tracking
@@ -338,7 +343,8 @@ async def lifespan(app: FastAPI):
             _probability_model = ProbabilityModel()
             _auto_trader = AutoTrader(pm, scanner=arb_scanner, insider_tracker=insider,
                                        decision_logger=decision_log,
-                                       probability_model=_probability_model)
+                                       probability_model=_probability_model,
+                                       initial_bankroll=_initial_bankroll)
             _auto_trader.start()
             _auto_trader_ref = _auto_trader
             logger.info("Auto trader started — reacts to arb scanner within seconds, 5min safety-net fallback")
@@ -349,6 +355,7 @@ async def lifespan(app: FastAPI):
                 news_ai=news_ai,
                 auto_trader=_auto_trader,
                 decision_logger=decision_log,
+                initial_bankroll=_initial_bankroll,
             )
             _news_scanner.start()
             exit_engine._news_scanner = _news_scanner
@@ -371,14 +378,18 @@ async def lifespan(app: FastAPI):
                 _price_feed = BinancePriceFeed(assets=sniper_assets)
                 _price_feed.start()
 
-                sniper_bankroll = float(os.environ.get("SNIPER_BANKROLL", "500"))
-                sniper_mode = os.environ.get("SNIPER_MODE", "paper" if is_paper_mode() else "safe")
-                _btc_sniper = BtcSniper(_price_feed, position_manager=pm,
-                                         bankroll=sniper_bankroll, mode=sniper_mode,
-                                         assets=sniper_assets)
-                _btc_sniper.start()
-                logger.info("Crypto sniper started (assets=%s, bankroll=$%.0f, mode=%s)",
-                            ",".join(sniper_assets), sniper_bankroll, sniper_mode)
+                from positions.btc_sniper import SNIPER_MIN_BANKROLL
+                if _initial_bankroll >= SNIPER_MIN_BANKROLL:
+                    sniper_mode = os.environ.get("SNIPER_MODE", "paper" if is_paper_mode() else "safe")
+                    _btc_sniper = BtcSniper(_price_feed, position_manager=pm,
+                                             main_bankroll=_initial_bankroll, mode=sniper_mode,
+                                             assets=sniper_assets)
+                    _btc_sniper.start()
+                    logger.info("Crypto sniper started (assets=%s, bankroll=$%.0f, mode=%s)",
+                                ",".join(sniper_assets), _initial_bankroll * 0.25, sniper_mode)
+                else:
+                    logger.info("Crypto sniper SKIPPED — bankroll $%.0f < $%.0f threshold",
+                                _initial_bankroll, SNIPER_MIN_BANKROLL)
             except Exception as e:
                 logger.warning("Sniper init failed (non-critical): %s", e)
 
@@ -392,9 +403,9 @@ async def lifespan(app: FastAPI):
                     _price_feed = BinancePriceFeed(assets=["BTC"])
                     _price_feed.start()
 
-                mm_capital = float(os.environ.get("MM_CAPITAL", "1000"))
+                mm_capital = round(_initial_bankroll * 0.50, 2)
                 _market_maker = MarketMaker(_price_feed, position_manager=pm,
-                                            total_capital=mm_capital)
+                                            total_capital=mm_capital, main_bankroll=_initial_bankroll)
                 _market_maker.start()
                 logger.info("Market maker started (capital=$%.0f, preemptive cancel + token merge enabled)",
                             mm_capital)
