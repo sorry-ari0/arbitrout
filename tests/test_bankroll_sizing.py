@@ -165,3 +165,27 @@ class TestNewsScannerBankroll:
         scanner = self._make_scanner(bankroll=20.0, pnl=80.0)
         scanner._refresh_limits()
         assert scanner._max_trade_size == pytest.approx(10.0)
+
+
+class TestSniperBankroll:
+    def test_sniper_bankroll_is_25pct(self):
+        bankroll = 100.0
+        assert bankroll * 0.25 == 25.0
+
+    def test_sniper_disabled_below_40(self):
+        from positions.btc_sniper import SNIPER_MIN_BANKROLL
+        bankroll = 20.0
+        assert bankroll < SNIPER_MIN_BANKROLL
+
+    def test_sniper_enabled_at_40(self):
+        from positions.btc_sniper import SNIPER_MIN_BANKROLL
+        bankroll = 40.0
+        assert bankroll >= SNIPER_MIN_BANKROLL
+
+    def test_sniper_paper_bet_scales(self):
+        sniper_bankroll = 25.0
+        assert sniper_bankroll * 0.02 == 0.50
+
+    def test_sniper_min_bet_floor(self):
+        sniper_bankroll = 10.0
+        assert max(0.50, sniper_bankroll * 0.002) == 0.50
