@@ -40,6 +40,11 @@ MAX_NEW_TRADES_PER_DAY = 3          # Max new positions per calendar day
 MARKET_COOLDOWN_SECONDS = 172800    # 48h cooldown per market (was 86400)
 MIN_HOURS_TO_EXPIRY = 1.0  # Skip markets expiring within 1 hour (dynamic fees, bot dominance)
 
+# Reserve 40% of max exposure for cross-platform arb (highest conviction, guaranteed profit).
+# Directional bets can only consume the remaining 60%. This prevents arb starvation
+# that the decision log showed: 30-43% spread arbs repeatedly blocked.
+ARB_BUDGET_RESERVE_PCT = 0.40
+
 # ── Portfolio correlation / concentration limits ──────────────────────────────
 # Research: max 20-30% in one sector. Count correlated positions as single exposure.
 MAX_CATEGORY_CONCENTRATION = 0.30  # No more than 30% of total exposure in one category
@@ -409,6 +414,19 @@ class AutoTrader:
 
         remaining_budget = min(self._max_total_exposure - total_exposure, kelly_cap - total_exposure)
         remaining_slots = MAX_CONCURRENT - len(open_pkgs)
+
+        # Split budget: reserve ARB_BUDGET_RESERVE_PCT for cross-platform arbs.
+        # Directional bets can only use the unreserved portion.
+        arb_reserve = self._max_total_exposure * ARB_BUDGET_RESERVE_PCT
+        # How much of the reserve is already consumed by existing arb packages?
+        arb_exposure = sum(p.get("total_cost", 0) for p in open_pkgs
+                          if p.get("strategy_type") in ("cross_platform_arb", "multi_outcome_arb"))
+        arb_remaining_reserve = max(0, arb_reserve - arb_exposure)
+        # Directional budget = total remaining MINUS the unfilled arb reserve
+        directional_budget = max(0, remaining_budget - arb_remaining_reserve)
+        # Arb budget = full remaining (arbs can use both their reserve AND any leftover)
+        arb_budget = remaining_budget
+
         open_market_ids = self._get_open_market_ids(open_pkgs)
 
         # Read opportunities from the arb scanner's cache (already scanned every 60s).
@@ -536,7 +554,7 @@ class AutoTrader:
             opp_title = (opp.get("title") or opp.get("canonical_title") or "?")[:100]
             if trades_this_cycle >= remaining_slots:
                 break
-            if remaining_budget < self._min_trade_size:
+            if directional_budget < self._min_trade_size and arb_budget < self._min_trade_size:
                 break
 
             # Filter: skip zero-price markets (no liquidity, phantom opportunities)
@@ -722,7 +740,7 @@ class AutoTrader:
                 continue
 
             # Size the trade — Kelly for arb/synthetic, pure_prediction uses its own Kelly below
-            trade_size = min(self._max_trade_size, remaining_budget / 2, remaining_budget)
+            trade_size = min(self._max_trade_size, directional_budget / 2, directional_budget)
             trade_size = max(self._min_trade_size, trade_size)
 
             # Extract market details from opportunity
@@ -859,7 +877,7 @@ class AutoTrader:
                     continue
 
                 # Kelly-sized trade (Half Kelly for near-guaranteed arb)
-                trade_size = self._kelly_size("multi_outcome_arb", remaining_budget,
+                trade_size = self._kelly_size("multi_outcome_arb", arb_budget,
                                               spread_pct=spread_pct, bypass_regime=True)
                 if trade_size <= 0:
                     continue
@@ -900,7 +918,7 @@ class AutoTrader:
                         trades_this_cycle += 1
                         self._trades_opened += 1
                         self._daily_trade_count += 1
-                        remaining_budget -= trade_size
+                        arb_budget -= trade_size
                         total_exposure += trade_size
                         _cat = self._detect_category(opp_title)
                         category_exposure[_cat] = category_exposure.get(_cat, 0) + trade_size
@@ -937,7 +955,7 @@ class AutoTrader:
                     continue
 
                 # Kelly-sized trade (Half Kelly for near-guaranteed profit)
-                trade_size = self._kelly_size("portfolio_no", remaining_budget,
+                trade_size = self._kelly_size("portfolio_no", arb_budget,
                                               spread_pct=spread_pct, bypass_regime=True)
                 if trade_size <= 0:
                     continue
@@ -982,7 +1000,7 @@ class AutoTrader:
                         trades_this_cycle += 1
                         self._trades_opened += 1
                         self._daily_trade_count += 1
-                        remaining_budget -= trade_size
+                        arb_budget -= trade_size
                         total_exposure += trade_size
                         _cat = self._detect_category(opp_title)
                         category_exposure[_cat] = category_exposure.get(_cat, 0) + trade_size
@@ -1019,7 +1037,7 @@ class AutoTrader:
                     continue
 
                 # Kelly-sized trade (Quarter Kelly — NWS data edge)
-                trade_size = self._kelly_size("weather_forecast", remaining_budget,
+                trade_size = self._kelly_size("weather_forecast", directional_budget,
                                               implied_prob=entry_price,
                                               spread_pct=opp.get("edge", 0) * 100)
                 if trade_size <= 0:
@@ -1052,7 +1070,7 @@ class AutoTrader:
                         trades_this_cycle += 1
                         self._trades_opened += 1
                         self._daily_trade_count += 1
-                        remaining_budget -= trade_size
+                        directional_budget -= trade_size
                         total_exposure += trade_size
                         _cat = self._detect_category(opp_title)
                         category_exposure[_cat] = category_exposure.get(_cat, 0) + trade_size
@@ -1087,7 +1105,7 @@ class AutoTrader:
                     continue
 
                 # Kelly-sized trade (1/5 Kelly — LLM-derived edge)
-                trade_size = self._kelly_size("political_synthetic", remaining_budget,
+                trade_size = self._kelly_size("political_synthetic", directional_budget,
                                               spread_pct=spread_pct)
                 if trade_size <= 0:
                     continue
@@ -1131,7 +1149,7 @@ class AutoTrader:
                         trades_this_cycle += 1
                         self._trades_opened += 1
                         self._daily_trade_count += 1
-                        remaining_budget -= trade_size
+                        directional_budget -= trade_size
                         total_exposure += trade_size
                         _cat = self._detect_category(opp_title)
                         category_exposure[_cat] = category_exposure.get(_cat, 0) + trade_size
@@ -1168,7 +1186,7 @@ class AutoTrader:
                     continue
 
                 # Kelly-sized trade (1/5 Kelly — LLM-derived edge)
-                trade_size = self._kelly_size("crypto_synthetic", remaining_budget,
+                trade_size = self._kelly_size("crypto_synthetic", directional_budget,
                                               spread_pct=spread_pct)
                 if trade_size <= 0:
                     continue
@@ -1209,7 +1227,7 @@ class AutoTrader:
                         trades_this_cycle += 1
                         self._trades_opened += 1
                         self._daily_trade_count += 1
-                        remaining_budget -= trade_size
+                        directional_budget -= trade_size
                         total_exposure += trade_size
                         _cat = self._detect_category(opp_title)
                         category_exposure[_cat] = category_exposure.get(_cat, 0) + trade_size
@@ -1264,7 +1282,9 @@ class AutoTrader:
 
             if is_cross_platform or is_synthetic:
                 # Kelly size for arb/synthetic strategies
-                trade_size = self._kelly_size(strategy, remaining_budget,
+                # Cross-platform arb uses reserved arb budget; synthetics use directional budget
+                _strategy_budget = arb_budget if is_cross_platform else directional_budget
+                trade_size = self._kelly_size(strategy, _strategy_budget,
                                               spread_pct=spread_pct,
                                               bypass_regime=is_cross_platform)
                 if trade_size <= 0:
@@ -1412,8 +1432,8 @@ class AutoTrader:
                         self.dlog.log_opportunity_skip(opp_title, "bad_regime")
                     continue
 
-                # Apply Kelly fraction to remaining budget, capped at _max_trade_size
-                sized_trade = round(min(self._max_trade_size, remaining_budget * kelly_quarter), 2)
+                # Apply Kelly fraction to directional budget, capped at _max_trade_size
+                sized_trade = round(min(self._max_trade_size, directional_budget * kelly_quarter), 2)
                 sized_trade = max(self._min_trade_size, min(sized_trade, trade_size))
 
                 pkg["legs"].append(create_leg(
@@ -1506,7 +1526,11 @@ class AutoTrader:
                     # arb trades consume the cap before news signals can execute.
                     if not opp.get("_news_driven"):
                         self._daily_trade_count += 1
-                    remaining_budget -= trade_size
+                    # Decrement appropriate budget based on strategy type
+                    if is_cross_platform:
+                        arb_budget -= trade_size
+                    else:
+                        directional_budget -= trade_size
                     total_exposure += trade_size
                     cat = self._detect_category(opp_title)
                     category_exposure[cat] = category_exposure.get(cat, 0) + trade_size
