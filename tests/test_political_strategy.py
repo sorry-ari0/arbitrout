@@ -109,7 +109,8 @@ class TestValidateStrategy:
         assert validate_strategy(s) is True
 
     def test_low_win_probability_rejected(self):
-        s = self._make_strategy(win_probability=0.40)
+        # Threshold was relaxed from 0.50 to 0.35; use value below new threshold
+        s = self._make_strategy(win_probability=0.30)
         assert validate_strategy(s) is False
 
     def test_extreme_loss_rejected(self):
@@ -117,7 +118,8 @@ class TestValidateStrategy:
         assert validate_strategy(s) is False
 
     def test_low_ev_rejected(self):
-        s = self._make_strategy(expected_value_pct=2.0)
+        # EV threshold was relaxed from 3% to 1%; use value below new threshold
+        s = self._make_strategy(expected_value_pct=0.5)
         assert validate_strategy(s) is False
 
     def test_low_confidence_rejected(self):

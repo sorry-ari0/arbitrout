@@ -24,7 +24,7 @@ All dollar-denominated limits derive from `current_bankroll`:
 | Derived value | Ratio | Formula | At $20 | At $25 | At $15 |
 |---|---|---|---|---|---|
 | max_trade_size | 0.025 | `bankroll * 0.025` | $0.50 | $0.63 | $0.38 |
-| min_trade_size | 0.05 (floor $1) | `max(1.0, bankroll * 0.05)` | $1.00 | $1.25 | $1.00 |
+| min_trade_size | 0.005 (floor $1) | `max(1.0, bankroll * 0.005)` | $1.00 | $1.00 | $1.00 |
 | max_total_exposure | 0.175 | `bankroll * 0.175` | $3.50 | $4.38 | $2.63 |
 | max_concurrent | fixed | 7 | 7 | 7 | 7 |
 | Kelly portfolio cap | 0.40 | `bankroll * 0.40` | $8.00 | $10.00 | $6.00 |
@@ -35,7 +35,7 @@ The `$1.00` floor on `min_trade_size` ensures Polymarket orders are practical (n
 
 **Ratios are derived from the current hardcoded relationship to the $2000 bankroll:**
 - $50 / $2000 = 0.025 (max_trade_size)
-- $10 / $2000 = 0.005, but raised to 0.05 with $1 floor for Polymarket practicality
+- $10 / $2000 = 0.005, with $1 floor for Polymarket practicality
 - $350 / $2000 = 0.175 (max_total_exposure)
 - 0.40 portfolio cap (already a ratio, unchanged)
 
