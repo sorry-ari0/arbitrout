@@ -98,17 +98,21 @@ class EvalLogger:
     # ── Read helpers ────────────────────────────────────────────────────
 
     def _read_all(self) -> list[dict]:
-        """Read all entries from the log file."""
+        """Read all entries from the log file. Skips corrupt lines individually."""
         entries = []
         if not os.path.exists(self._path):
             return entries
         try:
             with open(self._path, "r", encoding="utf-8") as f:
-                for line in f:
+                for line_num, line in enumerate(f, 1):
                     line = line.strip()
-                    if line:
+                    if not line:
+                        continue
+                    try:
                         entries.append(json.loads(line))
-        except Exception as e:
+                    except json.JSONDecodeError:
+                        logger.warning("Corrupt JSONL line %d in eval log, skipping", line_num)
+        except OSError as e:
             logger.error("Failed to read eval log: %s", e)
         return entries
 
@@ -116,7 +120,7 @@ class EvalLogger:
         """Build a map of opportunity_id -> backfill entry."""
         backfills = {}
         for e in entries:
-            if e.get("type") == "backfill":
+            if e.get("type") == "backfill" and e.get("opportunity_id"):
                 backfills[e["opportunity_id"]] = e
         return backfills
 
