@@ -495,6 +495,10 @@ def match_events(events: list[NormalizedEvent]) -> list[MatchedEvent]:
     entities = [extract_entities(t) for t in effective_titles]
 
     # --- Phase 2: Two-phase matching with Union-Find ---
+    # Optimized: build inverted index by entity keys to avoid O(n^2) all-pairs.
+    # Only compare events that share at least one bucket key (crypto ticker,
+    # person name, quoted term, country, or top key terms). This is safe because
+    # _passes_quick_filter already requires a shared entity to pass.
     parent = list(range(len(unlinked)))
 
     def find(x):
@@ -508,25 +512,53 @@ def match_events(events: list[NormalizedEvent]) -> list[MatchedEvent]:
         if ra != rb:
             parent[ra] = rb
 
-    match_count = 0
-    for i in range(len(unlinked)):
-        for j in range(i + 1, len(unlinked)):
-            if unlinked[i].platform == unlinked[j].platform:
-                continue
-            if not _passes_quick_filter(entities[i], entities[j], effective_titles[i], effective_titles[j]):
-                continue
-            score = _entity_overlap_score(entities[i], entities[j])
-            if score < MATCH_THRESHOLD:
-                continue
-            cat_i, cat_j = unlinked[i].category, unlinked[j].category
-            if cat_i != cat_j and cat_i != "culture" and cat_j != "culture":
-                continue
-            if not _expiry_compatible(unlinked[i].expiry, unlinked[j].expiry):
-                continue
-            union(i, j)
-            match_count += 1
+    # Build inverted index: bucket_key → set of event indices
+    buckets: dict[str, set[int]] = {}
+    for idx, ent in enumerate(entities):
+        keys = set()
+        if ent["crypto_ticker"]:
+            keys.add(f"crypto:{ent['crypto_ticker']}")
+        for name in ent["names"]:
+            keys.add(f"name:{name}")
+        for qt in ent["quoted"]:
+            keys.add(f"quoted:{qt}")
+        for country in ent["countries"]:
+            keys.add(f"country:{country}")
+        # Top key terms (only terms that appear in 2+ events are useful)
+        for term in ent["key_terms"]:
+            keys.add(f"term:{term}")
+        for key in keys:
+            buckets.setdefault(key, set()).add(idx)
 
-    logger.info("Entity matching: %d events, %d cross-platform matches found", len(unlinked), match_count)
+    # Collect candidate pairs from shared buckets (deduplicated)
+    candidate_pairs: set[tuple[int, int]] = set()
+    for indices in buckets.values():
+        if len(indices) > 200:
+            continue  # Skip overly broad buckets (common terms)
+        idx_list = sorted(indices)
+        for ii in range(len(idx_list)):
+            for jj in range(ii + 1, len(idx_list)):
+                i, j = idx_list[ii], idx_list[jj]
+                if unlinked[i].platform != unlinked[j].platform:
+                    candidate_pairs.add((i, j))
+
+    match_count = 0
+    for i, j in candidate_pairs:
+        if not _passes_quick_filter(entities[i], entities[j], effective_titles[i], effective_titles[j]):
+            continue
+        score = _entity_overlap_score(entities[i], entities[j])
+        if score < MATCH_THRESHOLD:
+            continue
+        cat_i, cat_j = unlinked[i].category, unlinked[j].category
+        if cat_i != cat_j and cat_i != "culture" and cat_j != "culture":
+            continue
+        if not _expiry_compatible(unlinked[i].expiry, unlinked[j].expiry):
+            continue
+        union(i, j)
+        match_count += 1
+
+    logger.info("Entity matching: %d events, %d candidates, %d matches",
+                len(unlinked), len(candidate_pairs), match_count)
 
     # Build clusters
     clusters: dict[int, list[int]] = {}
