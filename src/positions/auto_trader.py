@@ -51,7 +51,7 @@ HOLD_TO_RESOLUTION_MAX_DAYS = 14
 
 # ── Portfolio correlation / concentration limits ──────────────────────────────
 # Research: max 20-30% in one sector. Count correlated positions as single exposure.
-MAX_CATEGORY_CONCENTRATION = 0.30  # No more than 30% of total exposure in one category
+MAX_CATEGORY_CONCENTRATION = 0.50  # No more than 50% of total exposure in one category
 # CATEGORY_KEYWORDS defined after SPORTS_KEYWORDS below
 
 # ── Regime detection (5-loss rule) ────────────────────────────────────────────
@@ -143,6 +143,7 @@ class AutoTrader:
         self._last_trade_time = 0.0
         self._daily_trade_count = 0
         self._daily_trade_date = ""
+        self._session_start_time = time.time()  # Tracks server start for daily limit
         self._scan_event = asyncio.Event()  # Fired by arb scanner after each scan
         # News scanner integration — thread-safe queue
         self._news_lock = asyncio.Lock()
@@ -361,18 +362,19 @@ class AutoTrader:
     def _check_daily_limit(self) -> bool:
         """Returns True if we can still open trades today.
 
-        Counts from actual packages (survives server restarts) and merges
-        with in-memory counter to catch trades opened this session.
+        Only counts trades opened during THIS session (after server start).
+        Pre-existing positions loaded on restart do NOT count — they were
+        already counted in the session that created them.
         """
         today = date.today().isoformat()
         if self._daily_trade_date != today:
             # Reset in-memory counter and recount from persisted packages
             self._daily_trade_count = 0
             self._daily_trade_date = today
-            today_start = datetime.combine(date.today(), datetime.min.time()).timestamp()
             for p in self.pm.list_packages():
-                # Only count Auto: trades (not News: trades) against arb daily limit
-                if p.get("created_at", 0) >= today_start and p.get("name", "").startswith("Auto:"):
+                # Only count trades created AFTER this server started
+                if (p.get("created_at", 0) >= self._session_start_time
+                        and p.get("name", "").startswith("Auto:")):
                     self._daily_trade_count += 1
         return self._daily_trade_count < MAX_NEW_TRADES_PER_DAY
 
@@ -409,12 +411,12 @@ class AutoTrader:
                 self.dlog.log_scan_skip("kelly_portfolio_cap", exposure=round(total_exposure, 2))
             return
 
-        if not self._check_daily_limit():
-            logger.info("Auto trader: daily trade limit (%d/%d), skipping",
+        daily_limit_hit = not self._check_daily_limit()
+        if daily_limit_hit:
+            logger.info("Auto trader: daily limit (%d/%d), scanning for guaranteed-profit only",
                         self._daily_trade_count, MAX_NEW_TRADES_PER_DAY)
             if self.dlog:
                 self.dlog.log_scan_skip("daily_limit", trades_today=self._daily_trade_count)
-            return
 
         remaining_budget = min(self._max_total_exposure - total_exposure, kelly_cap - total_exposure)
         remaining_slots = MAX_CONCURRENT - len(open_pkgs)
@@ -762,10 +764,19 @@ class AutoTrader:
                                                    spread_pct=spread_pct, days_to_expiry=days_to_expiry)
                 continue
 
-            # Portfolio concentration check: skip if adding this trade
-            # would put >30% of total exposure in one category
-            if not self._check_concentration(opp_title, self._min_trade_size,
-                                             total_exposure, category_exposure):
+            # Portfolio concentration check: skip if one category exceeds limit.
+            # Bypass for guaranteed-profit strategies (multi_outcome_arb, portfolio_no).
+            opp_type = opp.get("opportunity_type", "")
+            guaranteed_profit = opp_type in ("multi_outcome_arb", "portfolio_no")
+
+            # Daily limit: skip non-guaranteed-profit trades when at cap
+            if daily_limit_hit and not guaranteed_profit:
+                self._trades_skipped += 1
+                continue
+
+            if not guaranteed_profit and not self._check_concentration(
+                    opp_title, self._min_trade_size,
+                    total_exposure, category_exposure):
                 self._trades_skipped += 1
                 cat = self._detect_category(opp_title)
                 if self.dlog:

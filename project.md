@@ -1,7 +1,7 @@
 # Project: Arbitrout (Prediction Market Arbitrage + Auto Trading)
 Status: ACTIVE
 Phase: BUILD
-Last Updated: 2026-03-21
+Last Updated: 2026-03-22
 Repo: https://github.com/sorry-ari0/arbitrout.git
 Branch: main
 
@@ -355,10 +355,49 @@ For each crypto market opportunity:
   ENTER if: score >= 8.0 AND net_profit >= 8% (MIN_SPREAD_PCT)
   STRATEGY: directional bet (one side) on same-platform, arb (both sides) on cross-platform
   SIZE: variable Kelly — 1/4 for favorites (>=0.70), 1/5 mid-range, 1/8 for longshots (<=0.30)
-  LIMITS: 7 concurrent, $700 auto exposure, 3 trades/day cap
+  LIMITS: 7 concurrent, $700 auto exposure, 3 trades/day cap (session-scoped, not restart)
+  CONCENTRATION: 50% max per category; multi_outcome_arb + portfolio_no bypass concentration
+  DAILY LIMIT: guaranteed-profit strategies (multi_outcome_arb, portfolio_no) bypass daily cap
   ORDERS: limit orders (GTC) for entries + exits = 0% maker fee on Polymarket
   BRACKETS: _use_brackets = True for standard prediction packages (not _hold_to_resolution)
 ```
+
+### Fee Elimination & Exit Architecture (v2-fee-fix, 2026-03-22)
+
+**Problem:** Phase 1 (16 trades) had 70% fee drag — taker fees on exits destroyed profits. Trailing stops and premature time-based exits compounded the damage on binary prediction markets.
+
+**Solution: Zero-fee exit architecture**
+- All exits use 0% maker GTC limit orders (Polymarket maker fee = 0%)
+- `_use_limit_orders = True` on all new packages
+- `_hold_to_resolution = True` for prediction markets expiring within 10 days
+- Bracket orders placed on entry for standard packages (not hold-to-resolution)
+- Safety overrides (spread_inversion, political_event_resolved) still fire immediately but use limit-first with FOK fallback
+
+**Exit order flow:**
+```
+ExitEngine trigger fires
+  → pkg._use_limit_orders? → PositionManager._place_limit_sell() (GTC at current mid)
+       → Pending order tracked in pkg._pending_limit_orders
+       → resolve_pending_order() checks fill status each cycle:
+           filled → finalize exit (0% fees)
+           timed out (60s normal, 300s safety) → cancel + FOK fallback
+  → else → PositionManager._exit_leg_locked() (FOK direct, 2% taker fee)
+```
+
+**Legacy migration:** `_migrate_legacy_packages()` runs at startup. Packages missing `_hold_to_resolution` get:
+- `_category` detected from title keywords
+- `_hold_to_resolution = True`, `_use_limit_orders = True`
+- `target_profit` reduced 25% → 10% (realistic for >$0.85 NO contracts)
+- `stop_loss` widened -40% → -60% (avoid premature exit on volatile final days)
+- `trailing_stop` deactivated (wrong for binary instruments)
+
+**Phase tagging:** Journal entries now include `_code_version: "v2-fee-fix"`. Entries without this field are Phase 1 (pre-fix). Enables before/after comparison.
+
+**Phase 2 success metrics (target after ~20 new trades):**
+- Win rate >30% (Phase 1: 25%)
+- Fee drag <5% of gross (Phase 1: 70%)
+- Net P&L positive
+- No premature exits from trailing_stop or stop_loss on winners
 
 ### Insider Signal Strength Formula
 
