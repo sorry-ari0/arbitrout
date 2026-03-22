@@ -34,9 +34,12 @@ SPIKE_THRESHOLD = 1.5           # Score jump threshold for immediate entry
 TAKER_FEE_PCT = 0.0156          # 1.56% max taker fee on 5-min crypto markets
 
 # Position sizing
-DEFAULT_BANKROLL = 500.0
-MIN_BET = 1.0
-SAFE_BET_FRACTION = 0.25        # 25% of bankroll per trade in safe mode
+_SNIPER_BANKROLL_RATIO = 0.25   # 25% of main bankroll
+_SNIPER_MIN_BET_RATIO = 0.002   # Of sniper bankroll
+_SNIPER_MIN_BET_FLOOR = 0.50
+_SNIPER_PAPER_BET_RATIO = 0.02  # Of sniper bankroll
+SAFE_BET_FRACTION = 0.25        # 25% of sniper bankroll per trade in safe mode
+SNIPER_MIN_BANKROLL = 40.0      # Main bankroll must be >= $40 for sniper to run
 
 
 @dataclass
@@ -73,12 +76,13 @@ class BtcSniper:
     """
 
     def __init__(self, price_feed: BinancePriceFeed, position_manager=None,
-                 bankroll: float = DEFAULT_BANKROLL, mode: str = "safe",
+                 main_bankroll: float = 2000.0, mode: str = "paper",
                  assets: list[str] | None = None):
         self.feed = price_feed
         self.pm = position_manager
-        self.bankroll = bankroll
-        self.initial_bankroll = bankroll
+        self.bankroll = main_bankroll * _SNIPER_BANKROLL_RATIO
+        self._initial_sniper_bankroll = self.bankroll
+        self._min_bet = max(_SNIPER_MIN_BET_FLOOR, self.bankroll * _SNIPER_MIN_BET_RATIO)
         self.mode = mode  # "safe", "aggressive", "paper"
         self.assets = [a.upper() for a in (assets or ["BTC"])]
         self.stats = SniperStats()
@@ -131,7 +135,7 @@ class BtcSniper:
     def get_stats(self) -> dict:
         return {
             "bankroll": round(self.bankroll, 2),
-            "initial_bankroll": self.initial_bankroll,
+            "initial_sniper_bankroll": self._initial_sniper_bankroll,
             "mode": self.mode,
             "assets": self.assets,
             "trades_placed": self.stats.trades_placed,
@@ -223,10 +227,10 @@ class BtcSniper:
 
         # Bankroll check
         bet_size = self._calculate_bet_size()
-        if bet_size < MIN_BET:
+        if bet_size < self._min_bet:
             self.stats.windows_skipped += 1
             self._log_decision(window_ts, "skip", "insufficient_bankroll",
-                               {"asset": asset, "bankroll": self.bankroll, "min_bet": MIN_BET})
+                               {"asset": asset, "bankroll": self.bankroll, "min_bet": self._min_bet})
             return
 
         # Price feed health check
@@ -447,16 +451,15 @@ class BtcSniper:
     def _calculate_bet_size(self) -> float:
         """Calculate bet size based on mode and bankroll."""
         if self.mode == "safe":
-            return max(MIN_BET, min(self.bankroll * SAFE_BET_FRACTION, self.bankroll))
+            return max(self._min_bet, min(self.bankroll * SAFE_BET_FRACTION, self.bankroll))
         elif self.mode == "aggressive":
-            # Bet only gains above initial investment
-            gains = self.bankroll - self.initial_bankroll
-            if gains <= MIN_BET:
-                return max(MIN_BET, min(self.bankroll * 0.10, self.bankroll))  # 10% minimum
-            return max(MIN_BET, gains)
+            gains = self.bankroll - self._initial_sniper_bankroll
+            if gains <= self._min_bet:
+                return max(self._min_bet, min(self.bankroll * 0.10, self.bankroll))
+            return max(self._min_bet, gains)
         else:
-            # Paper mode — fixed $10
-            return min(10.0, self.bankroll)
+            # Paper mode — proportional to sniper bankroll
+            return max(self._min_bet, self.bankroll * _SNIPER_PAPER_BET_RATIO)
 
     def _log_decision(self, window_ts: int, action: str, reason: str, details: dict | None = None):
         """Log a decision for analysis."""
