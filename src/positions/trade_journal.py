@@ -1,6 +1,6 @@
 """Trade journal — tracks completed trades, win/loss metrics, and learnings for iterative improvement.
 
-Persists to trade_journal.json alongside positions.json.
+Persists to trade_journal_{mode}.json alongside positions.json.
 Records: entry/exit prices, P&L, triggers that fired, AI verdicts, and strategy performance.
 """
 import json
@@ -17,13 +17,29 @@ logger = logging.getLogger("positions.trade_journal")
 class TradeJournal:
     """Tracks trade outcomes for performance analysis and strategy improvement."""
 
-    def __init__(self, data_dir: Path):
+    def __init__(self, data_dir: Path, mode: str = "paper"):
         self.data_dir = Path(data_dir)
+        self.mode = mode
         self.entries: list[dict] = []
+        self._migrate_old_file()
         self._load()
 
+    def _journal_filename(self) -> str:
+        """Return the mode-specific journal filename."""
+        return f"trade_journal_{self.mode}.json"
+
+    def _migrate_old_file(self):
+        """One-time migration: rename legacy trade_journal.json to trade_journal_paper.json."""
+        if self.mode != "paper":
+            return
+        old_path = self.data_dir / "trade_journal.json"
+        new_path = self.data_dir / self._journal_filename()
+        if old_path.exists() and not new_path.exists():
+            os.rename(str(old_path), str(new_path))
+            logger.info("Migrated trade_journal.json → %s", self._journal_filename())
+
     def _load(self):
-        path = self.data_dir / "trade_journal.json"
+        path = self.data_dir / self._journal_filename()
         if path.exists():
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
@@ -33,7 +49,7 @@ class TradeJournal:
 
     def save(self):
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        path = self.data_dir / "trade_journal.json"
+        path = self.data_dir / self._journal_filename()
         tmp = str(path) + ".tmp"
         data = {
             "entries": self.entries,
@@ -42,6 +58,10 @@ class TradeJournal:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         os.replace(tmp, str(path))
+
+    def get_cumulative_pnl(self) -> float:
+        """Sum of all closed trade PnL in this journal."""
+        return sum(e.get("pnl", 0.0) for e in self.entries)
 
     def record_close(self, pkg: dict, exit_trigger: str = "manual"):
         """Record a completed trade (package close) with full details including fees."""

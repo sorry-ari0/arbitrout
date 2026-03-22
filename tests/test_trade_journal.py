@@ -108,7 +108,7 @@ class TestJournal:
             j1.record_close(pkg, exit_trigger="manual")
 
             assert len(j1.entries) == 1
-            assert (data_dir / "trade_journal.json").exists()
+            assert (data_dir / "trade_journal_paper.json").exists()
 
             # Create new journal instance — should load from file
             j2 = TradeJournal(data_dir)
