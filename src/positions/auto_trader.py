@@ -554,6 +554,7 @@ class AutoTrader:
         category_exposure = self._get_category_exposure(open_pkgs)
 
         trades_this_cycle = 0
+        opportunities.sort(key=lambda o: o.get("_score", 0), reverse=True)
         for opp in opportunities:
             opp_title = (opp.get("title") or opp.get("canonical_title") or "?")[:100]
             if trades_this_cycle >= remaining_slots:
@@ -667,7 +668,7 @@ class AutoTrader:
             # Kalshi: contracts <$0.10 lose >60% of buyer's money
             # Academic evidence: markets systematically overprice longshots,
             # underprice favorites. This is a documented, persistent edge.
-            favored = min(buy_yes_price, buy_no_price) if buy_no_price > 0 else buy_yes_price
+            favored = max(buy_yes_price, buy_no_price) if buy_no_price > 0 else buy_yes_price
             if favored >= 0.80:
                 favorite_mult = 3.0  # Strong favorite — strongest documented edge
             elif favored >= 0.70:
@@ -730,7 +731,15 @@ class AutoTrader:
                 kyle_signal = self.kyle_estimator.get_lambda_signal(kyle_market_id, kyle_direction)
                 if kyle_signal:
                     kyle_mult = kyle_signal["multiplier"]
-                    score *= kyle_mult
+                    # Cap combined signal multiplier — insider and kyle can measure
+                    # the same whale trade through two lenses. Use max, not product.
+                    if insider_mult > 1.0 and kyle_mult > 1.0:
+                        combined = max(insider_mult, kyle_mult)
+                        # Undo insider_mult already applied, apply combined cap
+                        score = score / insider_mult * combined
+                        kyle_mult = 1.0  # already folded into combined
+                    else:
+                        score *= kyle_mult
                     opp["kyle_signal"] = kyle_signal
 
             # Log score components for post-hoc analysis (favorite bias audit)
@@ -934,6 +943,12 @@ class AutoTrader:
                     self._trades_skipped += 1
                     continue
 
+                # Track actual cost (may exceed trade_size due to min_trade_size floors)
+                actual_cost = sum(l["cost"] for l in pkg["legs"])
+                if actual_cost > arb_budget:
+                    self._trades_skipped += 1
+                    continue
+
                 pkg["_use_limit_orders"] = True
                 pkg["_category"] = self._detect_category(opp_title)
                 pkg_name = pkg.get("name", opp_title)
@@ -943,10 +958,10 @@ class AutoTrader:
                         trades_this_cycle += 1
                         self._trades_opened += 1
                         self._daily_trade_count += 1
-                        arb_budget -= trade_size
-                        total_exposure += trade_size
+                        arb_budget -= actual_cost
+                        total_exposure += actual_cost
                         _cat = self._detect_category(opp_title)
-                        category_exposure[_cat] = category_exposure.get(_cat, 0) + trade_size
+                        category_exposure[_cat] = category_exposure.get(_cat, 0) + actual_cost
                         # Refresh open IDs for this cycle
                         for leg in pkg.get("legs", []):
                             cid = leg.get("asset_id", "").split(":")[0]
@@ -1016,6 +1031,12 @@ class AutoTrader:
                     self._trades_skipped += 1
                     continue
 
+                # Track actual cost (may exceed trade_size due to min_trade_size floors)
+                actual_cost = sum(l["cost"] for l in pkg["legs"])
+                if actual_cost > arb_budget:
+                    self._trades_skipped += 1
+                    continue
+
                 pkg["_use_limit_orders"] = True
                 pkg["_use_brackets"] = True  # GTC target sell at 0% maker fee
                 pkg_name = pkg.get("name", opp_title)
@@ -1025,10 +1046,10 @@ class AutoTrader:
                         trades_this_cycle += 1
                         self._trades_opened += 1
                         self._daily_trade_count += 1
-                        arb_budget -= trade_size
-                        total_exposure += trade_size
+                        arb_budget -= actual_cost
+                        total_exposure += actual_cost
                         _cat = self._detect_category(opp_title)
-                        category_exposure[_cat] = category_exposure.get(_cat, 0) + trade_size
+                        category_exposure[_cat] = category_exposure.get(_cat, 0) + actual_cost
                         for leg in pkg.get("legs", []):
                             cid = leg.get("asset_id", "").split(":")[0]
                             if cid:
@@ -1392,7 +1413,7 @@ class AutoTrader:
                     leg_type = "prediction_yes"
                 elif buy_yes_price <= 0.40 and no_market_id:
                     # Market favors NO → bet NO (riding the consensus)
-                    side, side_price, side_id = "NO", (1.0 - buy_yes_price), no_market_id
+                    side, side_price, side_id = "NO", buy_no_price, no_market_id
                     leg_type = "prediction_no"
                 elif buy_yes_price >= 0.50 and yes_market_id:
                     # Slight YES lean
@@ -1400,7 +1421,7 @@ class AutoTrader:
                     leg_type = "prediction_yes"
                 elif no_market_id:
                     # Slight NO lean
-                    side, side_price, side_id = "NO", (1.0 - buy_yes_price), no_market_id
+                    side, side_price, side_id = "NO", buy_no_price, no_market_id
                     leg_type = "prediction_no"
                 elif yes_market_id:
                     side, side_price, side_id = "YES", buy_yes_price, yes_market_id
@@ -1553,7 +1574,7 @@ class AutoTrader:
             pkg_name = pkg.get("name", opp_title)
             bet_side = pkg.get("_bet_side", "SYNTHETIC" if is_synthetic else ("BOTH" if is_cross_platform else "?"))
             bet_conviction = pkg.get("_entry_conviction", round(abs(buy_yes_price - 0.5), 3))
-            entry_price = side_price if not is_cross_platform else buy_yes_price
+            entry_price = side_price if strategy == "pure_prediction" else buy_yes_price
             try:
                 result = await self.pm.execute_package(pkg)
                 if result.get("success"):
@@ -1570,6 +1591,9 @@ class AutoTrader:
                     else:
                         directional_budget -= trade_size
                     total_exposure += trade_size
+                    # Hard stop if exposure cap reached mid-cycle
+                    if total_exposure >= self._max_total_exposure:
+                        remaining_slots = 0
                     cat = self._detect_category(opp_title)
                     category_exposure[cat] = category_exposure.get(cat, 0) + trade_size
                     # Refresh open market IDs so later iterations in this cycle see this trade
@@ -1742,8 +1766,8 @@ class AutoTrader:
                 if yes_price < 0.01 or no_price < 0.01:
                     continue
 
-                # Same filters as _scan_polymarket
-                if yes_price > 0.85 or yes_price < 0.15:
+                # Same filters as main loop — allow favorites up to 0.96
+                if yes_price > 0.96 or yes_price < 0.05:
                     continue
                 if 0.42 < yes_price < 0.58:
                     continue
@@ -1895,8 +1919,8 @@ class AutoTrader:
 
                     no_price = 1.0 - yes_price
 
-                    # Skip if too close to resolved (>0.85 or <0.15) — tiny upside not worth risk
-                    if yes_price > 0.85 or yes_price < 0.15:
+                    # Skip extremes — allow favorites up to 0.96 per main loop thresholds
+                    if yes_price > 0.96 or yes_price < 0.05:
                         continue
                     # Skip near-50/50 markets — no conviction edge
                     if 0.42 < yes_price < 0.58:

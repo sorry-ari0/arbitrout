@@ -10,6 +10,7 @@ multiplier (0.4–1.5) for the auto-trader's scoring pipeline.
 Concurrency: single-threaded asyncio. deque operations are atomic in CPython.
 No locks needed — the WS receive loop and scoring loop run on the same event loop.
 """
+import json
 import logging
 import time
 from collections import defaultdict, deque
@@ -34,16 +35,25 @@ FLOW_DIRECTION_THRESHOLD = 0.10
 class KyleLambdaEstimator:
     """Estimates Kyle's λ from real-time Polymarket trade flow."""
 
-    def __init__(self):
+    def __init__(self, data_dir: str = ""):
         self._trades: dict[str, deque] = defaultdict(
             lambda: deque(maxlen=MAX_TRADES_PER_MARKET)
         )
         self.ab_test_enabled = True  # Set False to disable kyle scoring (A/B test)
+        self._data_dir = data_dir
+        self._save_counter = 0
+        if data_dir:
+            self._load_cache()
 
     def on_trade(self, asset_id: str, price: float, size: float,
                  timestamp: float, side: str):
         """Trade callback — registered with PolymarketPriceFeed.on_trade()."""
         self._trades[asset_id].append((timestamp, price, size, side))
+        # Periodic save every 100 trades
+        self._save_counter += 1
+        if self._save_counter >= 100:
+            self._save_counter = 0
+            self._save_cache()
 
     def _prune_old(self, asset_id: str):
         """Remove trades older than LONG_WINDOW_SECONDS."""
@@ -167,7 +177,7 @@ class KyleLambdaEstimator:
         short_lambda, n_short = short_result
         long_lambda, n_long = long_result
 
-        if long_lambda <= 0:
+        if long_lambda <= 0 or abs(long_lambda) < 1e-8:
             neutral["short_lambda"] = short_lambda
             neutral["long_lambda"] = long_lambda
             neutral["n_trades_short"] = n_short
@@ -227,3 +237,47 @@ class KyleLambdaEstimator:
         """Return estimator status for diagnostics."""
         total_trades = sum(len(d) for d in self._trades.values())
         return {"tracked_markets": len(self._trades), "total_buffered_trades": total_trades}
+
+    def _save_cache(self):
+        """Persist trade data to disk for restart recovery."""
+        if not self._data_dir:
+            return
+        try:
+            import os
+            path = os.path.join(self._data_dir, "kyle_trades_cache.json")
+            tmp = path + ".tmp"
+            cutoff = time.time() - LONG_WINDOW_SECONDS
+            data = {}
+            for aid, trades in self._trades.items():
+                recent = [(t, p, s, sd) for t, p, s, sd in trades if t >= cutoff]
+                if recent:
+                    data[aid] = recent
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"trades": data, "saved_at": time.time()}, f)
+            os.replace(tmp, path)
+        except Exception as e:
+            logger.debug("Kyle cache save failed: %s", e)
+
+    def _load_cache(self):
+        """Load persisted trade data on startup."""
+        if not self._data_dir:
+            return
+        try:
+            import os
+            path = os.path.join(self._data_dir, "kyle_trades_cache.json")
+            if not os.path.exists(path):
+                return
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            cutoff = time.time() - LONG_WINDOW_SECONDS
+            loaded = 0
+            for aid, trades in data.get("trades", {}).items():
+                for t, p, s, sd in trades:
+                    if t >= cutoff:
+                        self._trades[aid].append((t, p, s, sd))
+                        loaded += 1
+            if loaded:
+                logger.info("Kyle cache loaded: %d trades across %d markets",
+                            loaded, len(self._trades))
+        except Exception as e:
+            logger.warning("Kyle cache load failed: %s", e)

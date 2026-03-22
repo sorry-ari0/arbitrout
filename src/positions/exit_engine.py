@@ -78,9 +78,14 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
     peak_value = pkg.get("peak_value", total_cost)
 
     # ── 1: Target Hit ───────────────────────────────────────────────────────
+    # Skip for hold-to-resolution positions — they resolve at $0/$1,
+    # so a 50% target_hit would cut arbs early instead of letting them
+    # resolve at 100%. Only fire if profit exceeds 90% (near-resolution).
     for rule in rules:
         if rule.get("type") == "target_profit" and rule.get("active"):
             target = rule["params"].get("target_pct", 20)
+            if pkg.get("_hold_to_resolution") and pnl_pct < 90:
+                continue
             if pnl_pct >= target:
                 triggers.append({"trigger_id": T_TARGET_HIT, "name": "target_hit",
                     "details": f"P&L {pnl_pct:.1f}% >= target {target}%",

@@ -484,7 +484,7 @@ async def lifespan(app: FastAPI):
                 # Kyle's lambda estimator — adverse selection signal from trade flow
                 try:
                     from positions.kyle_lambda import KyleLambdaEstimator
-                    _kyle_est = KyleLambdaEstimator()
+                    _kyle_est = KyleLambdaEstimator(data_dir=str(DATA_DIR / "positions"))
                     _poly_ws.on_trade(_kyle_est.on_trade)
                     if _auto_trader:
                         _auto_trader.set_kyle_estimator(_kyle_est)
