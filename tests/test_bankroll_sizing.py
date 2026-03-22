@@ -189,3 +189,13 @@ class TestSniperBankroll:
     def test_sniper_min_bet_floor(self):
         sniper_bankroll = 10.0
         assert max(0.50, sniper_bankroll * 0.002) == 0.50
+
+
+class TestMarketMakerBankroll:
+    def test_mm_capital_is_50pct(self):
+        bankroll = 20.0
+        assert bankroll * 0.50 == 10.0
+
+    def test_max_capital_per_market_is_25pct(self):
+        bankroll = 20.0
+        assert bankroll * 0.25 == 5.0

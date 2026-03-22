@@ -38,7 +38,7 @@ QUOTE_REFRESH_INTERVAL = 8.0    # Seconds between quote updates
 TARGET_SPREAD_LIQUID = 0.03     # 3% spread for liquid markets
 TARGET_SPREAD_VOLATILE = 0.06   # 6% spread for volatile markets
 MAX_INVENTORY_IMBALANCE = 0.70  # Max 70% on one side
-MAX_CAPITAL_PER_MARKET = 500.0  # $500 max per market
+_MM_CAPITAL_PER_MARKET_RATIO = 0.25  # Of main bankroll (was $500 / $2000)
 RESOLUTION_BUFFER_SECONDS = 7200  # Withdraw 2 hours before resolution
 PRICE_DIVERGENCE_HALT = 0.05    # Halt if external price diverges >5% from Polymarket
 STALE_QUOTE_SECONDS = 10.0     # Cancel quotes older than 10 seconds
@@ -108,10 +108,11 @@ class MarketMaker:
     """
 
     def __init__(self, price_feed: BinancePriceFeed, position_manager=None,
-                 total_capital: float = 1000.0):
+                 total_capital: float = 1000.0, main_bankroll: float = 2000.0):
         self.feed = price_feed
         self.pm = position_manager
         self.total_capital = total_capital
+        self._max_capital_per_market = round(main_bankroll * _MM_CAPITAL_PER_MARKET_RATIO, 2)
         self.stats = MMStats()
         self._running = False
         self._task: asyncio.Task | None = None
@@ -382,7 +383,7 @@ class MarketMaker:
                         expiry=expiry or "",
                         asset=asset,
                     )
-                    capital_allocated += MAX_CAPITAL_PER_MARKET
+                    capital_allocated += self._max_capital_per_market
 
                     if len(self._markets) >= 4:
                         break
@@ -465,7 +466,7 @@ class MarketMaker:
         await self._cancel_market_orders(market)
 
         # Place new maker orders
-        bet_size = min(MAX_CAPITAL_PER_MARKET / 2,
+        bet_size = min(self._max_capital_per_market / 2,
                        (self.total_capital - self._total_allocated()) / 2)
         if bet_size < 1.0:
             return
