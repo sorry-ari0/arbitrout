@@ -104,3 +104,79 @@ class TestHeuristics:
         pkg["current_value"] = 5.0
         triggers = evaluate_heuristics(pkg)
         assert any(t["name"] == "trailing_stop" for t in triggers)
+
+
+import asyncio
+from unittest.mock import MagicMock, AsyncMock
+
+
+class TestAutoExecuteTriggers:
+    """Test that _auto_execute_triggers only executes target_hit mechanically."""
+
+    def _make_engine(self):
+        pm = MagicMock()
+        pm.exit_leg = AsyncMock(return_value={"success": True})
+        pm.list_packages = MagicMock(return_value=[])
+        from positions.exit_engine import ExitEngine
+        engine = ExitEngine(pm)
+        return engine, pm
+
+    def test_target_hit_executes(self):
+        """target_hit should auto-execute."""
+        engine, pm = self._make_engine()
+        pkg = _make_pkg()
+        triggers = [{"name": "target_hit", "action": "full_exit",
+                      "details": "Target reached"}]
+        asyncio.run(engine._auto_execute_triggers(pkg, triggers))
+        assert pm.exit_leg.called
+
+    def test_stop_loss_does_not_execute(self):
+        """stop_loss should NOT auto-execute after fee elimination change."""
+        engine, pm = self._make_engine()
+        pkg = _make_pkg()
+        triggers = [{"name": "stop_loss", "action": "full_exit",
+                      "details": "Stop hit"}]
+        asyncio.run(engine._auto_execute_triggers(pkg, triggers))
+        assert not pm.exit_leg.called
+
+    def test_trailing_stop_does_not_execute(self):
+        """trailing_stop should NOT auto-execute after fee elimination change."""
+        engine, pm = self._make_engine()
+        pkg = _make_pkg()
+        triggers = [{"name": "trailing_stop", "action": "full_exit",
+                      "details": "Trail hit"}]
+        asyncio.run(engine._auto_execute_triggers(pkg, triggers))
+        assert not pm.exit_leg.called
+
+
+class TestSafetyOverrideLimitOrders:
+    """Safety overrides should use limit orders (0% maker fee)."""
+
+    def test_safety_override_passes_use_limit(self):
+        """The exit_engine safety override loop should call exit_leg(use_limit=True)."""
+        pm = MagicMock()
+        pm.exit_leg = AsyncMock(return_value={"success": True})
+        pm.list_packages = MagicMock(return_value=[])
+        pm.resolve_pending_order = AsyncMock(return_value={"success": True})
+        pm.packages = {}
+
+        from positions.exit_engine import ExitEngine
+        engine = ExitEngine(pm)
+
+        # Build a package that will trigger spread_inversion (safety override)
+        pkg = _make_pkg()
+        pkg["legs"][0]["current_price"] = 0.80
+        pkg["legs"][1]["current_price"] = 0.30  # combined > 1.05
+
+        pm.list_packages.return_value = [pkg]
+        pm.packages = {pkg["id"]: pkg}
+
+        # Run one tick
+        asyncio.run(engine._tick())
+
+        # Verify exit_leg was called AND with use_limit=True
+        assert pm.exit_leg.called, "Safety override should have triggered exit_leg"
+        for call in pm.exit_leg.call_args_list:
+            _, kwargs = call
+            assert kwargs.get("use_limit") is True, \
+                f"Safety override should use limit orders, got: {kwargs}"
