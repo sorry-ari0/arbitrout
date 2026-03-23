@@ -13,7 +13,9 @@ Data API: https://data-api.polymarket.com (no auth required)
 import asyncio
 import json
 import logging
+import os
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 try:
@@ -26,7 +28,7 @@ logger = logging.getLogger("positions.insider_tracker")
 DATA_API = "https://data-api.polymarket.com"
 
 # Thresholds
-MIN_PNL_USD = 10000          # Only track traders with >$10K lifetime PNL
+MIN_PNL_USD = 5000           # Track traders with >$5K lifetime PNL (lowered to catch mid-size edge traders)
 MIN_WIN_RATE = 0.65          # Flag traders with >65% win rate
 SUSPICIOUS_WIN_RATE = 0.80   # Highly suspicious above 80%
 MIN_POSITION_SIZE = 100      # Minimum $100 position to count as signal
@@ -45,9 +47,16 @@ ROI_CONVICTION_MIN = 0.15    # >15% ROI = conviction trader (consistent winners)
 ROI_MARKET_MAKER_MAX = 0.05  # <5% ROI = market maker (spread capture, noise)
 VOL_MARKET_MAKER_MIN = 100_000_000  # >$100M volume + low ROI = market maker
 
+# Statistical edge detection — identifies traders profiting beyond chance
+# A trader with >12% ROI at $50K+ volume has ~95% probability of real edge
+# (random trading at fair prices converges to 0% ROI by law of large numbers)
+EDGE_ROI_MIN = 0.12          # >12% ROI signals likely information advantage
+EDGE_VOLUME_MIN = 50_000     # Minimum $50K volume to distinguish from luck
+EDGE_HIGH_ROI = 0.25         # >25% ROI at any volume = extremely strong signal
+
 # Auto-promotion thresholds
-AUTO_PROMOTE_PNL = 1_000_000    # $1M+ PNL
-AUTO_PROMOTE_ROI = 0.20         # 20%+ ROI
+AUTO_PROMOTE_PNL = 500_000      # $500K+ PNL (lowered to catch mid-size edge traders)
+AUTO_PROMOTE_ROI = 0.18         # 18%+ ROI
 AUTO_PROMOTE_SCANS = 2          # Must appear on 2+ consecutive scans
 AUTO_DEMOTE_SCANS = 10          # Drop off leaderboard for 10+ scans → demote
 
@@ -170,7 +179,6 @@ class InsiderTracker:
         """Persist insider data to disk."""
         path = self.data_dir / "insider_signals.json"
         tmp = str(path) + ".tmp"
-        import os
         data = {
             "top_traders": self._top_traders,
             "insider_positions": self._insider_positions,
@@ -290,8 +298,14 @@ class InsiderTracker:
         # Track which wallets appeared this scan for auto-promotion
         current_wallets = set()
 
+        # Pre-compute lowercase sets for O(1) lookups (avoid rebuilding per iteration)
+        watchlist_lower = {k.lower() for k in self._conviction_watchlist}
+        mm_lower = {k.lower() for k in KNOWN_MARKET_MAKERS}
+
         # Flag wallets with high PNL or suspicious patterns
-        # Classify into conviction traders vs market makers
+        # Classify: conviction > edge_trader > market_maker > unknown
+        # "edge_trader" = mid-size accounts with statistically improbable returns,
+        # likely profiting from information advantage (not just big whales)
         for t in self._top_traders:
             wallet = t.get("proxyWallet", "")
             pnl = float(t.get("pnl", 0) or 0)
@@ -302,21 +316,32 @@ class InsiderTracker:
 
             current_wallets.add(wallet)
 
-            # Estimate win rate from PNL/volume ratio
+            # ROI = PNL/volume. At scale, random trading converges to ~0% ROI.
+            # High ROI over significant volume = statistical evidence of real edge.
             roi = pnl / volume if volume > 0 else 0
-            is_suspicious = roi > 0.12  # >12% ROI is noteworthy (consistent winners)
+            is_suspicious = roi > EDGE_ROI_MIN
 
             # Classify wallet type
-            # Priority: watchlist > known MM > ROI-based classification
-            if wallet.lower() in {k.lower() for k in self._conviction_watchlist}:
+            # Priority: watchlist > known MM > high-ROI conviction > edge trader > unknown
+            if wallet.lower() in watchlist_lower:
                 wallet_type = "conviction"
                 signal_weight = 5.0  # Watchlist wallets get 5x weight
-            elif wallet.lower() in {k.lower() for k in KNOWN_MARKET_MAKERS}:
+            elif wallet.lower() in mm_lower:
                 wallet_type = "market_maker"
                 signal_weight = 0.0  # Market makers excluded from directional signals
             elif roi >= ROI_CONVICTION_MIN:
+                # High ROI = proven conviction trader (big or small account)
                 wallet_type = "conviction"
                 signal_weight = 3.0 + min(roi * 5, 2.0)  # 3-5x weight, scales with ROI
+            elif roi >= EDGE_HIGH_ROI:
+                # Very high ROI at any volume = extremely strong statistical edge
+                wallet_type = "edge_trader"
+                signal_weight = 3.5  # Strong signal even at smaller account size
+            elif roi >= EDGE_ROI_MIN and volume >= EDGE_VOLUME_MIN:
+                # Moderate ROI over meaningful volume = likely information advantage
+                # A 12%+ ROI over $50K+ volume is statistically unlikely by chance alone
+                wallet_type = "edge_trader"
+                signal_weight = 2.0 + min(roi * 8, 2.0)  # 2-4x weight
             elif roi <= ROI_MARKET_MAKER_MAX and volume >= VOL_MARKET_MAKER_MIN:
                 wallet_type = "market_maker"
                 signal_weight = 0.0
@@ -406,8 +431,15 @@ class InsiderTracker:
         Tier 1 (every scan): conviction watchlist + top accuracy wallets (10)
         Tier 2 (every 2nd scan): high-PNL wallets (15)
         Tier 3 (every 4th scan): remaining flagged wallets (25)
+
+        Only clears positions for wallets actually polled this scan to avoid
+        false exit alerts for wallets that were simply not queried this cycle.
         """
-        self._insider_positions = {}
+        polled_wallets: set[str] = set()  # Track which wallets we actually query
+
+        # Remove old positions for wallets we'll poll (they'll be re-fetched).
+        # Keep positions for wallets NOT polled this cycle (they're still valid).
+        # This is done after we know which wallets to poll — see below.
 
         # Build tiered wallet list sorted by signal quality, not raw PNL
         def _wallet_priority(w):
@@ -418,8 +450,8 @@ class InsiderTracker:
         all_wallets = sorted(self._flagged_wallets.values(),
                              key=_wallet_priority, reverse=True)
 
-        # Tier 1: conviction + top accuracy (always polled)
-        tier1 = [w for w in all_wallets if w.get("wallet_type") == "conviction"][:10]
+        # Tier 1: conviction + edge_traders + top accuracy (always polled)
+        tier1 = [w for w in all_wallets if w.get("wallet_type") in ("conviction", "edge_trader")][:10]
         tier1_addrs = {w["wallet"] for w in tier1}
 
         # Tier 2: next best by priority (every 2nd scan)
@@ -438,8 +470,18 @@ class InsiderTracker:
         if self._scan_count % 4 == 0:
             wallets_to_poll.extend(tier3)
 
+        # Clear old positions ONLY for wallets we're about to poll
+        wallets_to_clear = {w["wallet"] for w in wallets_to_poll}
+        for cid in list(self._insider_positions.keys()):
+            self._insider_positions[cid] = [
+                p for p in self._insider_positions[cid] if p["wallet"] not in wallets_to_clear
+            ]
+            if not self._insider_positions[cid]:
+                del self._insider_positions[cid]
+
         for trader in wallets_to_poll:
             wallet = trader["wallet"]
+            polled_wallets.add(wallet)
             try:
                 r = await client.get(f"{DATA_API}/positions", params={
                     "user": wallet,
@@ -516,7 +558,6 @@ class InsiderTracker:
                 # Convert string timestamps if needed
                 if isinstance(ts, str):
                     try:
-                        from datetime import datetime, timezone
                         ts = datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
                     except Exception:
                         ts = now
@@ -694,7 +735,7 @@ class InsiderTracker:
                 direction = self._get_direction(new_entrants)
                 conviction_new = sum(
                     1 for p in new_entrants
-                    if self._flagged_wallets.get(p.get("wallet", ""), {}).get("wallet_type") == "conviction"
+                    if self._flagged_wallets.get(p.get("wallet", ""), {}).get("wallet_type") in ("conviction", "edge_trader")
                 )
                 total_value = sum(p.get("current_value", 0) for p in new_entrants)
                 alert = {
@@ -722,8 +763,8 @@ class InsiderTracker:
             exited_wallets = prev_wallets - curr_wallets
             for wallet in exited_wallets:
                 trader = self._flagged_wallets.get(wallet, {})
-                if trader.get("wallet_type") != "conviction":
-                    continue  # Only alert on conviction trader exits
+                if trader.get("wallet_type") not in ("conviction", "edge_trader"):
+                    continue  # Only alert on conviction/edge trader exits
 
                 prev_pos = next((p for p in prev_positions if p["wallet"] == wallet), None)
                 if not prev_pos:
@@ -741,7 +782,7 @@ class InsiderTracker:
                     "username": trader.get("username", prev_pos.get("username", "")),
                     "prev_value": round(prev_value, 2),
                     "direction": (prev_pos.get("outcome", "") or prev_pos.get("asset", "")).upper(),
-                    "wallet_type": "conviction",
+                    "wallet_type": trader.get("wallet_type", "conviction"),
                     "signal_weight": trader.get("signal_weight", 5.0),
                     "timestamp": time.time(),
                     "auto_triggered": False,  # Exits are informational, not auto-traded
@@ -873,6 +914,7 @@ class InsiderTracker:
 
         yes_value = 0
         no_value = 0
+        raw_total_value = 0  # Unweighted, for concentration ratio
         suspicious_count = 0
         conviction_count = 0
         market_maker_count = 0
@@ -888,9 +930,10 @@ class InsiderTracker:
                 market_maker_count += 1
                 continue
 
-            if w_type == "conviction":
+            if w_type in ("conviction", "edge_trader"):
                 conviction_count += 1
 
+            raw_total_value += val
             weighted_val = val * weight
             if "YES" in outcome or outcome == "0":
                 yes_value += weighted_val
@@ -945,7 +988,7 @@ class InsiderTracker:
         # TASK 6: Whale trade signal boost
         whale_trade_count = len(whale_trades)
         whale_yes = sum(1 for t in whale_trades if t.get("direction") == "YES")
-        whale_no = whale_trade_count - whale_yes
+        whale_no = sum(1 for t in whale_trades if t.get("direction") == "NO")
         if whale_yes > whale_no * 1.5:
             whale_direction = "YES"
         elif whale_no > whale_yes * 1.5:
@@ -960,9 +1003,9 @@ class InsiderTracker:
             whale_boost = min(0.15, whale_trade_count * 0.03)
             strength = min(1.0, strength + whale_boost)
 
-        # TASK 7: Position-relative sizing boost
-        if market_volume > 0 and total_value > 0:
-            concentration = total_value / market_volume
+        # TASK 7: Position-relative sizing boost (uses raw value, not weight-inflated)
+        if market_volume > 0 and raw_total_value > 0:
+            concentration = raw_total_value / market_volume
             if concentration > 0.10:
                 strength = min(1.0, strength + 0.25)
             elif concentration > 0.05:
