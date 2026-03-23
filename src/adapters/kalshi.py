@@ -53,6 +53,7 @@ class KalshiAdapter(BaseAdapter):
     """
 
     PLATFORM_NAME = "kalshi"
+    CACHE_TTL_SECONDS = 55.0  # Kalshi has many orderbook fetches — cache longer
     AUTH_URL = "https://trading-api.kalshi.com/trade-api/v2"
     PUBLIC_URL = "https://api.elections.kalshi.com/trade-api/v2"
     RATE_LIMIT_SECONDS = 1.0
