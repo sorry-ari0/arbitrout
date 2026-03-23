@@ -255,16 +255,18 @@ ACTIVE MARKETS:
 For each headline, respond with exactly one line:
 <index>: SKIP
 or
-<index>: RELEVANT <market_title> | <side YES or NO> | <confidence 1-100> | <urgency LOW MEDIUM HIGH>
+<index>: RELEVANT <market_title> | <side YES or NO> | <confidence 1-100> | <urgency LOW MEDIUM HIGH> | <keywords>
 
 Rules:
 - RELEVANT if the headline materially affects ANY listed market's outcome — even indirectly
   Examples: Fed rate decisions affect crypto price markets, political news affects election/policy markets,
   geopolitical events affect commodity/currency markets, regulatory news affects crypto markets
 - SKIP only if the headline is truly unrelated to any market (lifestyle, sports not on the list, local news)
+- market_title: COPY the exact market title from the ACTIVE MARKETS list above. Do NOT rephrase or abbreviate.
 - side: YES if the news makes the market condition more likely, NO if less likely
 - confidence: how strongly this news shifts the probability (1-100). 60+ means clear directional impact.
 - urgency: LOW (background context), MEDIUM (notable development), HIGH (breaking — markets likely haven't reacted yet)
+- keywords: 2-4 key search terms to help match this signal to the market (e.g. "bitcoin,BTC,crypto,100000")
 - Think like a trader: what news creates an edge before the market adjusts?
 - When in doubt about relevance, mark RELEVANT with lower confidence — false negatives cost more than false positives"""
 
@@ -276,19 +278,25 @@ Rules:
             if not line:
                 continue
 
-            # Match: <index>: RELEVANT <market_title> | <side> | <confidence> | <urgency>
+            # Match: <index>: RELEVANT <market_title> | <side> | <confidence> | <urgency> | <keywords>
+            # Keywords field is optional for backwards compatibility
             # Handles both "0: RELEVANT ..." and "[0]: RELEVANT ..." formats
             match = re.match(
-                r"\[?(\d+)\]?\s*:\s*RELEVANT\s+(.+?)\s*\|\s*(YES|NO)\s*\|\s*(\d+)\s*\|\s*(LOW|MEDIUM|HIGH)",
+                r"\[?(\d+)\]?\s*:\s*RELEVANT\s+(.+?)\s*\|\s*(YES|NO)\s*\|\s*(\d+)\s*\|\s*(LOW|MEDIUM|HIGH)(?:\s*\|\s*(.+))?",
                 line,
             )
             if match:
+                keywords_raw = match.group(6)
+                keywords = []
+                if keywords_raw:
+                    keywords = [k.strip() for k in keywords_raw.split(",") if k.strip()]
                 signals.append({
                     "headline_index": int(match.group(1)),
                     "market_title": match.group(2).strip(),
                     "side": match.group(3),
                     "confidence": int(match.group(4)),
                     "urgency": match.group(5),
+                    "search_keywords": keywords,
                 })
 
         return signals
@@ -318,8 +326,8 @@ Rules:
 
         prompt = self._build_scan_prompt(headlines, markets)
 
-        # Scan may return many lines — allow more tokens (40 headlines * ~20 tokens each)
-        max_tokens = 1200
+        # Scan may return many lines — allow more tokens (40 headlines * ~30 tokens each with keywords)
+        max_tokens = 1500
 
         for provider in providers:
             try:
