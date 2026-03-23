@@ -17,6 +17,7 @@ class BaseAdapter(ABC):
     PLATFORM_NAME: str = ""
     BASE_URL: str = ""
     RATE_LIMIT_SECONDS: float = 1.0  # min seconds between requests
+    CACHE_TTL_SECONDS: float = 30.0  # return cached results if fresher than this
 
     def __init__(self):
         self.logger = logging.getLogger(f"adapters.{self.PLATFORM_NAME}")
@@ -32,6 +33,10 @@ class BaseAdapter(ABC):
     # ============================================================
     async def fetch_events(self) -> list[NormalizedEvent]:
         """Fetch events with caching and error handling."""
+        # Return cached results if still fresh
+        if self._cache and (time.time() - self._cache_time) < self.CACHE_TTL_SECONDS:
+            return self._cache
+
         self._status = "fetching"
         try:
             # Rate limiting

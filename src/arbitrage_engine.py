@@ -993,24 +993,32 @@ class ArbitrageScanner:
         scan_start = time.time()
 
         # 1. Fetch from all platforms
+        t1 = time.time()
         events = await self.registry.fetch_all()
         with self._lock:
             self._last_events = events
+        fetch_ms = int((time.time() - t1) * 1000)
 
         # 2. Match events
+        t2 = time.time()
         matched = match_events(events)
         with self._lock:
             self._last_matched = matched
+        match_ms = int((time.time() - t2) * 1000)
 
         # 3. Find arbitrage
+        t3 = time.time()
         opportunities = find_arbitrage(matched)
         with self._lock:
             self._last_opportunities = opportunities
+        arb_ms = int((time.time() - t3) * 1000)
 
         # 4. Compute feed
         feed = compute_feed(events)
         with self._lock:
             self._last_feed = feed
+
+        logger.info("Scan timing: fetch=%dms match=%dms arb=%dms", fetch_ms, match_ms, arb_ms)
 
         with self._lock:
             self._last_scan_time = time.time()
