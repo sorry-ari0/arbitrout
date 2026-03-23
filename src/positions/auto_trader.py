@@ -682,7 +682,9 @@ class AutoTrader:
             insider_mult = 1.0
             market_id = opp.get("buy_yes_market_id", "")
             if self.insider_tracker and market_id:
-                insider_signal = self.insider_tracker.get_insider_signal(market_id)
+                # Pass market volume for position-relative sizing signal
+                opp_volume = opp.get("volume", 0)
+                insider_signal = self.insider_tracker.get_insider_signal(market_id, market_volume=opp_volume)
                 if insider_signal and insider_signal.get("has_signal"):
                     strength = insider_signal.get("signal_strength", 0)
                     conviction_count = insider_signal.get("conviction_count", 0)
