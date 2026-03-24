@@ -1,9 +1,10 @@
 # Arbitrout + Lobsterminal — File Map
 # Updated: 2026-03-19 (added all new modules: executors, positions, news scanner)
+# Updated: 2026-03-24 (added new execution files, updated server.py line count)
 
 ## SUBSYSTEM 1: LOBSTERMINAL (Stock Terminal)
 
-### src/server.py (1288 lines)
+### src/server.py (925 lines)
 - imports: 1-37
 - verify_api_key: 92-102
 - _validate_symbol: 104-110
@@ -22,7 +23,7 @@
 - ws_prices: 1025-1064
 - static_routes: 1066-1077
 - utility functions: 1079-1268
-- arbitrage subsystem wiring: 1268-1288
+- arbitrage subsystem wiring: 1268-925
 
 ### src/static/js/app.js (2306 lines)
 - state/init: 18-58
