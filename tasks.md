@@ -357,7 +357,7 @@
    - Verify price differences are genuine arbitrage, not different market definitions
    - File: src/positions/auto_trader.py, src/event_matcher.py
 
-50. IN_PROGRESS - Update Arbitrout FILE_MAP.md for new files
+50. COMPLETED - Update Arbitrout FILE_MAP.md for new files
    - FILE_MAP.md is stale — maps Bloomberg files but Arbitrout server.py now has 925+ lines
    - Add new files: execution/crypto_spot_executor.py, execution/kraken_cli.py, execution/limitless_executor.py, execution/opinion_labs_executor.py, execution/robinhood_executor.py, positions/news_scanner.py, positions/news_ai.py, positions/decision_log.py
    - Run tools/update-file-map.py or manually update section maps
@@ -486,6 +486,7 @@
    - This gives a reasonable baseline immediately instead of waiting 7 days
    - In _load_state(), if loaded baselines are empty, log "Baselines empty, will seed on first poll"
    - File: src/positions/kalshi_whale_tracker.py
+
 
 
 
