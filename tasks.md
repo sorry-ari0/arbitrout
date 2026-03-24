@@ -298,7 +298,7 @@
    - Already implemented: threading.Lock at line 1011, _previous_prices_lock at line 950
    - All shared state mutations properly wrapped in lock blocks (lines 1028-1054)
 
-42. TODO - Add integration tests for adapter fetch cycles
+42. IN_PROGRESS - Add integration tests for adapter fetch cycles
    - Create `tests/test_adapters_integration.py`
    - Test each adapter's fetch_events() returns valid NormalizedEvent list (or gracefully fails)
    - Mock HTTP responses for deterministic testing
@@ -486,6 +486,7 @@
    - This gives a reasonable baseline immediately instead of waiting 7 days
    - In _load_state(), if loaded baselines are empty, log "Baselines empty, will seed on first poll"
    - File: src/positions/kalshi_whale_tracker.py
+
 
 
 
