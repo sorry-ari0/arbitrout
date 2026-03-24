@@ -397,7 +397,7 @@
    - Show breaking news alerts that triggered immediate trades
    - File: src/static/js/arbitrout.js, src/static/css/arbitrout.css
 
-57. IN_PROGRESS - Add multi-platform executor status to dashboard
+57. COMPLETED - Add multi-platform executor status to dashboard
    - Dashboard should show which executors are active, their paper balances, and trade counts per platform
    - Currently only shows aggregate stats — need per-platform breakdown
    - File: src/static/js/arbitrout.js, src/positions/position_router.py
@@ -486,6 +486,7 @@
    - This gives a reasonable baseline immediately instead of waiting 7 days
    - In _load_state(), if loaded baselines are empty, log "Baselines empty, will seed on first poll"
    - File: src/positions/kalshi_whale_tracker.py
+
 
 
 
