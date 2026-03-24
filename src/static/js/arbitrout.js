@@ -11,9 +11,12 @@ let feedItems = [];
 let lastLoadedOpportunities = []; // To hold opportunities for restoring selected
 let lastSelectedOppId = localStorage.getItem('arbSelectedOppId') || null; // For restoring selected opportunity
 
-// NEW: For hedge packages
+// NEW: For hedge packages, saved markets, and news
 let hedgePackages = [];
+let savedMarkets = [];
+let newsItems = [];
 let arbHedgePollingInterval = null; // New interval for hedge packages
+let arbNewsPollingInterval = null; // NEW interval for news scanner
 
 // === PIXEL ART (CSS grid of div cells) ===
 function createPixelGrid(colorMap, scale) {
@@ -181,10 +184,12 @@ function startArbPolling() {
     loadOpportunities();
     loadSavedMarkets();
     loadHedgePackages(); // NEW: Load hedge packages
+    loadNews(); // NEW: Load news
 
     arbPollingInterval = setInterval(loadOpportunities, 15000);
     arbScanInterval = setInterval(triggerScan, 60000);
     arbHedgePollingInterval = setInterval(loadHedgePackages, 30000); // NEW: Poll hedge packages every 30s
+    arbNewsPollingInterval = setInterval(loadNews, 60000); // NEW: Poll news every 60s
     connectArbWs();
 }
 
@@ -200,6 +205,10 @@ function stopArbPolling() {
     if (arbHedgePollingInterval) { // NEW: Clear hedge polling interval
         clearInterval(arbHedgePollingInterval);
         arbHedgePollingInterval = null;
+    }
+    if (arbNewsPollingInterval) { // NEW: Clear news polling interval
+        clearInterval(arbNewsPollingInterval);
+        arbNewsPollingInterval = null;
     }
     if (arbWs) {
         arbWs.close();
@@ -238,6 +247,14 @@ function connectArbWs() {
             renderOpportunities(data.data);
         } else if (data.type === 'feed') {
             addFeedItem(data.data);
+        } else if (data.type === 'news_alert') { // NEW
+            addFeedItem({
+                time: new Date().toLocaleTimeString(),
+                platform: 'NEWS ALERT',
+                title: data.data.headline,
+                direction: 'alert'
+            });
+            loadNews(); // Reload news to show new headlines
         }
     };
 
@@ -740,18 +757,82 @@ function renderFeed() {
     });
 }
 
+// === STACKED PANELS (NEWS, SAVED, HEDGE) ===
+// This function renders all three sections in the bottom-right panel
+function renderAllStackedPanels() {
+    // Target the bottom-right arb-panel, assuming arbitrout-container is a 2x2 grid
+    var stackedPanelContainer = document.querySelector('.arbitrout-container > .arb-panel:nth-child(4)');
+
+    // If the element doesn't have an ID, give it one for easier access in CSS/JS
+    if (stackedPanelContainer && !stackedPanelContainer.id) {
+        stackedPanelContainer.id = 'arb-bottom-right-panel';
+    }
+
+    if (!stackedPanelContainer) {
+        console.error("Could not find the target container for stacked panels (bottom-right arb-panel).");
+        return;
+    }
+
+    // Clear existing content in the panel body
+    var panelBody = stackedPanelContainer.querySelector('.arb-panel-body');
+    if (!panelBody) {
+        panelBody = document.createElement('div');
+        panelBody.className = 'arb-panel-body';
+        stackedPanelContainer.appendChild(panelBody);
+    } else {
+        while (panelBody.firstChild) {
+            panelBody.removeChild(panelBody.firstChild);
+        }
+    }
+
+    // --- Render News Scanner Section ---
+    var newsHeader = document.createElement('div');
+    newsHeader.className = 'arb-section-header';
+    newsHeader.textContent = 'NEWS SCANNER';
+    panelBody.appendChild(newsHeader);
+    var newsList = document.createElement('div');
+    newsList.id = 'news-list';
+    newsList.className = 'arb-section-content'; // Use a specific class for content areas
+    renderNewsContent(newsList, newsItems);
+    panelBody.appendChild(newsList);
+
+    // --- Render Saved Markets Section ---
+    var savedHeader = document.createElement('div');
+    savedHeader.className = 'arb-section-header';
+    savedHeader.textContent = 'BOOKMARKED MARKETS';
+    panelBody.appendChild(savedHeader);
+    var savedList = document.createElement('div');
+    savedList.id = 'saved-list';
+    savedList.className = 'arb-section-content';
+    renderSavedContent(savedList, savedMarkets);
+    panelBody.appendChild(savedList);
+
+    // --- Render Hedge Packages Section ---
+    var hedgeHeader = document.createElement('div');
+    hedgeHeader.className = 'arb-section-header';
+    hedgeHeader.textContent = 'HEDGE PACKAGES';
+    panelBody.appendChild(hedgeHeader);
+    var hedgeList = document.createElement('div');
+    hedgeList.id = 'hedge-packages-list';
+    hedgeList.className = 'arb-section-content';
+    renderHedgePackagesContent(hedgeList, hedgePackages);
+    panelBody.appendChild(hedgeList);
+}
+
+
 // === SAVED MARKETS ===
 function loadSavedMarkets() {
     fetch('/api/arbitrage/saved')
         .then(function(r) { return r.json(); })
-        .then(function(data) { renderSaved(data); })
+        .then(function(data) {
+            savedMarkets = data; // Store data globally
+            renderAllStackedPanels(); // Render all sections in the stacked container
+        })
         .catch(function() {});
 }
 
-function renderSaved(items) {
-    var container = document.getElementById('saved-list');
-    if (!container) return;
-
+// Refactored to populate a given container
+function renderSavedContent(container, items) {
     while (container.firstChild) {
         container.removeChild(container.firstChild);
     }
@@ -801,44 +882,19 @@ function removeSaved(matchId) {
 }
 
 
-// === HEDGE PACKAGES (NEW SECTION) ===
+// === HEDGE PACKAGES ===
 function loadHedgePackages() {
     fetch('/api/arbitrage/hedge-packages')
         .then(function(r) { return r.json(); })
         .then(function(data) {
             hedgePackages = data;
-            renderHedgePackages(data);
+            renderAllStackedPanels(); // Render all sections in the stacked container
         })
         .catch(function(err) { console.error('Hedge packages fetch error:', err); });
 }
 
-function renderHedgePackages(packages) {
-    var container = document.getElementById('hedge-packages-list');
-    if (!container) {
-        // If container doesn't exist, create it dynamically
-        container = document.createElement('div');
-        container.id = 'hedge-packages-list';
-        var arbRightCol = document.querySelector('.arb-col-right');
-        if (arbRightCol) {
-            var savedList = document.getElementById('saved-list');
-            if (savedList) {
-                // Insert after saved-list
-                savedList.parentNode.insertBefore(container, savedList.nextSibling);
-            } else {
-                // Or just append to the right column if saved-list is not found
-                arbRightCol.appendChild(container);
-            }
-
-            // Add a header for the section
-            var header = document.createElement('div');
-            header.className = 'arb-section-header'; // Assuming this class exists for styling
-            header.textContent = 'HEDGE PACKAGES';
-            container.parentNode.insertBefore(header, container);
-        } else {
-            return; // Cannot render without a parent container
-        }
-    }
-
+// Refactored to populate a given container
+function renderHedgePackagesContent(container, packages) {
     while (container.firstChild) {
         container.removeChild(container.firstChild);
     }
@@ -893,7 +949,7 @@ function renderHedgePackages(packages) {
             item.appendChild(valSpan);
             metrics.appendChild(item);
         };
-        
+
         addMetric('Spot Price', '$' + pkg.spot_price.toFixed(2));
         addMetric('PM NO Price', (pkg.pm_buy_no_price * 100).toFixed(1) + '\u00A2', '#ff9800');
         addMetric('Max Profit', '$' + pkg.max_profit.toFixed(2), pkg.max_profit >= 0 ? 'var(--arb-green)' : 'var(--arb-red)');
@@ -926,6 +982,100 @@ function renderHedgePackages(packages) {
         card.appendChild(scenariosList);
 
         container.appendChild(card);
+    });
+}
+
+// === NEWS SCANNER (NEW SECTION) ===
+function loadNews() {
+    fetch('/api/arbitrage/news')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            newsItems = data || []; // Ensure newsItems is an array
+            renderAllStackedPanels(); // Render all sections in the stacked container
+        })
+        .catch(function(err) { console.error('News fetch error:', err); });
+}
+
+function renderNewsContent(container, newsData) {
+    while (container.firstChild) {
+        container.removeChild(container.firstChild);
+    }
+
+    if (!newsData || newsData.length === 0) {
+        var empty = document.createElement('div');
+        empty.className = 'arb-empty';
+        empty.textContent = 'Scanning for breaking news...';
+        container.appendChild(empty);
+        return;
+    }
+
+    newsData.slice(0, 20).forEach(function(item) { // Limit to 20 recent news items
+        var newsEntry = document.createElement('div');
+        newsEntry.className = 'news-entry';
+        if (item.is_breaking) {
+            newsEntry.classList.add('news-breaking');
+        }
+
+        var header = document.createElement('div');
+        header.className = 'news-header';
+        var timeSpan = document.createElement('span');
+        timeSpan.className = 'news-time';
+        timeSpan.textContent = new Date(item.timestamp).toLocaleTimeString() + ' ';
+        header.appendChild(timeSpan);
+        var headlineLink = document.createElement('a');
+        headlineLink.className = 'news-headline';
+        headlineLink.textContent = item.headline;
+        headlineLink.href = item.url || '#';
+        headlineLink.target = '_blank';
+        headlineLink.rel = 'noopener';
+        header.appendChild(headlineLink);
+        newsEntry.appendChild(header);
+
+        if (item.matched_markets && item.matched_markets.length > 0) {
+            var marketsDiv = document.createElement('div');
+            marketsDiv.className = 'news-markets';
+            var marketPrefix = document.createElement('span');
+            marketPrefix.style.color = 'var(--arb-muted)';
+            marketPrefix.textContent = 'Markets: ';
+            marketsDiv.appendChild(marketPrefix);
+            item.matched_markets.forEach(function(market, idx) {
+                var marketSpan = document.createElement('span');
+                marketSpan.className = 'news-market-tag';
+                marketSpan.textContent = market.title;
+                if (market.match_id) {
+                     marketSpan.style.cursor = 'pointer';
+                     marketSpan.title = 'View details';
+                     marketSpan.addEventListener('click', function() {
+                         var opp = lastLoadedOpportunities.find(o => (o.match_id || (o.matched_event ? o.matched_event.match_id : null)) === market.match_id);
+                         if (opp) showEventDetail(opp);
+                     });
+                }
+                marketsDiv.appendChild(marketSpan);
+                if (idx < item.matched_markets.length - 1) {
+                    marketsDiv.appendChild(document.createTextNode(', '));
+                }
+            });
+            newsEntry.appendChild(marketsDiv);
+        }
+
+        if (item.trade_decisions && item.trade_decisions.length > 0) {
+            var tradesDiv = document.createElement('div');
+            tradesDiv.className = 'news-trades';
+            tradesDiv.textContent = 'Trades: ';
+            item.trade_decisions.forEach(function(decision, idx) {
+                var tradeSpan = document.createElement('span');
+                tradeSpan.className = 'news-trade-tag';
+                tradeSpan.style.background = 'rgba(0, 230, 118, 0.1)';
+                tradeSpan.style.color = 'var(--arb-green)';
+                tradeSpan.textContent = decision.type.toUpperCase() + (decision.platform ? ' on ' + decision.platform : '') + (decision.price ? ' @ ' + (decision.price * 100).toFixed(0) + '\u00A2' : '');
+                tradesDiv.appendChild(tradeSpan);
+                if (idx < item.trade_decisions.length - 1) {
+                    tradesDiv.appendChild(document.createTextNode(', '));
+                }
+            });
+            newsEntry.appendChild(tradesDiv);
+        }
+        container.appendChild(newsEntry);
     });
 }
 
