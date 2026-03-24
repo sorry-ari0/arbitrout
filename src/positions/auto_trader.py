@@ -21,6 +21,7 @@ logger = logging.getLogger("positions.auto_trader")
 
 # Position limits — derived from bankroll at runtime
 MAX_CONCURRENT = 7           # Max 7 open packages (reserve 3 slots for news-driven trades)
+INSIDER_EXTRA_SLOTS = 3      # Extra slots beyond MAX_CONCURRENT for insider-signaled trades
 PORTFOLIO_EXPOSURE_CAP = 0.40  # Kelly portfolio rule: never exceed 40% of total bankroll
 
 # Bankroll -> dollar limit ratios
@@ -386,11 +387,18 @@ class AutoTrader:
         self._refresh_limits()
 
         open_pkgs = self.pm.list_packages("open")
+        insider_only_mode = False
         if len(open_pkgs) >= MAX_CONCURRENT:
-            logger.info("Auto trader: at max concurrent positions (%d), skipping", len(open_pkgs))
-            if self.dlog:
-                self.dlog.log_scan_skip("max_concurrent", open_positions=len(open_pkgs))
-            return
+            if len(open_pkgs) >= MAX_CONCURRENT + INSIDER_EXTRA_SLOTS:
+                logger.info("Auto trader: at max concurrent + insider slots (%d/%d), skipping",
+                            len(open_pkgs), MAX_CONCURRENT + INSIDER_EXTRA_SLOTS)
+                if self.dlog:
+                    self.dlog.log_scan_skip("max_concurrent", open_positions=len(open_pkgs))
+                return
+            # In the extra-slots zone: only allow insider-signaled trades
+            insider_only_mode = True
+            logger.info("Auto trader: at max concurrent (%d/%d), insider-only mode (%d extra slots)",
+                         len(open_pkgs), MAX_CONCURRENT, MAX_CONCURRENT + INSIDER_EXTRA_SLOTS - len(open_pkgs))
 
         total_exposure = sum(p.get("total_cost", 0) for p in open_pkgs)
         if total_exposure >= self._max_total_exposure:
@@ -419,7 +427,8 @@ class AutoTrader:
                 self.dlog.log_scan_skip("daily_limit", trades_today=self._daily_trade_count)
 
         remaining_budget = min(self._max_total_exposure - total_exposure, kelly_cap - total_exposure)
-        remaining_slots = MAX_CONCURRENT - len(open_pkgs)
+        effective_max = (MAX_CONCURRENT + INSIDER_EXTRA_SLOTS) if insider_only_mode else MAX_CONCURRENT
+        remaining_slots = effective_max - len(open_pkgs)
 
         # Split budget: reserve ARB_BUDGET_RESERVE_PCT for cross-platform arbs.
         # Directional bets can only use the unreserved portion.
@@ -781,6 +790,14 @@ class AutoTrader:
                 "entry_price": favored,
                 "side": "YES" if buy_yes_price <= buy_no_price else "NO",
             }
+
+            # In insider-only mode (extra slots), only allow insider-signaled trades
+            if insider_only_mode and insider_mult <= 1.0 and cross_platform_mult <= 1.0:
+                self._trades_skipped += 1
+                if self.dlog:
+                    self.dlog.log_opportunity_skip(opp_title, "insider_only_mode",
+                                                   insider_mult=insider_mult)
+                continue
 
             # Skip low-score opportunities
             if score < MIN_SPREAD_PCT:
