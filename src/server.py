@@ -21,7 +21,7 @@ import httpx
 import feedparser
 
 # NEW: Import the logging configuration and the ContextVar for request_id
-from src import logging_config
+import logging_config
 _request_id_ctx = logging_config._request_id_ctx
 
 # NEW: Configure logging globally before any loggers are instantiated
@@ -418,6 +418,7 @@ async def lifespan(app: FastAPI):
                 kalshi_adapter = None
             kalshi_whale = KalshiWhaleTracker(data_dir=DATA_DIR / "positions", kalshi_adapter=kalshi_adapter)
             kalshi_whale.start()
+            app.state.kalshi_whale_tracker = kalshi_whale  # Expose via app.state for API
             insider.kalshi_whale_tracker = kalshi_whale  # Wire for cross-platform convergence
             global _auto_trader_ref, _probability_model
             _probability_model = ProbabilityModel()
@@ -605,7 +606,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_calibration_loop())
     app.state.calibration_engine = _calibration_engine
 
-    logger.info("Lobsterminal started on port 8500", event_type="server_startup") # Added event_type
+    logger.info("Lobsterminal started on port 8500", extra={"event_type": "server_startup"})
     yield
     # Shutdown
     if _political_analyzer:
@@ -623,6 +624,8 @@ async def lifespan(app: FastAPI):
                 await news_ai.close()
             if insider:
                 insider.stop()
+            if hasattr(app.state, 'kalshi_whale_tracker') and app.state.kalshi_whale_tracker:
+                app.state.kalshi_whale_tracker.stop()
             # Shutdown new strategy modules
             if _btc_sniper:
                 _btc_sniper.stop()
@@ -637,7 +640,7 @@ async def lifespan(app: FastAPI):
     if _ARBITRAGE_AVAILABLE:
         scan_task.cancel()
         await arb_registry.close_all()
-    logger.info("Lobsterminal shutting down", event_type="server_shutdown") # Added event_type
+    logger.info("Lobsterminal shutting down", extra={"event_type": "server_shutdown"})
 
 
 app = FastAPI(title="Lobsterminal", lifespan=lifespan)
@@ -653,19 +656,19 @@ async def add_request_id_middleware(request: Request, call_next):
         # Log successful requests and their duration
         duration_ms = (time.perf_counter() - start_time) * 1000
         if response.status_code < 400:
-            logger.info("request_completed", event_type="http_request",
-                        path=request.url.path, method=request.method,
-                        status_code=response.status_code, duration_ms=f"{duration_ms:.2f}")
+            logger.info("request_completed", extra={"event_type": "http_request",
+                        "path": request.url.path, "method": request.method,
+                        "status_code": response.status_code, "duration_ms": f"{duration_ms:.2f}"})
         else:
-            logger.warning("request_completed_with_error_status", event_type="http_request",
-                           path=request.url.path, method=request.method,
-                           status_code=response.status_code, duration_ms=f"{duration_ms:.2f}")
+            logger.warning("request_completed_with_error_status", extra={"event_type": "http_request",
+                           "path": request.url.path, "method": request.method,
+                           "status_code": response.status_code, "duration_ms": f"{duration_ms:.2f}"})
     except Exception as exc:
         duration_ms = (time.perf_counter() - start_time) * 1000
-        logger.error("request_failed", event_type="http_request_error",
-                     path=request.url.path, method=request.method,
-                     status_code=500, duration_ms=f"{duration_ms:.2f}",
-                     error_message=str(exc), error_type=type(exc).__name__)
+        logger.error("request_failed", extra={"event_type": "http_request_error",
+                     "path": request.url.path, "method": request.method,
+                     "status_code": 500, "duration_ms": f"{duration_ms:.2f}",
+                     "error_message": str(exc), "error_type": type(exc).__name__})
         raise # Re-raise the exception after logging
     finally:
         # Reset the context variable to its previous state
@@ -1441,6 +1444,24 @@ async def get_derivatives_insiders():
         "markets_with_signals": stats.get("markets_with_signals", 0),
         "last_scan_ago_min": stats.get("last_scan_ago_min"),
     })
+
+
+# --- Kalshi whale tracker API endpoints ---
+@app.get("/api/derivatives/whales", dependencies=[Depends(verify_api_key)])
+async def get_derivatives_whales():
+    """Get Kalshi whale tracker stats with active signals."""
+    if not hasattr(app.state, "kalshi_whale_tracker") or not app.state.kalshi_whale_tracker:
+        raise HTTPException(status_code=503, detail="Kalshi whale tracker not initialized")
+    return JSONResponse(content=app.state.kalshi_whale_tracker.get_stats())
+
+
+@app.get("/api/derivatives/whales/{ticker}", dependencies=[Depends(verify_api_key)])
+async def get_derivatives_whale_signal(ticker: str):
+    """Get whale signal for a specific Kalshi market ticker."""
+    if not hasattr(app.state, "kalshi_whale_tracker") or not app.state.kalshi_whale_tracker:
+        raise HTTPException(status_code=503, detail="Kalshi whale tracker not initialized")
+    signal = app.state.kalshi_whale_tracker.get_whale_signal(ticker, volume_24h=0)
+    return JSONResponse(content=signal)
 
 
 # --- Static files ---

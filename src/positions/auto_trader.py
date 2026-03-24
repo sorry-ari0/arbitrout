@@ -20,8 +20,9 @@ except ImportError:
 logger = logging.getLogger("positions.auto_trader")
 
 # Position limits — derived from bankroll at runtime
-MAX_CONCURRENT = 7           # Max 7 open packages (reserve 3 slots for news-driven trades)
+MAX_CONCURRENT = 10          # Max 10 open packages (raised from 7 — was blocking all new trades)
 INSIDER_EXTRA_SLOTS = 3      # Extra slots beyond MAX_CONCURRENT for insider-signaled trades
+NEWS_EXTRA_SLOTS = 2         # Extra slots beyond MAX_CONCURRENT for news-driven trades
 PORTFOLIO_EXPOSURE_CAP = 0.40  # Kelly portfolio rule: never exceed 40% of total bankroll
 
 # Bankroll -> dollar limit ratios
@@ -388,19 +389,20 @@ class AutoTrader:
 
         open_pkgs = self.pm.list_packages("open")
         insider_only_mode = False
+        news_only_mode = False
+        _hard_max = MAX_CONCURRENT + max(INSIDER_EXTRA_SLOTS, NEWS_EXTRA_SLOTS)
         if len(open_pkgs) >= MAX_CONCURRENT:
-            if len(open_pkgs) >= MAX_CONCURRENT + INSIDER_EXTRA_SLOTS:
-                logger.info("Auto trader: at max concurrent + insider slots (%d/%d), skipping",
-                            len(open_pkgs), MAX_CONCURRENT + INSIDER_EXTRA_SLOTS)
+            if len(open_pkgs) >= _hard_max:
+                logger.info("Auto trader: at hard max (%d/%d), skipping",
+                            len(open_pkgs), _hard_max)
                 if self.dlog:
                     self.dlog.log_scan_skip("max_concurrent", open_positions=len(open_pkgs))
                 return
-            # In the extra-slots zone: only allow insider-signaled trades
+            # In the extra-slots zone: only allow insider-signaled or news-driven trades
             insider_only_mode = True
-            if self.dlog:
-                self.dlog.log_scan_skip("insider_only_mode", open_positions=len(open_pkgs))
-            logger.info("Auto trader: at max concurrent (%d/%d), insider-only mode (%d extra slots)",
-                         len(open_pkgs), MAX_CONCURRENT, MAX_CONCURRENT + INSIDER_EXTRA_SLOTS - len(open_pkgs))
+            news_only_mode = True
+            logger.info("Auto trader: at max concurrent (%d/%d), insider+news only mode (%d extra slots)",
+                         len(open_pkgs), MAX_CONCURRENT, _hard_max - len(open_pkgs))
 
         total_exposure = sum(p.get("total_cost", 0) for p in open_pkgs)
         if total_exposure >= self._max_total_exposure:
@@ -429,7 +431,7 @@ class AutoTrader:
                 self.dlog.log_scan_skip("daily_limit", trades_today=self._daily_trade_count)
 
         remaining_budget = min(self._max_total_exposure - total_exposure, kelly_cap - total_exposure)
-        effective_max = (MAX_CONCURRENT + INSIDER_EXTRA_SLOTS) if insider_only_mode else MAX_CONCURRENT
+        effective_max = _hard_max if (insider_only_mode or news_only_mode) else MAX_CONCURRENT
         remaining_slots = effective_max - len(open_pkgs)
 
         # Split budget: reserve ARB_BUDGET_RESERVE_PCT for cross-platform arbs.
@@ -625,9 +627,15 @@ class AutoTrader:
                         pass
                 is_near_expiry = 2 < days_to_expiry <= 30
 
+            # Guaranteed-profit strategies (multi_outcome_arb, portfolio_no) resolve
+            # at exactly $1.00 regardless of timing — skip duration filters entirely.
+            opp_type = opp.get("opportunity_type", "")
+            guaranteed_profit = opp_type in ("multi_outcome_arb", "portfolio_no")
+
             # Skip short-duration markets (15-min, 1-hour crypto)
             # Research: dynamic fees up to 3.15%, 73% of arb captured by sub-100ms bots
-            if hours_to_expiry < MIN_HOURS_TO_EXPIRY:
+            # Bypass: guaranteed-profit arbs have only upside at any duration.
+            if hours_to_expiry < MIN_HOURS_TO_EXPIRY and not guaranteed_profit:
                 self._trades_skipped += 1
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "short_duration",
@@ -635,7 +643,8 @@ class AutoTrader:
                 continue
 
             # Skip markets expiring within 2 days
-            if days_to_expiry <= 2:
+            # Bypass: guaranteed-profit arbs profit at resolution, short expiry is fine.
+            if days_to_expiry <= 2 and not guaranteed_profit:
                 self._trades_skipped += 1
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "too_near_expiry", days=days_to_expiry)
@@ -803,15 +812,16 @@ class AutoTrader:
                 "side": "YES" if buy_yes_price <= buy_no_price else "NO",
             }
 
-            # In insider-only mode (extra slots), only allow insider-signaled trades
-            if insider_only_mode and insider_mult <= 1.0 and cross_platform_mult <= 1.0:
+            # In extra-slots mode: only allow insider-signaled OR news-driven trades
+            is_news = bool(opp.get("_news_driven"))
+            if (insider_only_mode or news_only_mode) and insider_mult <= 1.0 and cross_platform_mult <= 1.0 and not is_news:
                 self._trades_skipped += 1
                 insider_mode_skipped_filter_count += 1
                 if self.dlog:
-                    self.dlog.log_opportunity_skip(opp_title, "insider_only_mode",
+                    self.dlog.log_opportunity_skip(opp_title, "insider_news_only_mode",
                                                    insider_mult=insider_mult)
                 continue
-            if insider_only_mode:
+            if insider_only_mode or news_only_mode:
                 insider_mode_passed_filter_count += 1
 
             # Skip low-score opportunities
@@ -824,8 +834,6 @@ class AutoTrader:
 
             # Portfolio concentration check: skip if one category exceeds limit.
             # Bypass for guaranteed-profit strategies (multi_outcome_arb, portfolio_no).
-            opp_type = opp.get("opportunity_type", "")
-            guaranteed_profit = opp_type in ("multi_outcome_arb", "portfolio_no")
 
             # Daily limit: skip non-guaranteed-profit trades when at cap
             if daily_limit_hit and not guaranteed_profit:

@@ -1,4 +1,4 @@
-"""Exit engine — 60s scan loop with 21 heuristic triggers and safety overrides.
+"""Exit engine — 60s scan loop with 22 heuristic triggers and safety overrides.
 
 Evaluates open packages, fires triggers, routes to AI advisor or immediate exit.
 Safety overrides (spread inversion, political event resolved) bypass LLM entirely.
@@ -60,9 +60,12 @@ T_LONGSHOT_DECAY = 20        # Favorite-longshot: longshots ($<0.30) decay faste
 # Category: Political (21)
 T_POLITICAL_EVENT_RESOLVED = 21  # Contract in cluster settled → evaluate all legs
 
+# Category: Staleness (22)
+T_MARKET_RESOLVED = 22           # SAFETY: Any leg at 0.99+/0.01- = market resolved, auto-exit
+
 
 def evaluate_heuristics(pkg: dict) -> list[dict]:
-    """Evaluate all 21 heuristic triggers against a package. Returns list of fired triggers."""
+    """Evaluate all 22 heuristic triggers against a package. Returns list of fired triggers."""
     triggers: list[dict] = []
     strategy = pkg.get("strategy_type", "")
     legs = pkg.get("legs", [])
@@ -272,17 +275,32 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
     pass
 
     # ── 19: Stale Position (Triple Barrier time barrier) ──────────────────
-    # Research: exit after 7 days if position hasn't moved significantly.
-    # Prevents capital from being tied up in dead markets.
-    # Skip for hold-to-resolution: these are MEANT to be held until the event resolves.
+    # Research: exit after 3 days if position hasn't moved significantly.
+    # Prevents capital from being tied up in dead markets (was 7 days — too long,
+    # tied up 8 slots for 48h+ blocking all new trades).
     created_at = pkg.get("created_at", 0)
     if not pkg.get("_hold_to_resolution"):
         if created_at:
             days_open = (time.time() - created_at) / 86400
-            if days_open >= 7 and abs(pnl_pct) < 5:
+            if days_open >= 3 and abs(pnl_pct) < 5:
                 triggers.append({"trigger_id": T_STALE_POSITION, "name": "stale_position",
                     "details": f"Position open {days_open:.1f} days with only {pnl_pct:+.1f}% P&L — capital not working",
-                    "action": "review", "safety_override": False})
+                    "action": "full_exit", "safety_override": False})
+
+    # ── 22: Market Resolved (SAFETY OVERRIDE) ──────────────────────────
+    # If ANY open leg is at 0.99+ or 0.01- the market has effectively resolved.
+    # Auto-exit immediately to free the slot and realize the P&L.
+    # Works for ALL strategy types including hold-to-resolution.
+    # Aggregated into a single trigger to avoid duplicate exit attempts.
+    open_legs = [l for l in legs if l.get("status") == "open"]
+    resolved_legs = [l for l in open_legs
+                     if l.get("current_price", 0.5) >= 0.99 or l.get("current_price", 0.5) <= 0.01]
+    if resolved_legs:
+        leg_ids = [l["leg_id"] for l in resolved_legs]
+        prices = [f"${l.get('current_price', 0):.4f}" for l in resolved_legs]
+        triggers.append({"trigger_id": T_MARKET_RESOLVED, "name": "market_resolved",
+            "details": f"{len(resolved_legs)} leg(s) resolved: {', '.join(leg_ids)} at {', '.join(prices)}",
+            "action": "immediate_exit", "safety_override": True})
 
     # ── 20: Longshot Decay ────────────────────────────────────────────────
     # Research (favorite-longshot bias): contracts bought <$0.30 decay faster
@@ -701,7 +719,7 @@ class ExitEngine:
     async def _auto_execute_triggers(self, pkg: dict, triggers: list[dict]):
         """Auto-execute mechanical triggers when AI is unavailable."""
         for trigger in triggers:
-            if trigger["name"] in ("target_hit",):
+            if trigger["name"] in ("target_hit", "stale_position"):
                 logger.info("Auto-executing %s on %s: %s",
                             trigger["name"], pkg["id"], trigger["details"])
                 if self.dlog:
@@ -725,7 +743,7 @@ class ExitEngine:
                             use_limit=True)
                         break
             elif trigger["name"] in ("correlation_break", "time_decay", "negative_drift",
-                                       "platform_error", "stale_position", "longshot_decay"):
+                                       "platform_error", "longshot_decay"):
                 self.pm.add_alert(pkg["id"], trigger["trigger_id"], trigger["name"],
                     {"details": trigger["details"], "action": trigger["action"]})
             else:

@@ -610,6 +610,15 @@ class NewsScanner:
                         confidence=confidence, urgency=urgency,
                         size=round(trade_size, 2), reasoning=reasoning,
                     )
+                    # Also log as trade_opened for unified analysis
+                    self.dlog.log_trade_opened(
+                        pkg_id=pkg.get("id", ""), title=f"News: {title}",
+                        strategy="news_driven", side=side,
+                        price=pkg["legs"][0].get("entry_price", 0) if pkg.get("legs") else 0,
+                        size=round(trade_size, 2), score=confidence,
+                        spread_pct=0, conviction=confidence / 100.0,
+                        days_to_expiry=0, volume=0,
+                    )
             else:
                 logger.warning("News scanner: execution failed for '%s': %s",
                                title[:60], result.get("error"))
