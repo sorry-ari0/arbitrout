@@ -11,6 +11,10 @@ let feedItems = [];
 let lastLoadedOpportunities = []; // To hold opportunities for restoring selected
 let lastSelectedOppId = localStorage.getItem('arbSelectedOppId') || null; // For restoring selected opportunity
 
+// NEW: For hedge packages
+let hedgePackages = [];
+let arbHedgePollingInterval = null; // New interval for hedge packages
+
 // === PIXEL ART (CSS grid of div cells) ===
 function createPixelGrid(colorMap, scale) {
     // colorMap: 2D array of hex colors (null = transparent)
@@ -174,9 +178,13 @@ function switchMode(mode, isInit) {
 // === POLLING + AUTO-SCAN ===
 function startArbPolling() {
     triggerScan();
+    loadOpportunities();
     loadSavedMarkets();
+    loadHedgePackages(); // NEW: Load hedge packages
+
     arbPollingInterval = setInterval(loadOpportunities, 15000);
     arbScanInterval = setInterval(triggerScan, 60000);
+    arbHedgePollingInterval = setInterval(loadHedgePackages, 30000); // NEW: Poll hedge packages every 30s
     connectArbWs();
 }
 
@@ -188,6 +196,10 @@ function stopArbPolling() {
     if (arbScanInterval) {
         clearInterval(arbScanInterval);
         arbScanInterval = null;
+    }
+    if (arbHedgePollingInterval) { // NEW: Clear hedge polling interval
+        clearInterval(arbHedgePollingInterval);
+        arbHedgePollingInterval = null;
     }
     if (arbWs) {
         arbWs.close();
@@ -787,6 +799,136 @@ function removeSaved(matchId) {
         method: 'DELETE'
     }).then(function() { loadSavedMarkets(); });
 }
+
+
+// === HEDGE PACKAGES (NEW SECTION) ===
+function loadHedgePackages() {
+    fetch('/api/arbitrage/hedge-packages')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            hedgePackages = data;
+            renderHedgePackages(data);
+        })
+        .catch(function(err) { console.error('Hedge packages fetch error:', err); });
+}
+
+function renderHedgePackages(packages) {
+    var container = document.getElementById('hedge-packages-list');
+    if (!container) {
+        // If container doesn't exist, create it dynamically
+        container = document.createElement('div');
+        container.id = 'hedge-packages-list';
+        var arbRightCol = document.querySelector('.arb-col-right');
+        if (arbRightCol) {
+            var savedList = document.getElementById('saved-list');
+            if (savedList) {
+                // Insert after saved-list
+                savedList.parentNode.insertBefore(container, savedList.nextSibling);
+            } else {
+                // Or just append to the right column if saved-list is not found
+                arbRightCol.appendChild(container);
+            }
+
+            // Add a header for the section
+            var header = document.createElement('div');
+            header.className = 'arb-section-header'; // Assuming this class exists for styling
+            header.textContent = 'HEDGE PACKAGES';
+            container.parentNode.insertBefore(header, container);
+        } else {
+            return; // Cannot render without a parent container
+        }
+    }
+
+    while (container.firstChild) {
+        container.removeChild(container.firstChild);
+    }
+
+    if (!packages || packages.length === 0) {
+        var empty = document.createElement('div');
+        empty.className = 'arb-empty';
+        empty.textContent = 'Scanning for hedge opportunities...';
+        container.appendChild(empty);
+        return;
+    }
+
+    packages.forEach(function(pkg) {
+        var card = document.createElement('div');
+        card.className = 'hedge-package-card arb-card'; // Add arb-card for general styling
+
+        var header = document.createElement('div');
+        header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding-bottom:4px;border-bottom:1px solid var(--arb-border);margin-bottom:8px;';
+
+        var title = document.createElement('div');
+        title.style.cssText = 'font-weight:700;color:var(--arb-accent);';
+        title.textContent = pkg.crypto_symbol + ' vs ' + pkg.pm_platform.toUpperCase() + ' (Strike: $' + pkg.strike_price.toLocaleString() + ')';
+        header.appendChild(title);
+
+        var profitIndicator = document.createElement('span');
+        profitIndicator.style.cssText = 'font-size:11px;font-weight:700;padding:2px 6px;border-radius:3px;';
+        if (pkg.overall_profit_type === 'guaranteed') {
+            profitIndicator.textContent = 'GUARANTEED PROFIT';
+            profitIndicator.style.backgroundColor = 'rgba(0, 255, 0, 0.1)'; // var(--arb-green-bg)
+            profitIndicator.style.color = '#0f0'; // var(--arb-green)
+        } else if (pkg.overall_profit_type === 'conditional') {
+            profitIndicator.textContent = 'CONDITIONAL PROFIT';
+            profitIndicator.style.backgroundColor = 'rgba(255, 255, 0, 0.1)'; // var(--arb-yellow-bg)
+            profitIndicator.style.color = '#ff0'; // var(--arb-yellow)
+        } else {
+            profitIndicator.textContent = 'P&L SCENARIOS';
+            profitIndicator.style.backgroundColor = 'rgba(100, 100, 100, 0.1)'; // var(--arb-muted-bg)
+            profitIndicator.style.color = '#888'; // var(--arb-muted)
+        }
+        header.appendChild(profitIndicator);
+        card.appendChild(header);
+
+        var metrics = document.createElement('div');
+        metrics.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;margin-bottom:8px;';
+
+        var addMetric = function(label, value, color) {
+            var item = document.createElement('div');
+            item.textContent = label + ': ';
+            var valSpan = document.createElement('span');
+            valSpan.style.color = color || 'var(--arb-text)';
+            valSpan.textContent = value;
+            item.appendChild(valSpan);
+            metrics.appendChild(item);
+        };
+        
+        addMetric('Spot Price', '$' + pkg.spot_price.toFixed(2));
+        addMetric('PM NO Price', (pkg.pm_buy_no_price * 100).toFixed(1) + '\u00A2', '#ff9800');
+        addMetric('Max Profit', '$' + pkg.max_profit.toFixed(2), pkg.max_profit >= 0 ? 'var(--arb-green)' : 'var(--arb-red)');
+        addMetric('Max Loss', '$' + pkg.max_loss.toFixed(2), pkg.max_loss <= 0 ? 'var(--arb-red)' : 'var(--arb-green)');
+        addMetric('Breakeven', '$' + pkg.breakeven_price.toFixed(2));
+        card.appendChild(metrics);
+
+        var scenariosTitle = document.createElement('div');
+        scenariosTitle.style.cssText = 'font-size:11px;font-weight:700;margin-top:8px;color:var(--arb-accent);border-top:1px dashed var(--arb-border);padding-top:8px;';
+        scenariosTitle.textContent = 'P&L Scenarios:';
+        card.appendChild(scenariosTitle);
+
+        var scenariosList = document.createElement('div');
+        scenariosList.style.cssText = 'font-size:10px;margin-bottom:8px;';
+
+        for (var key in pkg.scenarios) {
+            var s = pkg.scenarios[key];
+            var scenarioEl = document.createElement('div');
+            scenarioEl.style.padding = '2px 0';
+            var icon = s.net_profit > 0 ? '\u2705' : (s.net_profit < 0 ? '\u274C' : '\u2796');
+            var color = s.net_profit > 0 ? 'var(--arb-green)' : (s.net_profit < 0 ? 'var(--arb-red)' : 'var(--arb-text)');
+            scenarioEl.textContent = icon + ' ' + s.condition + ': ';
+            var profitSpan = document.createElement('span');
+            profitSpan.style.color = color;
+            profitSpan.style.fontWeight = '700';
+            profitSpan.textContent = '$' + s.net_profit.toFixed(2) + ' (' + s.return_pct.toFixed(1) + '%)';
+            scenarioEl.appendChild(profitSpan);
+            scenariosList.appendChild(scenarioEl);
+        }
+        card.appendChild(scenariosList);
+
+        container.appendChild(card);
+    });
+}
+
 
 // === POSITIONS DASHBOARD ===
 var positionsData = { packages: [], dashboard: {}, alerts: [], config: {} };
