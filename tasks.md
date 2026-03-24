@@ -481,11 +481,12 @@
    - Useful for evaluating if the new watchlist is performing better than the old one
    - File: src/positions/insider_tracker.py, src/server.py
 
-69. TODO - Seed volume baselines on first startup for Kalshi whale tracker
+69. IN_PROGRESS - Seed volume baselines on first startup for Kalshi whale tracker
    - In KalshiWhaleTracker._detect_volume_spikes(), when `_volume_baselines` is empty for a ticker, seed it with `current_volume * 0.8` instead of returning 0
    - This gives a reasonable baseline immediately instead of waiting 7 days
    - In _load_state(), if loaded baselines are empty, log "Baselines empty, will seed on first poll"
    - File: src/positions/kalshi_whale_tracker.py
+
 
 
 
