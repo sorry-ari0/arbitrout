@@ -474,7 +474,7 @@
    - Add a counter `insider_mode_passed = 0` incremented when a trade passes the insider_only_mode check
    - File: src/positions/auto_trader.py
 
-68. TODO - Add accuracy-weighted wallet ranking to insider tracker API
+68. IN_PROGRESS - Add accuracy-weighted wallet ranking to insider tracker API
    - GET /api/derivatives/insiders currently returns raw wallet data
    - Add sorting by accuracy * signal_weight to surface the most reliable wallets
    - Add field showing each wallet's recent hit/miss record
@@ -486,6 +486,7 @@
    - This gives a reasonable baseline immediately instead of waiting 7 days
    - In _load_state(), if loaded baselines are empty, log "Baselines empty, will seed on first poll"
    - File: src/positions/kalshi_whale_tracker.py
+
 
 
 
