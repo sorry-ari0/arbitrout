@@ -1466,7 +1466,7 @@
       "current_value": 10.84,
       "peak_value": 10.84,
       "created_at": 1774343229.8424675,
-      "updated_at": 1774348174.1021833,
+      "updated_at": 1774348112.0977566,
       "insider_signal": {
         "has_signal": true,
         "insider_count": 2,
@@ -1614,5 +1614,5 @@
       "created_at": 1774301806.7916083
     }
   ],
-  "saved_at": 1774348174.1026251
+  "saved_at": 1774348173.9269047
 }

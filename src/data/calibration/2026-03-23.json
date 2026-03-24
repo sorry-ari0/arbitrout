@@ -1,0 +1,56 @@
+{
+  "generated_at": "2026-03-23T21:38:09.626390+00:00",
+  "trade_count": 2,
+  "entry_calibration": {},
+  "exit_calibration": {
+    "bracket_target": {
+      "trades": 2,
+      "win_rate": 1.0,
+      "total_pnl": 8.39,
+      "suggestion": "INSUFFICIENT DATA \u2014 only 2 trades."
+    }
+  },
+  "hold_duration_analysis": {
+    "0-6h": {
+      "trades": 2,
+      "wins": 2,
+      "pnl": 8.39,
+      "avg_pnl": 4.2,
+      "win_rate": 1.0
+    },
+    "6-24h": {
+      "trades": 0,
+      "wins": 0,
+      "pnl": 0.0,
+      "avg_pnl": 0.0,
+      "win_rate": 0.0
+    },
+    "24h-3d": {
+      "trades": 0,
+      "wins": 0,
+      "pnl": 0.0,
+      "avg_pnl": 0.0,
+      "win_rate": 0.0
+    },
+    "3d-7d": {
+      "trades": 0,
+      "wins": 0,
+      "pnl": 0.0,
+      "avg_pnl": 0.0,
+      "win_rate": 0.0
+    },
+    "7d+": {
+      "trades": 0,
+      "wins": 0,
+      "pnl": 0.0,
+      "avg_pnl": 0.0,
+      "win_rate": 0.0
+    }
+  },
+  "fee_analysis": {
+    "total_fees": 0.0,
+    "fee_drag_pct": 0.0,
+    "limit_fill_rate": null,
+    "suggestion": "TRACK \u2014 no limit order data yet."
+  }
+}
