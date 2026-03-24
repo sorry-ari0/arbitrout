@@ -397,6 +397,8 @@ class AutoTrader:
                 return
             # In the extra-slots zone: only allow insider-signaled trades
             insider_only_mode = True
+            if self.dlog:
+                self.dlog.log_scan_skip("insider_only_mode", open_positions=len(open_pkgs))
             logger.info("Auto trader: at max concurrent (%d/%d), insider-only mode (%d extra slots)",
                          len(open_pkgs), MAX_CONCURRENT, MAX_CONCURRENT + INSIDER_EXTRA_SLOTS - len(open_pkgs))
 
@@ -555,6 +557,8 @@ class AutoTrader:
         category_exposure = self._get_category_exposure(open_pkgs)
 
         trades_this_cycle = 0
+        insider_mode_passed_filter_count = 0
+        insider_mode_skipped_filter_count = 0
         opportunities.sort(key=lambda o: o.get("_score", 0), reverse=True)
         for opp in opportunities:
             opp_title = (opp.get("title") or opp.get("canonical_title") or "?")[:100]
@@ -794,10 +798,13 @@ class AutoTrader:
             # In insider-only mode (extra slots), only allow insider-signaled trades
             if insider_only_mode and insider_mult <= 1.0 and cross_platform_mult <= 1.0:
                 self._trades_skipped += 1
+                insider_mode_skipped_filter_count += 1
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "insider_only_mode",
                                                    insider_mult=insider_mult)
                 continue
+            if insider_only_mode:
+                insider_mode_passed_filter_count += 1
 
             # Skip low-score opportunities
             if score < MIN_SPREAD_PCT:
@@ -1682,6 +1689,13 @@ class AutoTrader:
 
         if trades_this_cycle > 0:
             logger.info("Auto trader: opened %d new positions this cycle", trades_this_cycle)
+
+        if insider_only_mode and self.dlog:
+            self.dlog.log_scan_summary(
+                "insider_mode_filter",
+                passed=insider_mode_passed_filter_count,
+                skipped=insider_mode_skipped_filter_count
+            )
 
     def _arb_to_opportunity(self, arb: dict) -> dict | None:
         """Convert an ArbitrageOpportunity dict to auto_trader opportunity format.
