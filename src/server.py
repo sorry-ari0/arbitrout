@@ -3,6 +3,31 @@ import asyncio
 import json
 import logging
 import os
+import uuid # Added for request_id generation
+from contextvars import ContextVar # Added for request_id context
+import time # Already imported, used for time.perf_counter in middleware
+from datetime import datetime, timedelta
+from pathlib import Path
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, Security, Request # Request added for middleware
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import APIKeyHeader
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel, Field
+import yfinance as yf
+import httpx
+import feedparser
+
+# NEW: Import the logging configuration and the ContextVar for request_id
+from src import logging_config
+_request_id_ctx = logging_config._request_id_ctx
+
+# NEW: Configure logging globally before any loggers are instantiated
+logging_config.setup_logging()
+
+logger = logging.getLogger(__name__)
 
 # Load .env file if present (keys for trading platforms, AI, etc.)
 try:
@@ -21,22 +46,16 @@ import random
 import re
 import tempfile
 import threading
-import time
-from datetime import datetime, timedelta
-from pathlib import Path
-from contextlib import asynccontextmanager
+# time imported above
+# datetime imported above
+# Path imported above
+# asynccontextmanager imported above
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, Security
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import APIKeyHeader
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, Field
-import yfinance as yf
-import httpx
-import feedparser
-
-logger = logging.getLogger(__name__)
+# FastAPI imports imported above
+# Pydantic imported above
+# yfinance imported above
+# httpx imported above
+# feedparser imported above
 
 # --- Arbitrage imports ---
 try:
@@ -259,7 +278,7 @@ def _migrate_legacy_packages(pm):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    # logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s") # Removed, logging configured globally
     DATA_DIR.mkdir(exist_ok=True)
     # Init watchlist file if missing
     wl_file = DATA_DIR / "watchlist.json"
@@ -585,7 +604,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_calibration_loop())
     app.state.calibration_engine = _calibration_engine
 
-    logger.info("Lobsterminal started on port 8500")
+    logger.info("Lobsterminal started on port 8500", event_type="server_startup") # Added event_type
     yield
     # Shutdown
     if _political_analyzer:
@@ -617,10 +636,40 @@ async def lifespan(app: FastAPI):
     if _ARBITRAGE_AVAILABLE:
         scan_task.cancel()
         await arb_registry.close_all()
-    logger.info("Lobsterminal shutting down")
+    logger.info("Lobsterminal shutting down", event_type="server_shutdown") # Added event_type
 
 
 app = FastAPI(title="Lobsterminal", lifespan=lifespan)
+
+# NEW: Middleware to add request_id and log request/response
+@app.middleware("http")
+async def add_request_id_middleware(request: Request, call_next):
+    request_id = str(uuid.uuid4())
+    token = _request_id_ctx.set(request_id) # Set request_id in context
+    start_time = time.perf_counter()
+    try:
+        response = await call_next(request)
+        # Log successful requests and their duration
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        if response.status_code < 400:
+            logger.info("request_completed", event_type="http_request",
+                        path=request.url.path, method=request.method,
+                        status_code=response.status_code, duration_ms=f"{duration_ms:.2f}")
+        else:
+            logger.warning("request_completed_with_error_status", event_type="http_request",
+                           path=request.url.path, method=request.method,
+                           status_code=response.status_code, duration_ms=f"{duration_ms:.2f}")
+    except Exception as exc:
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        logger.error("request_failed", event_type="http_request_error",
+                     path=request.url.path, method=request.method,
+                     status_code=500, duration_ms=f"{duration_ms:.2f}",
+                     error_message=str(exc), error_type=type(exc).__name__)
+        raise # Re-raise the exception after logging
+    finally:
+        # Reset the context variable to its previous state
+        _request_id_ctx.reset(token)
+    return response
 
 # S2 fix: CORS middleware
 app.add_middleware(
