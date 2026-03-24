@@ -294,7 +294,7 @@
 
 ## Quality & Infrastructure
 
-41. TODO - Add asyncio.Lock to arbitrage scanner shared state
+41. IN_PROGRESS - Add asyncio.Lock to arbitrage scanner shared state
    - In ArbitrageScanner class, add `self._lock = asyncio.Lock()` in __init__
    - Wrap `_previous_prices` mutations in `async with self._lock:` blocks
    - Wrap the `scan()` method body in `async with self._lock:`
@@ -490,6 +490,7 @@
    - This gives a reasonable baseline immediately instead of waiting 7 days
    - In _load_state(), if loaded baselines are empty, log "Baselines empty, will seed on first poll"
    - File: src/positions/kalshi_whale_tracker.py
+
 
 
 
