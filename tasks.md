@@ -294,7 +294,7 @@
 
 ## Quality & Infrastructure
 
-41. IN_PROGRESS - Add asyncio.Lock to arbitrage scanner shared state
+41. TODO - Add asyncio.Lock to arbitrage scanner shared state
    - In ArbitrageScanner class, add `self._lock = asyncio.Lock()` in __init__
    - Wrap `_previous_prices` mutations in `async with self._lock:` blocks
    - Wrap the `scan()` method body in `async with self._lock:`
