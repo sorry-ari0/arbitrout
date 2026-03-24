@@ -1140,6 +1140,68 @@ function renderPortfolioBar(stats) {
         stat.appendChild(val);
         bar.appendChild(stat);
     });
+
+    // Add per-platform executor status
+    if (stats.executor_details) {
+        var executorSection = document.createElement('div');
+        executorSection.className = 'pos-executor-section';
+        executorSection.style.cssText = 'margin-top: 10px; border-top: 1px solid var(--arb-border); padding-top: 10px;';
+        
+        var sectionHeader = document.createElement('div');
+        sectionHeader.className = 'pos-section-header';
+        sectionHeader.style.cssText = 'font-weight: 700; color: var(--arb-accent); margin-bottom: 5px; font-size: 11px;';
+        sectionHeader.textContent = 'EXECUTORS';
+        executorSection.appendChild(sectionHeader);
+
+        for (var name in stats.executor_details) {
+            var exec = stats.executor_details[name];
+            var execRow = document.createElement('div');
+            execRow.className = 'pos-executor-row';
+            execRow.style.cssText = 'display: flex; justify-content: space-between; align-items: center; font-size: 10px; padding: 2px 0;';
+
+            var nameGroup = document.createElement('span');
+            nameGroup.style.cssText = 'display: flex; align-items: center; gap: 5px;';
+
+            var execName = document.createElement('span');
+            execName.className = 'pos-executor-name';
+            execName.style.fontWeight = '700';
+            execName.textContent = name.toUpperCase();
+            if (!exec.active) {
+                execName.style.color = 'var(--arb-red)';
+                execName.title = exec.error || 'Inactive';
+            }
+            nameGroup.appendChild(execName);
+
+            if (exec.active) {
+                var statusBadge = document.createElement('span');
+                statusBadge.className = 'pos-badge ' + (exec.is_paper_trading ? 'paper' : 'live');
+                statusBadge.textContent = exec.is_paper_trading ? 'PAPER' : 'LIVE';
+                statusBadge.style.cssText = 'font-size: 8px; padding: 1px 4px; border-radius: 3px; background: rgba(0, 200, 255, 0.1); color: var(--arb-accent);';
+                if (!exec.is_paper_trading) { // For live, make it slightly different
+                    statusBadge.style.background = 'rgba(0, 255, 0, 0.1)';
+                    statusBadge.style.color = 'var(--arb-green)';
+                }
+                nameGroup.appendChild(statusBadge);
+
+                execRow.appendChild(nameGroup);
+
+                var balanceAndTrades = document.createElement('span');
+                balanceAndTrades.style.cssText = 'color: var(--arb-text);';
+                balanceAndTrades.textContent = '$' + (exec.total_balance || 0).toFixed(2) + ' (' + (exec.trade_count || 0) + ' trades)';
+                execRow.appendChild(balanceAndTrades);
+
+            } else {
+                var errorSpan = document.createElement('span');
+                errorSpan.className = 'pos-executor-error';
+                errorSpan.style.color = 'var(--arb-red)';
+                errorSpan.textContent = exec.error ? 'Error: ' + exec.error : 'Inactive';
+                nameGroup.appendChild(errorSpan);
+                execRow.appendChild(nameGroup);
+            }
+            executorSection.appendChild(execRow);
+        }
+        bar.appendChild(executorSection);
+    }
 }
 
 function renderPackages(packages) {
