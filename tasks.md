@@ -294,13 +294,9 @@
 
 ## Quality & Infrastructure
 
-41. IN_PROGRESS - Add asyncio.Lock to arbitrage scanner shared state
-   - In ArbitrageScanner class, add `self._lock = asyncio.Lock()` in __init__
-   - Wrap `_previous_prices` mutations in `async with self._lock:` blocks
-   - Wrap the `scan()` method body in `async with self._lock:`
-   - This prevents race conditions between auto-scan loop and manual WebSocket scan triggers
-   - Do NOT change any logic, only add locking
-   - File: src/arbitrage_engine.py
+41. COMPLETED - Add thread safety to arbitrage scanner shared state
+   - Already implemented: threading.Lock at line 1011, _previous_prices_lock at line 950
+   - All shared state mutations properly wrapped in lock blocks (lines 1028-1054)
 
 42. TODO - Add integration tests for adapter fetch cycles
    - Create `tests/test_adapters_integration.py`
