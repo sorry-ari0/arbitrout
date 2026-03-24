@@ -462,7 +462,7 @@
    - Display cross-platform convergence alerts when Polymarket + Kalshi signals align
    - File: src/static/js/arbitrout.js, src/static/css/arbitrout.css
 
-66. TODO - Add Kalshi whale signal dashboard panel
+66. IN_PROGRESS - Add Kalshi whale signal dashboard panel
    - KalshiWhaleTracker runs in background but results are invisible to user
    - Add panel showing: large trades detected (count, volume, direction), volume spike alerts, orderbook tilt indicators
    - Show signal strength per actively watched market
@@ -486,6 +486,7 @@
    - This gives a reasonable baseline immediately instead of waiting 7 days
    - In _load_state(), if loaded baselines are empty, log "Baselines empty, will seed on first poll"
    - File: src/positions/kalshi_whale_tracker.py
+
 
 
 
