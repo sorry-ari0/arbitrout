@@ -448,7 +448,7 @@
 
 ## Insider Signal Pipeline Fixes (2026-03-24)
 
-64. TODO - Fix insider market ID matching in auto_trader scoring
+64. IN_PROGRESS - Fix insider market ID matching in auto_trader scoring
    - Around line 683, `market_id = opp.get("buy_yes_market_id", "")` is often empty
    - When empty, fall back to extracting from matched_event: `matched = opp.get("matched_event", {}); markets = matched.get("markets", []); for m in markets: if m.get("platform") == "polymarket": market_id = m.get("market_id", m.get("id", ""))`
    - Also check `buy_no_market_id` if `buy_yes_platform` is not polymarket
@@ -486,6 +486,7 @@
    - This gives a reasonable baseline immediately instead of waiting 7 days
    - In _load_state(), if loaded baselines are empty, log "Baselines empty, will seed on first poll"
    - File: src/positions/kalshi_whale_tracker.py
+
 
 
 
