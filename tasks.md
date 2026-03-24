@@ -455,7 +455,7 @@
    - This is a 5-line fix in the insider signal block
    - File: src/positions/auto_trader.py
 
-65. IN_PROGRESS - Add insider signal dashboard panel to Arbitrout UI
+65. COMPLETED - Add insider signal dashboard panel to Arbitrout UI
    - Insider tracker is running but has no UI representation on the dashboard
    - Add a panel showing: tracked wallets count, recent insider movements, active signals per market
    - Show conviction trader entries/exits with timestamps and position sizes
@@ -486,6 +486,7 @@
    - This gives a reasonable baseline immediately instead of waiting 7 days
    - In _load_state(), if loaded baselines are empty, log "Baselines empty, will seed on first poll"
    - File: src/positions/kalshi_whale_tracker.py
+
 
 
 
