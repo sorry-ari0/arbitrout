@@ -322,7 +322,7 @@
    - Match existing Bollinger Bands color scheme
    - File: src/static/js/app.js
 
-46. TODO - Add structured logging with JSON output
+46. IN_PROGRESS - Add structured logging with JSON output
    - Replace print statements and basic logging with structured JSON logs
    - Include: timestamp, level, module, event_type, duration_ms for API calls
    - Add request_id tracking through the middleware
@@ -486,6 +486,7 @@
    - This gives a reasonable baseline immediately instead of waiting 7 days
    - In _load_state(), if loaded baselines are empty, log "Baselines empty, will seed on first poll"
    - File: src/positions/kalshi_whale_tracker.py
+
 
 
 
