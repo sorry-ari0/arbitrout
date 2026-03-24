@@ -28,18 +28,18 @@ logger = logging.getLogger("positions.insider_tracker")
 DATA_API = "https://data-api.polymarket.com"
 
 # Thresholds
-MIN_PNL_USD = 5000           # Track traders with >$5K lifetime PNL (lowered to catch mid-size edge traders)
+MIN_PNL_USD = 2000           # Track traders with >$2K lifetime PNL (lowered to catch mid-size edge traders)
 MIN_WIN_RATE = 0.65          # Flag traders with >65% win rate
 SUSPICIOUS_WIN_RATE = 0.80   # Highly suspicious above 80%
 MIN_POSITION_SIZE = 100      # Minimum $100 position to count as signal
-LEADERBOARD_SIZE = 50        # Top 50 traders to monitor
+LEADERBOARD_SIZE = 100       # Top 100 traders per category to monitor
 SCAN_INTERVAL = 900          # 15 minutes between full scans
 CACHE_TTL = 600              # Cache insider data for 10 minutes
 CONVERGENCE_THRESHOLD = 3    # 3+ wallets entering same market = convergence signal
 
 # Leaderboard categories — expanded to cover politics/economics specialists
 LEADERBOARD_CATEGORIES = ["OVERALL", "CRYPTO", "POLITICS", "ECONOMICS", "FINANCE"]
-LEADERBOARD_TIME_PERIODS = ["ALL", "MONTH"]
+LEADERBOARD_TIME_PERIODS = ["ALL", "MONTH", "WEEK"]
 
 # Wallet classification thresholds
 # Conviction = consistently winning at high rates, regardless of volume
@@ -64,18 +64,27 @@ AUTO_DEMOTE_SCANS = 10          # Drop off leaderboard for 10+ scans → demote
 WHALE_TRADE_MIN_USD = 5000      # $5K+ trades count as whale activity
 WHALE_TRADE_WINDOW = 3600       # 1-hour rolling window for whale trade tracking
 
-# High-conviction watchlist: known profitable directional traders
+# High-conviction watchlist: CURRENTLY ACTIVE profitable directional traders
 # These get 5x signal weight and bypass normal ROI thresholds
-# Source: Polymarket leaderboard analysis (2026-03-20)
+# Source: Polymarket position data analysis (2026-03-23)
+# NOTE: Previous watchlist (Theo4, Fredi9999, etc.) were 2024 election traders
+#        who stopped trading Nov 2024 and returned 0 positions on every scan.
 HIGH_CONVICTION_WATCHLIST = {
-    "0x56687bf447db6ffa42ffe2204a05edaa20f55839": "Theo4",        # $22M PNL, 51% ROI
-    "0x1f2dd6d473f3e824cd2f8a89d9c69fb96f6ad0cf": "Fredi9999",    # $16.6M PNL, 22% ROI
-    "0x863134d00841b2e200492805a01e1e2f5defaa53": "RepTrump",     # $7.5M PNL, 54% ROI
-    "0x78b9ac44a6d7d7a076c14e0ad518b301b63c6b76": "Len9311238",   # $8.7M PNL, 53% ROI
-    "0x885783a5e42d297c3532081ebf5c14ba0e9b0a44": "BetTom42",     # $5.6M PNL, 50% ROI
-    "0x23786fdad0073692157c6d7dc81f281843a35fcb": "mikatrade77",  # $5.2M PNL, 47% ROI
-    "0xd0c042f8ac8f16a957f75de8c2e1e64e30e625c1": "alexmulti",    # $4.8M PNL, 48% ROI
-    "0x16f91d4d0c17c5de07d2f01bceac542c4e4a05a8": "Jenzigo",      # $4.1M PNL, 43% ROI
+    # Tier A: Massive active positions + high ROI
+    "0x660622caad009a8cc1f38038c0913be658621338": "manekineko",          # 122% ROI, 12 markets, $371K open value
+    "0xfa8fc6a3e706bc4aa7556d060564c154322ad61b": "singaporesling",      # 87% ROI, 50 markets, $247K open value
+    "0x44c1dfe43260c94ed4f1d00de2e1f80fb113ebc1": "aenews2",             # $2M PNL, 15 markets, $240K open value
+    "0x94a428cfa4f84b264e01f70d93d02bc96cb36356": "GCottrell93",         # $3.4M PNL, 22% ROI, 5 markets, $104K open
+    "0x29d683970afb6f722ea1f9d4417c7ee7057cd57f": "Labtrador",           # 265% ROI, $98K open value
+    # Tier B: High ROI edge traders with smaller but active positions
+    "0xf195721ad850377c96cd634457c70cd9e8308057": "CERTuo",              # $1.8M PNL, 26% ROI, 4 markets, $16K open
+    "0x23415ad0f4867d412d5d10e564d62f7938573535": "GEMBLER",             # 328% ROI, 4 markets, $17K open
+    "0x17bf9e17bc58980772907a666e318a2a30e46731": "Paradise Capital",    # 272% ROI, 7 markets, $17K open
+    "0x714b8a6e115fe36061a2b5922964b654b82a6c2f": "benj002",             # 40% ROI, 3 markets, $20K open
+    "0x46a11dd783dfa2dcaf59255bada232497ba0774b": "19sdfg8088",          # 50% ROI, 1 market, $22K open
+    # Tier C: Large PNL traders — monitor for re-entry signals
+    "0x59a0744db1f39ff3afccd175f80e6e8dfc239a09": "Blessed-Sunshine",    # $842K PNL, 21% ROI (currently idle)
+    "0x8c80d213c0cbad777d06ee3f58f6ca4bc03102c3": "SecondWindCapital",   # $501K PNL, 33% ROI (currently idle)
 }
 
 # Known market makers (high volume, low ROI — exclude from directional signals)
@@ -107,6 +116,10 @@ class InsiderTracker:
 
         # Auto-promotion tracking: wallet -> consecutive scan count
         self._consecutive_scans: dict[str, int] = {}
+
+        # Staleness tracking: wallet -> consecutive scans with 0 positions returned
+        self._empty_scan_count: dict[str, int] = {}
+        STALE_SCAN_THRESHOLD = 5  # Demote after 5 consecutive empty scans
 
         # Whale trade cache: condition_id -> [{size, side, timestamp}]
         self._whale_trades: dict[str, list[dict]] = {}
@@ -171,6 +184,7 @@ class InsiderTracker:
                 self._last_scan = data.get("last_scan", 0)
                 self._consecutive_scans = data.get("consecutive_scans", {})
                 self._whale_trades = data.get("whale_trades", {})
+                self._empty_scan_count = data.get("empty_scan_count", {})
                 logger.info("Loaded %d tracked insiders from cache", len(self._flagged_wallets))
             except (json.JSONDecodeError, OSError) as e:
                 logger.warning("Failed to load insider cache: %s", e)
@@ -189,6 +203,7 @@ class InsiderTracker:
             "last_scan": self._last_scan,
             "consecutive_scans": self._consecutive_scans,
             "whale_trades": self._whale_trades,
+            "empty_scan_count": self._empty_scan_count,
             "saved_at": time.time(),
         }
         with open(tmp, "w", encoding="utf-8") as f:
@@ -293,7 +308,7 @@ class InsiderTracker:
                 seen.add(wallet)
                 unique_traders.append(t)
 
-        self._top_traders = unique_traders[:LEADERBOARD_SIZE * 3]  # Keep top 150 (more categories)
+        self._top_traders = unique_traders[:300]  # Keep top 300 (5 categories x 3 periods x 100)
 
         # Track which wallets appeared this scan for auto-promotion
         current_wallets = set()
@@ -442,26 +457,35 @@ class InsiderTracker:
         # This is done after we know which wallets to poll — see below.
 
         # Build tiered wallet list sorted by signal quality, not raw PNL
+        # Wallets that return 0 positions for 5+ consecutive scans get demoted
         def _wallet_priority(w):
             acc = self._wallet_accuracy.get(w.get("wallet", ""), {})
             accuracy_bonus = acc.get("accuracy", 0.5) if acc.get("total", 0) >= 3 else 0.5
-            return w.get("signal_weight", 1.0) * accuracy_bonus
+            base = w.get("signal_weight", 1.0) * accuracy_bonus
+            # Staleness penalty: halve priority for each 5 consecutive empty scans
+            empty_count = self._empty_scan_count.get(w.get("wallet", ""), 0)
+            if empty_count >= 5:
+                base *= 0.5 ** (empty_count // 5)
+            return base
 
         all_wallets = sorted(self._flagged_wallets.values(),
                              key=_wallet_priority, reverse=True)
 
         # Tier 1: conviction + edge_traders + top accuracy (always polled)
-        tier1 = [w for w in all_wallets if w.get("wallet_type") in ("conviction", "edge_trader")][:10]
+        # Exclude wallets stale for 10+ scans from Tier 1 entirely
+        tier1 = [w for w in all_wallets
+                 if w.get("wallet_type") in ("conviction", "edge_trader")
+                 and self._empty_scan_count.get(w.get("wallet", ""), 0) < 10][:15]
         tier1_addrs = {w["wallet"] for w in tier1}
 
         # Tier 2: next best by priority (every 2nd scan)
         tier2 = [w for w in all_wallets
-                 if w["wallet"] not in tier1_addrs][:15]
+                 if w["wallet"] not in tier1_addrs][:20]
         tier2_addrs = {w["wallet"] for w in tier2}
 
         # Tier 3: remaining (every 4th scan)
         tier3 = [w for w in all_wallets
-                 if w["wallet"] not in tier1_addrs and w["wallet"] not in tier2_addrs][:25]
+                 if w["wallet"] not in tier1_addrs and w["wallet"] not in tier2_addrs][:30]
 
         # Decide which tiers to poll this scan
         wallets_to_poll = list(tier1)  # Always poll tier 1
@@ -482,6 +506,7 @@ class InsiderTracker:
         for trader in wallets_to_poll:
             wallet = trader["wallet"]
             polled_wallets.add(wallet)
+            positions_found = 0
             try:
                 r = await client.get(f"{DATA_API}/positions", params={
                     "user": wallet,
@@ -499,7 +524,12 @@ class InsiderTracker:
                         cid = pos.get("conditionId", "")
                         if not cid:
                             continue
+                        # Skip resolved/expired positions (current_value = 0)
+                        cv = float(pos.get("currentValue", 0) or 0)
+                        if cv <= 0:
+                            continue
 
+                        positions_found += 1
                         if cid not in self._insider_positions:
                             self._insider_positions[cid] = []
 
@@ -513,13 +543,18 @@ class InsiderTracker:
                             "outcome": pos.get("outcome", ""),
                             "size": float(pos.get("size", 0) or 0),
                             "avg_price": float(pos.get("avgPrice", 0) or 0),
-                            "current_value": float(pos.get("currentValue", 0) or 0),
+                            "current_value": cv,
                             "cash_pnl": float(pos.get("cashPnl", 0) or 0),
                             "pct_pnl": float(pos.get("percentPnl", 0) or 0),
                             "title": pos.get("title", ""),
                         })
             except Exception as e:
                 logger.warning("Position fetch failed for %s: %s", wallet[:10], e)
+            # Track staleness: consecutive scans with 0 active positions
+            if positions_found == 0:
+                self._empty_scan_count[wallet] = self._empty_scan_count.get(wallet, 0) + 1
+            else:
+                self._empty_scan_count[wallet] = 0  # Reset on any active data
             await asyncio.sleep(0.3)  # Rate limit: 150 req/10s
 
         logger.info("Position poll: %d wallets (T1=%d T2=%d T3=%d), %d markets",
