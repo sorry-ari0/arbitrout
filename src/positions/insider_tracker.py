@@ -1204,6 +1204,29 @@ class InsiderTracker:
             reverse=True
         )[:10]
 
+        ranked_wallets = []
+        for wallet_addr, trader_info in self._flagged_wallets.items():
+            acc_info = self._wallet_accuracy.get(wallet_addr)
+            if acc_info and acc_info["total"] >= 3:
+                accuracy = acc_info["accuracy"]
+                signal_weight = trader_info.get("signal_weight", 1.0)
+                ranking_score = accuracy * signal_weight
+
+                ranked_wallets.append({
+                    "wallet": wallet_addr,
+                    "username": trader_info.get("username", ""),
+                    "pnl": trader_info.get("pnl", 0),
+                    "roi_pct": trader_info.get("roi_pct", 0),
+                    "wallet_type": trader_info.get("wallet_type", "unknown"),
+                    "signal_weight": signal_weight,
+                    "accuracy": accuracy,
+                    "total_resolved": acc_info["total"],
+                    "correct": acc_info["correct"],
+                    "ranking_score": round(ranking_score, 3),
+                    "recent_history": acc_info["history"][-5:],
+                })
+        ranked_wallets = sorted(ranked_wallets, key=lambda w: w["ranking_score"], reverse=True)[:10]
+
         return {
             "running": self._running,
             "scan_count": self._scan_count,
@@ -1232,6 +1255,7 @@ class InsiderTracker:
                  "correct": w["correct"]}
                 for w in proven_wallets
             ],
+            "ranked_insiders": ranked_wallets,
             "recent_alerts": self._movement_alerts[-5:],
         }
 

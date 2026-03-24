@@ -410,6 +410,7 @@ async def lifespan(app: FastAPI):
             arb_scanner = get_scanner() if _ARBITRAGE_AVAILABLE else None
             insider = InsiderTracker(data_dir=DATA_DIR / "positions")
             insider.start()
+            app.state.insider_tracker = insider # Expose InsiderTracker via app.state
             # Kalshi anonymous whale tracker — feeds cross-platform convergence signals
             try:
                 kalshi_adapter = arb_registry.get("kalshi") if _ARBITRAGE_AVAILABLE else None
@@ -1423,6 +1424,23 @@ async def ws_prices(websocket: WebSocket):
         logger.exception("WebSocket error")
     finally:
         connected_clients.discard(websocket)
+
+
+# --- Insider tracker API endpoint ---
+@app.get("/api/derivatives/insiders", dependencies=[Depends(verify_api_key)])
+async def get_derivatives_insiders():
+    """Get ranked insider trader data with accuracy scores and recent trade history."""
+    if not hasattr(app.state, "insider_tracker") or not app.state.insider_tracker:
+        raise HTTPException(status_code=503, detail="Insider tracker not initialized")
+    insider = app.state.insider_tracker
+    stats = insider.get_stats()
+    return JSONResponse(content={
+        "ranked_insiders": stats.get("ranked_insiders", []),
+        "total_flagged_wallets": stats.get("flagged_wallets", 0),
+        "conviction_watchlist_size": stats.get("conviction_watchlist_size", 0),
+        "markets_with_signals": stats.get("markets_with_signals", 0),
+        "last_scan_ago_min": stats.get("last_scan_ago_min"),
+    })
 
 
 # --- Static files ---
