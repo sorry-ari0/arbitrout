@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from adapters.registry import AdapterRegistry
 from arbitrage_engine import ArbitrageScanner, load_saved, save_market, unsave_market
 from event_matcher import add_manual_link, remove_manual_link
+from execution.crypto_hedger import CryptoHedger
 
 logger = logging.getLogger("arbitrage_router")
 
@@ -18,19 +19,27 @@ router = APIRouter(prefix="/api/arbitrage", tags=["arbitrage"])
 # ============================================================
 _scanner: ArbitrageScanner | None = None
 _registry: AdapterRegistry | None = None
+_hedger: CryptoHedger | None = None
 
 
 def init_scanner(registry: AdapterRegistry, decision_logger=None):
     """Called by server.py to initialize the scanner."""
-    global _scanner, _registry
+    global _scanner, _registry, _hedger
     _registry = registry
     _scanner = ArbitrageScanner(registry, decision_logger=decision_logger)
+    _hedger = CryptoHedger(registry)
 
 
 def get_scanner() -> ArbitrageScanner:
     if _scanner is None:
         raise RuntimeError("Scanner not initialized")
     return _scanner
+
+
+def get_hedger() -> CryptoHedger:
+    if _hedger is None:
+        raise RuntimeError("CryptoHedger not initialized")
+    return _hedger
 
 
 # ============================================================
@@ -122,6 +131,14 @@ async def delete_saved(match_id: str):
     return JSONResponse(content=saved)
 
 
+@router.get("/hedge-packages")
+async def get_hedge_packages():
+    """Current crypto hedge packages with P&L scenarios."""
+    hedger = get_hedger()
+    packages = await hedger.find_hedge_packages()
+    return JSONResponse(content=packages)
+
+
 # ============================================================
 # WEBSOCKET
 # ============================================================
@@ -192,3 +209,4 @@ async def broadcast_update(data: dict):
             dead.append(ws)
     for ws in dead:
         _ws_clients.discard(ws)
+
