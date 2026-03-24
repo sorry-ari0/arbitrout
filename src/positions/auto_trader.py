@@ -694,6 +694,14 @@ class AutoTrader:
             insider_signal = None
             insider_mult = 1.0
             market_id = opp.get("buy_yes_market_id", "")
+            if not market_id:
+                matched = opp.get("matched_event", {})
+                for m in matched.get("markets", []):
+                    if m.get("platform") == "polymarket":
+                        market_id = m.get("market_id", m.get("id", ""))
+                        break
+            if not market_id and opp.get("buy_yes_platform") != "polymarket":
+                market_id = opp.get("buy_no_market_id", "")
             if self.insider_tracker and market_id:
                 # Pass market volume for position-relative sizing signal
                 opp_volume = opp.get("volume", 0)

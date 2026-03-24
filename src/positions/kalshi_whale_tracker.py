@@ -434,7 +434,16 @@ class KalshiWhaleTracker:
         baseline = self._volume_baselines.get(ticker, {})
         avg_7d = baseline.get("avg_7d", 0)
 
-        if avg_7d <= 0 or volume_24h <= 0:
+        if avg_7d <= 0:
+            if volume_24h > 0:
+                # Seed baseline with current volume * 0.8 (conservative estimate)
+                self._volume_baselines[ticker] = {
+                    "samples": [(time.time(), volume_24h)],
+                    "avg_7d": volume_24h * 0.8,
+                }
+                logger.info("Seeded volume baseline for %s: avg_7d=%.0f", ticker, volume_24h * 0.8)
+            return 0.0, 0.0
+        if volume_24h <= 0:
             return 0.0, 0.0
 
         spike_ratio = volume_24h / avg_7d
