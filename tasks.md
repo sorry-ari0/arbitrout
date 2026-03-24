@@ -311,7 +311,7 @@
    - Use token-based similarity (Jaccard) instead of exact string match
    - File: src/adapters/registry.py or src/arbitrage_engine.py
 
-44. IN_PROGRESS - Add localStorage persistence for arbitrout UI state
+44. BLOCKED - Add localStorage persistence for arbitrout UI state
    - Save sort preference, selected filters, and last viewed opportunity to localStorage
    - Restore on page load so user doesn't lose their view on refresh
    - File: src/static/js/arbitrout.js
@@ -486,6 +486,7 @@
    - This gives a reasonable baseline immediately instead of waiting 7 days
    - In _load_state(), if loaded baselines are empty, log "Baselines empty, will seed on first poll"
    - File: src/positions/kalshi_whale_tracker.py
+
 
 
 
