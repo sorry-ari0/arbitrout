@@ -1,0 +1,1786 @@
+{
+  "entries": [
+    {
+      "id": "journal_f3e6cf1b",
+      "package_id": "pkg_874e9c397c5e",
+      "name": "ETH Prediction",
+      "strategy_type": "pure_prediction",
+      "ai_strategy": "balanced",
+      "mode": "paper",
+      "total_cost": 200.0,
+      "exit_value": 200.0,
+      "pnl": 0.0,
+      "pnl_pct": 0.0,
+      "outcome": "flat",
+      "exit_trigger": "manual_full_exit",
+      "legs": [
+        {
+          "leg_id": "leg_2b477e9b",
+          "platform": "polymarket",
+          "type": "prediction_yes",
+          "asset_id": "eth-5k:BUY",
+          "entry_price": 0.4,
+          "exit_price": 0.4,
+          "quantity": 500.0,
+          "cost": 200.0,
+          "exit_value": 200.0,
+          "leg_pnl": 0.0,
+          "leg_pnl_pct": 0.0,
+          "status": "closed"
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_e1c1d9ce",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 30
+          },
+          "active": true,
+          "created_at": 1773823286.517418
+        }
+      ],
+      "hold_duration_hours": 0.0,
+      "peak_value": 200.0,
+      "max_drawdown_from_peak": 0.0,
+      "created_at": 1773823286.517369,
+      "closed_at": 1773823305.8038497
+    },
+    {
+      "id": "journal_207e1225",
+      "package_id": "pkg_ac7f1b41557b",
+      "name": "Election Arb",
+      "strategy_type": "cross_platform_arb",
+      "ai_strategy": "balanced",
+      "mode": "paper",
+      "total_cost": 100.0,
+      "exit_value": 100.0,
+      "total_fees": 2.0,
+      "buy_fees": 0.0,
+      "sell_fees": 2.0,
+      "pnl": -2.0,
+      "pnl_pct": -2.0,
+      "outcome": "loss",
+      "exit_trigger": "manual_full_exit",
+      "legs": [
+        {
+          "leg_id": "leg_282c4d1c",
+          "platform": "polymarket",
+          "type": "prediction_yes",
+          "asset_id": "election-2026:BUY",
+          "entry_price": 0.55,
+          "exit_price": 0.55,
+          "quantity": 90.9090909090909,
+          "cost": 50.0,
+          "exit_value": 50.0,
+          "buy_fees": 0,
+          "sell_fees": 1.0,
+          "leg_pnl": -1.0,
+          "leg_pnl_pct": -2.0,
+          "status": "closed"
+        },
+        {
+          "leg_id": "leg_8ce1ecd4",
+          "platform": "polymarket",
+          "type": "prediction_no",
+          "asset_id": "election-2026:SELL",
+          "entry_price": 0.38,
+          "exit_price": 0.38,
+          "quantity": 131.57894736842104,
+          "cost": 50.0,
+          "exit_value": 50.0,
+          "buy_fees": 0,
+          "sell_fees": 1.0,
+          "leg_pnl": -1.0,
+          "leg_pnl_pct": -2.0,
+          "status": "closed"
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_46b666d2",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 10
+          },
+          "active": true,
+          "created_at": 1773823142.010039
+        }
+      ],
+      "execution_log": [
+        {
+          "action": "buy",
+          "leg_id": "leg_282c4d1c",
+          "platform": "polymarket",
+          "tx_id": "paper_5a331ec2d0e1",
+          "price": 0.55,
+          "quantity": 90.9090909090909,
+          "fees": 0.0,
+          "timestamp": 1773823142.2920058
+        },
+        {
+          "action": "buy",
+          "leg_id": "leg_8ce1ecd4",
+          "platform": "polymarket",
+          "tx_id": "paper_487831c367a4",
+          "price": 0.38,
+          "quantity": 131.57894736842104,
+          "fees": 0.0,
+          "timestamp": 1773823142.4778578
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_282c4d1c",
+          "platform": "polymarket",
+          "tx_id": "paper_b5e02ec8c37b",
+          "price": 0.55,
+          "fees": 1.0,
+          "trigger": "manual_full_exit",
+          "timestamp": 1773882130.3935628
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_8ce1ecd4",
+          "platform": "polymarket",
+          "tx_id": "paper_dbdbe6036d8c",
+          "price": 0.38,
+          "fees": 1.0,
+          "trigger": "manual_full_exit",
+          "timestamp": 1773882130.449967
+        }
+      ],
+      "hold_duration_hours": 16.4,
+      "peak_value": 100.0,
+      "max_drawdown_from_peak": 0.0,
+      "created_at": 1773823142.010009,
+      "closed_at": 1773882130.4500067
+    },
+    {
+      "id": "journal_d3c50c19",
+      "package_id": "pkg_c31014bfee04",
+      "name": "Auto: Will Bitcoin dip to $30,000 by December 31, 2026?",
+      "strategy_type": "pure_prediction",
+      "ai_strategy": "balanced",
+      "mode": "paper",
+      "total_cost": 200.0,
+      "exit_value": 219.0476,
+      "total_fees": 4.381,
+      "buy_fees": 0.0,
+      "sell_fees": 4.381,
+      "pnl": 14.6666,
+      "pnl_pct": 7.33,
+      "outcome": "win",
+      "exit_trigger": "manual_full_exit",
+      "legs": [
+        {
+          "leg_id": "leg_310f6f8f",
+          "platform": "polymarket",
+          "type": "prediction_yes",
+          "asset_id": "0x903a1387e6414be5529efc8f7757e30371e6698de9d68fa4ce33252009db69ef:YES",
+          "entry_price": 0.16,
+          "exit_price": 0.16,
+          "quantity": 625.0,
+          "cost": 100.0,
+          "exit_value": 100.0,
+          "buy_fees": 0,
+          "sell_fees": 2.0,
+          "leg_pnl": -2.0,
+          "leg_pnl_pct": -2.0,
+          "status": "closed"
+        },
+        {
+          "leg_id": "leg_27e4c2e5",
+          "platform": "polymarket",
+          "type": "prediction_no",
+          "asset_id": "0x903a1387e6414be5529efc8f7757e30371e6698de9d68fa4ce33252009db69ef:NO",
+          "entry_price": 0.84,
+          "exit_price": 1.0,
+          "quantity": 119.04761904761905,
+          "cost": 100.0,
+          "exit_value": 119.0476,
+          "buy_fees": 0,
+          "sell_fees": 2.381,
+          "leg_pnl": 16.6666,
+          "leg_pnl_pct": 16.67,
+          "status": "closed"
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_797e0371",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 15
+          },
+          "active": true,
+          "created_at": 1773825601.5595663
+        },
+        {
+          "rule_id": "rule_7a0f8e9a",
+          "type": "stop_loss",
+          "params": {
+            "stop_pct": -10
+          },
+          "active": true,
+          "created_at": 1773825601.559568
+        },
+        {
+          "rule_id": "rule_492fc044",
+          "type": "trailing_stop",
+          "params": {
+            "current": 8,
+            "bound_min": 3,
+            "bound_max": 20
+          },
+          "active": true,
+          "created_at": 1773825601.5595694
+        }
+      ],
+      "execution_log": [
+        {
+          "action": "buy",
+          "leg_id": "leg_310f6f8f",
+          "platform": "polymarket",
+          "tx_id": "paper_1dee44e5ebf4",
+          "price": 0.16,
+          "quantity": 625.0,
+          "fees": 2.0,
+          "timestamp": 1773825601.7542515
+        },
+        {
+          "action": "buy",
+          "leg_id": "leg_27e4c2e5",
+          "platform": "polymarket",
+          "tx_id": "paper_a14689f4dced",
+          "price": 0.84,
+          "quantity": 119.04761904761905,
+          "fees": 2.0,
+          "timestamp": 1773825601.9542592
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_310f6f8f",
+          "platform": "polymarket",
+          "tx_id": "paper_242624788c1a",
+          "price": 0.16,
+          "fees": 2.0,
+          "trigger": "manual_full_exit",
+          "timestamp": 1773882130.9749775
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_27e4c2e5",
+          "platform": "polymarket",
+          "tx_id": "paper_a4d0dbe6c5ec",
+          "price": 1.0,
+          "fees": 2.381,
+          "trigger": "manual_full_exit",
+          "timestamp": 1773882131.0376499
+        }
+      ],
+      "hold_duration_hours": 15.7,
+      "peak_value": 216.85714285714283,
+      "max_drawdown_from_peak": -1.01,
+      "created_at": 1773825601.5595512,
+      "closed_at": 1773882131.0376987
+    },
+    {
+      "id": "journal_3f2e3d13",
+      "package_id": "pkg_f87381d783ee",
+      "name": "Auto: Will Bitcoin dip to $30,000 by December 31, 2026?",
+      "strategy_type": "pure_prediction",
+      "ai_strategy": "balanced",
+      "mode": "paper",
+      "total_cost": 200.0,
+      "exit_value": 219.0476,
+      "total_fees": 4.381,
+      "buy_fees": 0.0,
+      "sell_fees": 4.381,
+      "pnl": 14.6666,
+      "pnl_pct": 7.33,
+      "outcome": "win",
+      "exit_trigger": "manual_full_exit",
+      "legs": [
+        {
+          "leg_id": "leg_f59eca0a",
+          "platform": "polymarket",
+          "type": "prediction_yes",
+          "asset_id": "0x903a1387e6414be5529efc8f7757e30371e6698de9d68fa4ce33252009db69ef:YES",
+          "entry_price": 0.16,
+          "exit_price": 0.16,
+          "quantity": 625.0,
+          "cost": 100.0,
+          "exit_value": 100.0,
+          "buy_fees": 0,
+          "sell_fees": 2.0,
+          "leg_pnl": -2.0,
+          "leg_pnl_pct": -2.0,
+          "status": "closed"
+        },
+        {
+          "leg_id": "leg_f8cf2cae",
+          "platform": "polymarket",
+          "type": "prediction_no",
+          "asset_id": "0x903a1387e6414be5529efc8f7757e30371e6698de9d68fa4ce33252009db69ef:NO",
+          "entry_price": 0.84,
+          "exit_price": 1.0,
+          "quantity": 119.04761904761905,
+          "cost": 100.0,
+          "exit_value": 119.0476,
+          "buy_fees": 0,
+          "sell_fees": 2.381,
+          "leg_pnl": 16.6666,
+          "leg_pnl_pct": 16.67,
+          "status": "closed"
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_4b0bada7",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 15
+          },
+          "active": true,
+          "created_at": 1773825906.668039
+        },
+        {
+          "rule_id": "rule_e75de2d0",
+          "type": "stop_loss",
+          "params": {
+            "stop_pct": -10
+          },
+          "active": true,
+          "created_at": 1773825906.6680408
+        },
+        {
+          "rule_id": "rule_8435f5a6",
+          "type": "trailing_stop",
+          "params": {
+            "current": 8,
+            "bound_min": 3,
+            "bound_max": 20
+          },
+          "active": true,
+          "created_at": 1773825906.6680422
+        }
+      ],
+      "execution_log": [
+        {
+          "action": "buy",
+          "leg_id": "leg_f59eca0a",
+          "platform": "polymarket",
+          "tx_id": "paper_2a5ac1f15838",
+          "price": 0.16,
+          "quantity": 625.0,
+          "fees": 2.0,
+          "timestamp": 1773825906.8752234
+        },
+        {
+          "action": "buy",
+          "leg_id": "leg_f8cf2cae",
+          "platform": "polymarket",
+          "tx_id": "paper_fbd960c019cd",
+          "price": 0.84,
+          "quantity": 119.04761904761905,
+          "fees": 2.0,
+          "timestamp": 1773825907.092611
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_f59eca0a",
+          "platform": "polymarket",
+          "tx_id": "paper_2b7dc46775b4",
+          "price": 0.16,
+          "fees": 2.0,
+          "trigger": "manual_full_exit",
+          "timestamp": 1773882131.4166408
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_f8cf2cae",
+          "platform": "polymarket",
+          "tx_id": "paper_a72b248fd40e",
+          "price": 1.0,
+          "fees": 2.381,
+          "trigger": "manual_full_exit",
+          "timestamp": 1773882131.4630756
+        }
+      ],
+      "hold_duration_hours": 15.6,
+      "peak_value": 216.85714285714283,
+      "max_drawdown_from_peak": -1.01,
+      "created_at": 1773825906.6680267,
+      "closed_at": 1773882131.4631133
+    },
+    {
+      "id": "journal_192c6c4c",
+      "package_id": "pkg_9229982fc6a3",
+      "name": "Auto: Will Bitcoin dip to $30,000 by December 31, 2026?",
+      "strategy_type": "pure_prediction",
+      "ai_strategy": "balanced",
+      "mode": "paper",
+      "total_cost": 175.0,
+      "exit_value": 175.0,
+      "total_fees": 3.5,
+      "buy_fees": 0.0,
+      "sell_fees": 3.5,
+      "pnl": -3.5,
+      "pnl_pct": -2.0,
+      "outcome": "loss",
+      "exit_trigger": "manual_full_exit",
+      "legs": [
+        {
+          "leg_id": "leg_98f41d1a",
+          "platform": "polymarket",
+          "type": "prediction_yes",
+          "asset_id": "0x903a1387e6414be5529efc8f7757e30371e6698de9d68fa4ce33252009db69ef:YES",
+          "entry_price": 0.16,
+          "exit_price": 0.16,
+          "quantity": 546.875,
+          "cost": 87.5,
+          "exit_value": 87.5,
+          "buy_fees": 0.0,
+          "sell_fees": 1.75,
+          "leg_pnl": -1.75,
+          "leg_pnl_pct": -2.0,
+          "status": "closed"
+        },
+        {
+          "leg_id": "leg_90cbe96f",
+          "platform": "polymarket",
+          "type": "prediction_no",
+          "asset_id": "0x903a1387e6414be5529efc8f7757e30371e6698de9d68fa4ce33252009db69ef:NO",
+          "entry_price": 1.0,
+          "exit_price": 1.0,
+          "quantity": 87.5,
+          "cost": 87.5,
+          "exit_value": 87.5,
+          "buy_fees": 0.0,
+          "sell_fees": 1.75,
+          "leg_pnl": -1.75,
+          "leg_pnl_pct": -2.0,
+          "status": "closed"
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_d328bfd7",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 15
+          },
+          "active": true,
+          "created_at": 1773826320.3396516
+        },
+        {
+          "rule_id": "rule_0fb4d345",
+          "type": "stop_loss",
+          "params": {
+            "stop_pct": -10
+          },
+          "active": true,
+          "created_at": 1773826320.339654
+        },
+        {
+          "rule_id": "rule_dc3727df",
+          "type": "trailing_stop",
+          "params": {
+            "current": 8,
+            "bound_min": 3,
+            "bound_max": 20
+          },
+          "active": true,
+          "created_at": 1773826320.3396573
+        }
+      ],
+      "execution_log": [
+        {
+          "action": "buy",
+          "leg_id": "leg_98f41d1a",
+          "platform": "polymarket",
+          "tx_id": "paper_0c5c2ae1cc4e",
+          "price": 0.16,
+          "quantity": 546.875,
+          "fees": 0.0,
+          "timestamp": 1773826320.3773746
+        },
+        {
+          "action": "buy",
+          "leg_id": "leg_90cbe96f",
+          "platform": "polymarket",
+          "tx_id": "paper_6aeac8ce1409",
+          "price": 1.0,
+          "quantity": 87.5,
+          "fees": 0.0,
+          "timestamp": 1773826320.4193892
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_98f41d1a",
+          "platform": "polymarket",
+          "tx_id": "paper_e423d499f235",
+          "price": 0.16,
+          "fees": 1.75,
+          "trigger": "manual_full_exit",
+          "timestamp": 1773882131.8608599
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_90cbe96f",
+          "platform": "polymarket",
+          "tx_id": "paper_3aeecc480e7f",
+          "price": 1.0,
+          "fees": 1.75,
+          "trigger": "manual_full_exit",
+          "timestamp": 1773882131.9255314
+        }
+      ],
+      "hold_duration_hours": 15.5,
+      "peak_value": 175.0,
+      "max_drawdown_from_peak": 0.0,
+      "created_at": 1773826320.3396337,
+      "closed_at": 1773882131.9255836
+    },
+    {
+      "id": "journal_6bc90a15",
+      "package_id": "pkg_72cccc809ef8",
+      "name": "Auto: Will Solana dip to $80 in March?",
+      "strategy_type": "pure_prediction",
+      "ai_strategy": "balanced",
+      "mode": "paper",
+      "total_cost": 200.0,
+      "exit_value": 200.0,
+      "total_fees": 4.0,
+      "buy_fees": 0.0,
+      "sell_fees": 4.0,
+      "pnl": -4.0,
+      "pnl_pct": -2.0,
+      "outcome": "loss",
+      "exit_trigger": "manual_full_exit",
+      "legs": [
+        {
+          "leg_id": "leg_3d32593a",
+          "platform": "polymarket",
+          "type": "prediction_yes",
+          "asset_id": "0x882bdfededa5335c0ac59af1b774b97b4b19672499dfc3e41e1f177ae542fb5b:YES",
+          "entry_price": 0.2505,
+          "exit_price": 0.2505,
+          "quantity": 399.2015968063872,
+          "cost": 100.0,
+          "exit_value": 100.0,
+          "buy_fees": 0.0,
+          "sell_fees": 2.0,
+          "leg_pnl": -2.0,
+          "leg_pnl_pct": -2.0,
+          "status": "closed"
+        },
+        {
+          "leg_id": "leg_4d9635d3",
+          "platform": "polymarket",
+          "type": "prediction_no",
+          "asset_id": "0x882bdfededa5335c0ac59af1b774b97b4b19672499dfc3e41e1f177ae542fb5b:NO",
+          "entry_price": 1.0,
+          "exit_price": 1.0,
+          "quantity": 100.0,
+          "cost": 100.0,
+          "exit_value": 100.0,
+          "buy_fees": 0.0,
+          "sell_fees": 2.0,
+          "leg_pnl": -2.0,
+          "leg_pnl_pct": -2.0,
+          "status": "closed"
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_faba89e4",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 15
+          },
+          "active": true,
+          "created_at": 1773829533.3203855
+        },
+        {
+          "rule_id": "rule_6ba1b22d",
+          "type": "stop_loss",
+          "params": {
+            "stop_pct": -10
+          },
+          "active": true,
+          "created_at": 1773829533.320429
+        },
+        {
+          "rule_id": "rule_fba7b823",
+          "type": "trailing_stop",
+          "params": {
+            "current": 8,
+            "bound_min": 3,
+            "bound_max": 20
+          },
+          "active": true,
+          "created_at": 1773829533.3204665
+        }
+      ],
+      "execution_log": [
+        {
+          "action": "buy",
+          "leg_id": "leg_3d32593a",
+          "platform": "polymarket",
+          "tx_id": "paper_36386710f491",
+          "price": 0.2505,
+          "quantity": 399.2015968063872,
+          "fees": 0.0,
+          "timestamp": 1773829533.4252896
+        },
+        {
+          "action": "buy",
+          "leg_id": "leg_4d9635d3",
+          "platform": "polymarket",
+          "tx_id": "paper_c0b03e676601",
+          "price": 1.0,
+          "quantity": 100.0,
+          "fees": 0.0,
+          "timestamp": 1773829533.4720356
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_3d32593a",
+          "platform": "polymarket",
+          "tx_id": "paper_cf0fe8f15dde",
+          "price": 0.2505,
+          "fees": 2.0,
+          "trigger": "manual_full_exit",
+          "timestamp": 1773882132.3879364
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_4d9635d3",
+          "platform": "polymarket",
+          "tx_id": "paper_072070a191dc",
+          "price": 1.0,
+          "fees": 2.0,
+          "trigger": "manual_full_exit",
+          "timestamp": 1773882132.4405284
+        }
+      ],
+      "hold_duration_hours": 14.6,
+      "peak_value": 200.0,
+      "max_drawdown_from_peak": 0.0,
+      "created_at": 1773829533.319857,
+      "closed_at": 1773882132.4405632
+    },
+    {
+      "id": "journal_57c0e692",
+      "package_id": "pkg_3b6b9fa49de0",
+      "name": "Auto: Will Solana reach $100 in March?",
+      "strategy_type": "pure_prediction",
+      "ai_strategy": "balanced",
+      "mode": "paper",
+      "total_cost": 200.0,
+      "exit_value": 200.0,
+      "total_fees": 4.0,
+      "buy_fees": 0.0,
+      "sell_fees": 4.0,
+      "pnl": -4.0,
+      "pnl_pct": -2.0,
+      "outcome": "loss",
+      "exit_trigger": "manual_full_exit",
+      "legs": [
+        {
+          "leg_id": "leg_c3131e4f",
+          "platform": "polymarket",
+          "type": "prediction_yes",
+          "asset_id": "0x97de9adea81f908cc2b372c23627d8121ecbe1c21336d4263465fd3d1262d378:YES",
+          "entry_price": 0.665,
+          "exit_price": 0.665,
+          "quantity": 150.37593984962405,
+          "cost": 100.0,
+          "exit_value": 100.0,
+          "buy_fees": 0.0,
+          "sell_fees": 2.0,
+          "leg_pnl": -2.0,
+          "leg_pnl_pct": -2.0,
+          "status": "closed"
+        },
+        {
+          "leg_id": "leg_9445c2e9",
+          "platform": "polymarket",
+          "type": "prediction_no",
+          "asset_id": "0x97de9adea81f908cc2b372c23627d8121ecbe1c21336d4263465fd3d1262d378:NO",
+          "entry_price": 1.0,
+          "exit_price": 1.0,
+          "quantity": 100.0,
+          "cost": 100.0,
+          "exit_value": 100.0,
+          "buy_fees": 0.0,
+          "sell_fees": 2.0,
+          "leg_pnl": -2.0,
+          "leg_pnl_pct": -2.0,
+          "status": "closed"
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_602b486c",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 15
+          },
+          "active": true,
+          "created_at": 1773829533.5267792
+        },
+        {
+          "rule_id": "rule_167f2fba",
+          "type": "stop_loss",
+          "params": {
+            "stop_pct": -10
+          },
+          "active": true,
+          "created_at": 1773829533.5267851
+        },
+        {
+          "rule_id": "rule_92321b6f",
+          "type": "trailing_stop",
+          "params": {
+            "current": 8,
+            "bound_min": 3,
+            "bound_max": 20
+          },
+          "active": true,
+          "created_at": 1773829533.52679
+        }
+      ],
+      "execution_log": [
+        {
+          "action": "buy",
+          "leg_id": "leg_c3131e4f",
+          "platform": "polymarket",
+          "tx_id": "paper_9d1ced91a6b5",
+          "price": 0.665,
+          "quantity": 150.37593984962405,
+          "fees": 0.0,
+          "timestamp": 1773829533.572452
+        },
+        {
+          "action": "buy",
+          "leg_id": "leg_9445c2e9",
+          "platform": "polymarket",
+          "tx_id": "paper_e57c595b11bd",
+          "price": 1.0,
+          "quantity": 100.0,
+          "fees": 0.0,
+          "timestamp": 1773829533.627167
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_c3131e4f",
+          "platform": "polymarket",
+          "tx_id": "paper_c96167ccb96b",
+          "price": 0.665,
+          "fees": 2.0,
+          "trigger": "manual_full_exit",
+          "timestamp": 1773882132.812994
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_9445c2e9",
+          "platform": "polymarket",
+          "tx_id": "paper_1f3e03e7623d",
+          "price": 1.0,
+          "fees": 2.0,
+          "trigger": "manual_full_exit",
+          "timestamp": 1773882132.8592958
+        }
+      ],
+      "hold_duration_hours": 14.6,
+      "peak_value": 200.0,
+      "max_drawdown_from_peak": 0.0,
+      "created_at": 1773829533.5267346,
+      "closed_at": 1773882132.859323
+    },
+    {
+      "id": "journal_c08255e4",
+      "package_id": "pkg_513c3dc09a31",
+      "name": "Auto: Will Ethereum reach $2,400 March 16-22?",
+      "strategy_type": "pure_prediction",
+      "ai_strategy": "balanced",
+      "mode": "paper",
+      "total_cost": 200.0,
+      "exit_value": 200.0,
+      "total_fees": 4.0,
+      "buy_fees": 0.0,
+      "sell_fees": 4.0,
+      "pnl": -4.0,
+      "pnl_pct": -2.0,
+      "outcome": "loss",
+      "exit_trigger": "manual_full_exit",
+      "legs": [
+        {
+          "leg_id": "leg_8c5fd5ab",
+          "platform": "polymarket",
+          "type": "prediction_yes",
+          "asset_id": "0x6e1865e5c91162ce92fd1a3ac444bf7ab8c48e46fd818fc97d33578eb7be6a62:YES",
+          "entry_price": 0.615,
+          "exit_price": 0.615,
+          "quantity": 162.60162601626016,
+          "cost": 100.0,
+          "exit_value": 100.0,
+          "buy_fees": 0.0,
+          "sell_fees": 2.0,
+          "leg_pnl": -2.0,
+          "leg_pnl_pct": -2.0,
+          "status": "closed"
+        },
+        {
+          "leg_id": "leg_a163e116",
+          "platform": "polymarket",
+          "type": "prediction_no",
+          "asset_id": "0x6e1865e5c91162ce92fd1a3ac444bf7ab8c48e46fd818fc97d33578eb7be6a62:NO",
+          "entry_price": 0.385,
+          "exit_price": 0.385,
+          "quantity": 259.7402597402597,
+          "cost": 100.0,
+          "exit_value": 100.0,
+          "buy_fees": 0.0,
+          "sell_fees": 2.0,
+          "leg_pnl": -2.0,
+          "leg_pnl_pct": -2.0,
+          "status": "closed"
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_9464b126",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 15
+          },
+          "active": true,
+          "created_at": 1773831047.0636506
+        },
+        {
+          "rule_id": "rule_d5df1bc8",
+          "type": "stop_loss",
+          "params": {
+            "stop_pct": -10
+          },
+          "active": true,
+          "created_at": 1773831047.0636582
+        },
+        {
+          "rule_id": "rule_66890ed2",
+          "type": "trailing_stop",
+          "params": {
+            "current": 8,
+            "bound_min": 3,
+            "bound_max": 20
+          },
+          "active": true,
+          "created_at": 1773831047.0636642
+        }
+      ],
+      "execution_log": [
+        {
+          "action": "buy",
+          "leg_id": "leg_8c5fd5ab",
+          "platform": "polymarket",
+          "tx_id": "paper_8ca38dea949e",
+          "price": 0.615,
+          "quantity": 162.60162601626016,
+          "fees": 0.0,
+          "timestamp": 1773831047.3585458
+        },
+        {
+          "action": "buy",
+          "leg_id": "leg_a163e116",
+          "platform": "polymarket",
+          "tx_id": "paper_b84f73564849",
+          "price": 0.385,
+          "quantity": 259.7402597402597,
+          "fees": 0.0,
+          "timestamp": 1773831047.4050093
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_8c5fd5ab",
+          "platform": "polymarket",
+          "tx_id": "paper_fe703ae2121b",
+          "price": 0.615,
+          "fees": 2.0,
+          "trigger": "manual_full_exit",
+          "timestamp": 1773882133.3367922
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_a163e116",
+          "platform": "polymarket",
+          "tx_id": "paper_b060dc34ac02",
+          "price": 0.385,
+          "fees": 2.0,
+          "trigger": "manual_full_exit",
+          "timestamp": 1773882133.3898566
+        }
+      ],
+      "hold_duration_hours": 14.2,
+      "peak_value": 200.0,
+      "max_drawdown_from_peak": 0.0,
+      "created_at": 1773831047.0635998,
+      "closed_at": 1773882133.3898816
+    },
+    {
+      "id": "journal_70abe4ae",
+      "package_id": "pkg_120ce4bb620a",
+      "name": "Auto: Will the price of Solana be above $90 on March 22?",
+      "strategy_type": "pure_prediction",
+      "ai_strategy": "balanced",
+      "mode": "paper",
+      "total_cost": 200.0,
+      "exit_value": 200.0,
+      "total_fees": 4.0,
+      "buy_fees": 0.0,
+      "sell_fees": 4.0,
+      "pnl": -4.0,
+      "pnl_pct": -2.0,
+      "outcome": "loss",
+      "exit_trigger": "manual_full_exit",
+      "legs": [
+        {
+          "leg_id": "leg_a01dd126",
+          "platform": "polymarket",
+          "type": "prediction_yes",
+          "asset_id": "0x4b1edaa474ca330fcdab67971500ba9590016423c29ecd9622f463b8431396fc:YES",
+          "entry_price": 0.625,
+          "exit_price": 0.625,
+          "quantity": 160.0,
+          "cost": 100.0,
+          "exit_value": 100.0,
+          "buy_fees": 0.0,
+          "sell_fees": 2.0,
+          "leg_pnl": -2.0,
+          "leg_pnl_pct": -2.0,
+          "status": "closed"
+        },
+        {
+          "leg_id": "leg_8458a10a",
+          "platform": "polymarket",
+          "type": "prediction_no",
+          "asset_id": "0x4b1edaa474ca330fcdab67971500ba9590016423c29ecd9622f463b8431396fc:NO",
+          "entry_price": 0.375,
+          "exit_price": 0.375,
+          "quantity": 266.6666666666667,
+          "cost": 100.0,
+          "exit_value": 100.0,
+          "buy_fees": 0.0,
+          "sell_fees": 2.0,
+          "leg_pnl": -2.0,
+          "leg_pnl_pct": -2.0,
+          "status": "closed"
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_5bef1a38",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 15
+          },
+          "active": true,
+          "created_at": 1773834121.5919352
+        },
+        {
+          "rule_id": "rule_904eec35",
+          "type": "stop_loss",
+          "params": {
+            "stop_pct": -10
+          },
+          "active": true,
+          "created_at": 1773834121.5919418
+        },
+        {
+          "rule_id": "rule_29ed0df9",
+          "type": "trailing_stop",
+          "params": {
+            "current": 8,
+            "bound_min": 3,
+            "bound_max": 20
+          },
+          "active": true,
+          "created_at": 1773834121.5919473
+        }
+      ],
+      "execution_log": [
+        {
+          "action": "buy",
+          "leg_id": "leg_a01dd126",
+          "platform": "polymarket",
+          "tx_id": "paper_e39298ae3f97",
+          "price": 0.625,
+          "quantity": 160.0,
+          "fees": 0.0,
+          "timestamp": 1773834121.957605
+        },
+        {
+          "action": "buy",
+          "leg_id": "leg_8458a10a",
+          "platform": "polymarket",
+          "tx_id": "paper_fe18b85c0949",
+          "price": 0.375,
+          "quantity": 266.6666666666667,
+          "fees": 0.0,
+          "timestamp": 1773834122.070234
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_a01dd126",
+          "platform": "polymarket",
+          "tx_id": "paper_dda3982824de",
+          "price": 0.625,
+          "fees": 2.0,
+          "trigger": "manual_full_exit",
+          "timestamp": 1773882133.8399105
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_8458a10a",
+          "platform": "polymarket",
+          "tx_id": "paper_e0871a13a592",
+          "price": 0.375,
+          "fees": 2.0,
+          "trigger": "manual_full_exit",
+          "timestamp": 1773882133.8973722
+        }
+      ],
+      "hold_duration_hours": 13.3,
+      "peak_value": 200.0,
+      "max_drawdown_from_peak": 0.0,
+      "created_at": 1773834121.591887,
+      "closed_at": 1773882133.897401
+    },
+    {
+      "id": "journal_37cdef38",
+      "package_id": "pkg_f22caefc683c",
+      "name": "Auto: Will Solana dip to $70 in March?",
+      "strategy_type": "pure_prediction",
+      "ai_strategy": "balanced",
+      "mode": "paper",
+      "total_cost": 200.0,
+      "exit_value": 200.0,
+      "total_fees": 4.0,
+      "buy_fees": 0.0,
+      "sell_fees": 4.0,
+      "pnl": -4.0,
+      "pnl_pct": -2.0,
+      "outcome": "loss",
+      "exit_trigger": "manual_full_exit",
+      "legs": [
+        {
+          "leg_id": "leg_4b6c673e",
+          "platform": "polymarket",
+          "type": "prediction_yes",
+          "asset_id": "0xd1cd0d6020b3c528d7adf8490ad2526b3102b3ed064bb0f8cbe6e664a9bf0da7:YES",
+          "entry_price": 0.11,
+          "exit_price": 0.11,
+          "quantity": 909.0909090909091,
+          "cost": 100.0,
+          "exit_value": 100.0,
+          "buy_fees": 0.0,
+          "sell_fees": 2.0,
+          "leg_pnl": -2.0,
+          "leg_pnl_pct": -2.0,
+          "status": "closed"
+        },
+        {
+          "leg_id": "leg_19b3a2ae",
+          "platform": "polymarket",
+          "type": "prediction_no",
+          "asset_id": "0xd1cd0d6020b3c528d7adf8490ad2526b3102b3ed064bb0f8cbe6e664a9bf0da7:NO",
+          "entry_price": 0.89,
+          "exit_price": 0.89,
+          "quantity": 112.35955056179775,
+          "cost": 100.0,
+          "exit_value": 100.0,
+          "buy_fees": 0.0,
+          "sell_fees": 2.0,
+          "leg_pnl": -2.0,
+          "leg_pnl_pct": -2.0,
+          "status": "closed"
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_05684149",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 15
+          },
+          "active": true,
+          "created_at": 1773836313.7710624
+        },
+        {
+          "rule_id": "rule_224452ff",
+          "type": "stop_loss",
+          "params": {
+            "stop_pct": -10
+          },
+          "active": true,
+          "created_at": 1773836313.7710705
+        },
+        {
+          "rule_id": "rule_eb71fb4c",
+          "type": "trailing_stop",
+          "params": {
+            "current": 8,
+            "bound_min": 3,
+            "bound_max": 20
+          },
+          "active": true,
+          "created_at": 1773836313.7710788
+        }
+      ],
+      "execution_log": [
+        {
+          "action": "buy",
+          "leg_id": "leg_4b6c673e",
+          "platform": "polymarket",
+          "tx_id": "paper_cc41d750326e",
+          "price": 0.11,
+          "quantity": 909.0909090909091,
+          "fees": 0.0,
+          "timestamp": 1773836314.0932722
+        },
+        {
+          "action": "buy",
+          "leg_id": "leg_19b3a2ae",
+          "platform": "polymarket",
+          "tx_id": "paper_fbc84734a7cc",
+          "price": 0.89,
+          "quantity": 112.35955056179775,
+          "fees": 0.0,
+          "timestamp": 1773836314.1422346
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_4b6c673e",
+          "platform": "polymarket",
+          "tx_id": "paper_7ef4d8a63ed5",
+          "price": 0.11,
+          "fees": 2.0,
+          "trigger": "manual_full_exit",
+          "timestamp": 1773882134.251153
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_19b3a2ae",
+          "platform": "polymarket",
+          "tx_id": "paper_545d63b73416",
+          "price": 0.89,
+          "fees": 2.0,
+          "trigger": "manual_full_exit",
+          "timestamp": 1773882134.3194509
+        }
+      ],
+      "hold_duration_hours": 12.7,
+      "peak_value": 200.0,
+      "max_drawdown_from_peak": 0.0,
+      "created_at": 1773836313.7710214,
+      "closed_at": 1773882134.3194892
+    },
+    {
+      "id": "journal_70759d7c",
+      "package_id": "pkg_6b729da0de72",
+      "name": "Auto: Will the price of Bitcoin be above $72,000 on March 24?",
+      "strategy_type": "pure_prediction",
+      "ai_strategy": "balanced",
+      "mode": "paper",
+      "total_cost": 162.5,
+      "exit_value": 162.5,
+      "total_fees": 3.25,
+      "buy_fees": 0.0,
+      "sell_fees": 3.25,
+      "pnl": -3.25,
+      "pnl_pct": -2.0,
+      "outcome": "loss",
+      "exit_trigger": "manual_full_exit",
+      "legs": [
+        {
+          "leg_id": "leg_280df86a",
+          "platform": "polymarket",
+          "type": "prediction_yes",
+          "asset_id": "0xe384535c64ab2c29bb5cdc484754c9c4e5da3c390ba5e98f5f39a138a5b0b6d1:YES",
+          "entry_price": 0.525,
+          "exit_price": 0.525,
+          "quantity": 154.76190476190476,
+          "cost": 81.25,
+          "exit_value": 81.25,
+          "buy_fees": 0.0,
+          "sell_fees": 1.625,
+          "leg_pnl": -1.625,
+          "leg_pnl_pct": -2.0,
+          "status": "closed"
+        },
+        {
+          "leg_id": "leg_17819b16",
+          "platform": "polymarket",
+          "type": "prediction_no",
+          "asset_id": "0xe384535c64ab2c29bb5cdc484754c9c4e5da3c390ba5e98f5f39a138a5b0b6d1:NO",
+          "entry_price": 0.475,
+          "exit_price": 0.475,
+          "quantity": 171.05263157894737,
+          "cost": 81.25,
+          "exit_value": 81.25,
+          "buy_fees": 0.0,
+          "sell_fees": 1.625,
+          "leg_pnl": -1.625,
+          "leg_pnl_pct": -2.0,
+          "status": "closed"
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_5a789b77",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 15
+          },
+          "active": true,
+          "created_at": 1773841958.3815165
+        },
+        {
+          "rule_id": "rule_72e9abcf",
+          "type": "stop_loss",
+          "params": {
+            "stop_pct": -10
+          },
+          "active": true,
+          "created_at": 1773841958.3815222
+        },
+        {
+          "rule_id": "rule_cd4da31c",
+          "type": "trailing_stop",
+          "params": {
+            "current": 8,
+            "bound_min": 3,
+            "bound_max": 20
+          },
+          "active": true,
+          "created_at": 1773841958.3815296
+        }
+      ],
+      "execution_log": [
+        {
+          "action": "buy",
+          "leg_id": "leg_280df86a",
+          "platform": "polymarket",
+          "tx_id": "paper_302c417f5190",
+          "price": 0.525,
+          "quantity": 154.76190476190476,
+          "fees": 0.0,
+          "timestamp": 1773841958.6514516
+        },
+        {
+          "action": "buy",
+          "leg_id": "leg_17819b16",
+          "platform": "polymarket",
+          "tx_id": "paper_16dd371ac95b",
+          "price": 0.475,
+          "quantity": 171.05263157894737,
+          "fees": 0.0,
+          "timestamp": 1773841958.7023895
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_280df86a",
+          "platform": "polymarket",
+          "tx_id": "paper_7b498ea4792c",
+          "price": 0.525,
+          "fees": 1.625,
+          "trigger": "manual_full_exit",
+          "timestamp": 1773882134.7180176
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_17819b16",
+          "platform": "polymarket",
+          "tx_id": "paper_0e58a97b4b4e",
+          "price": 0.475,
+          "fees": 1.625,
+          "trigger": "manual_full_exit",
+          "timestamp": 1773882134.775528
+        }
+      ],
+      "hold_duration_hours": 11.2,
+      "peak_value": 162.5,
+      "max_drawdown_from_peak": 0.0,
+      "created_at": 1773841958.3814774,
+      "closed_at": 1773882134.775556
+    },
+    {
+      "id": "journal_1b175ff8",
+      "package_id": "pkg_f5bf31f5c1b1",
+      "name": "Auto: Will Bitcoin be the top performing crypto for the week of Ma",
+      "strategy_type": "pure_prediction",
+      "ai_strategy": "balanced",
+      "mode": "paper",
+      "total_cost": 200.0,
+      "exit_value": 200.0,
+      "total_fees": 4.0,
+      "buy_fees": 0.0,
+      "sell_fees": 4.0,
+      "pnl": -4.0,
+      "pnl_pct": -2.0,
+      "outcome": "loss",
+      "exit_trigger": "auto:trailing_stop",
+      "legs": [
+        {
+          "leg_id": "leg_2a9a85f0",
+          "platform": "polymarket",
+          "type": "prediction_yes",
+          "asset_id": "0xbff48aeca85048e900fe2e0670123351f6c557869cbd365086e02d691ee4b05d:YES",
+          "entry_price": 0.09,
+          "exit_price": 0.09,
+          "quantity": 2222.222222222222,
+          "cost": 200.0,
+          "exit_value": 200.0,
+          "buy_fees": 0.0,
+          "sell_fees": 4.0,
+          "leg_pnl": -4.0,
+          "leg_pnl_pct": -2.0,
+          "status": "closed"
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_992c673b",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 25
+          },
+          "active": true,
+          "created_at": 1773882369.4386566
+        },
+        {
+          "rule_id": "rule_bfd87b08",
+          "type": "stop_loss",
+          "params": {
+            "stop_pct": -20
+          },
+          "active": true,
+          "created_at": 1773882369.4386618
+        },
+        {
+          "rule_id": "rule_f22e927f",
+          "type": "trailing_stop",
+          "params": {
+            "current": 12,
+            "bound_min": 5,
+            "bound_max": 30
+          },
+          "active": true,
+          "created_at": 1773882369.438665
+        }
+      ],
+      "execution_log": [
+        {
+          "action": "buy",
+          "leg_id": "leg_2a9a85f0",
+          "platform": "polymarket",
+          "tx_id": "paper_60633f47cc7e",
+          "price": 0.09,
+          "quantity": 2222.222222222222,
+          "fees": 0.0,
+          "timestamp": 1773882369.6794505
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_2a9a85f0",
+          "platform": "polymarket",
+          "tx_id": "paper_ec79d0225180",
+          "price": 0.09,
+          "fees": 4.0,
+          "trigger": "auto:trailing_stop",
+          "timestamp": 1773883804.2118115
+        }
+      ],
+      "hold_duration_hours": 0.4,
+      "peak_value": 230.99999999999997,
+      "max_drawdown_from_peak": 13.42,
+      "created_at": 1773882369.4386373,
+      "closed_at": 1773883804.2118511
+    },
+    {
+      "id": "journal_7b414b6e",
+      "package_id": "pkg_3b7cd4ffd4dd",
+      "name": "Auto: Will the price of Bitcoin be between $74,000 and $76,000 on ",
+      "strategy_type": "pure_prediction",
+      "ai_strategy": "balanced",
+      "mode": "paper",
+      "total_cost": 200.0,
+      "exit_value": 200.0,
+      "total_fees": 4.0,
+      "buy_fees": 0.0,
+      "sell_fees": 4.0,
+      "pnl": -4.0,
+      "pnl_pct": -2.0,
+      "outcome": "loss",
+      "exit_trigger": "ai_approved:time_decay",
+      "legs": [
+        {
+          "leg_id": "leg_b9dac612",
+          "platform": "polymarket",
+          "type": "prediction_yes",
+          "asset_id": "0x7d072348cc9c998c3ac12f4377a1b798aee40b785000e9ae2417d66cbe1e255c:YES",
+          "entry_price": 0.12,
+          "exit_price": 0.12,
+          "quantity": 1666.6666666666667,
+          "cost": 200.0,
+          "exit_value": 200.0,
+          "buy_fees": 0.0,
+          "sell_fees": 4.0,
+          "leg_pnl": -4.0,
+          "leg_pnl_pct": -2.0,
+          "status": "closed"
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_92f26235",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 25
+          },
+          "active": true,
+          "created_at": 1773882369.6861382
+        },
+        {
+          "rule_id": "rule_7fe8ef71",
+          "type": "stop_loss",
+          "params": {
+            "stop_pct": -20
+          },
+          "active": true,
+          "created_at": 1773882369.68614
+        },
+        {
+          "rule_id": "rule_250be79b",
+          "type": "trailing_stop",
+          "params": {
+            "current": 12,
+            "bound_min": 5,
+            "bound_max": 30
+          },
+          "active": true,
+          "created_at": 1773882369.6861424
+        }
+      ],
+      "execution_log": [
+        {
+          "action": "buy",
+          "leg_id": "leg_b9dac612",
+          "platform": "polymarket",
+          "tx_id": "paper_daa3a61d448d",
+          "price": 0.12,
+          "quantity": 1666.6666666666667,
+          "fees": 0.0,
+          "timestamp": 1773882369.8784206
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_b9dac612",
+          "platform": "polymarket",
+          "tx_id": "paper_c1cfa696518f",
+          "price": 0.12,
+          "fees": 4.0,
+          "trigger": "ai_approved:time_decay",
+          "timestamp": 1773884073.6708918
+        }
+      ],
+      "hold_duration_hours": 0.5,
+      "peak_value": 214.50000000000003,
+      "max_drawdown_from_peak": 6.76,
+      "created_at": 1773882369.686127,
+      "closed_at": 1773884073.6709185
+    },
+    {
+      "id": "journal_c822508a",
+      "package_id": "pkg_3be5d01faad6",
+      "name": "Auto: Will Bitcoin dip to $30,000 by December 31, 2026?",
+      "strategy_type": "pure_prediction",
+      "ai_strategy": "balanced",
+      "mode": "paper",
+      "total_cost": 200.0,
+      "exit_value": 194.2857,
+      "total_fees": 3.8857,
+      "buy_fees": 0.0,
+      "sell_fees": 3.8857,
+      "pnl": -9.6,
+      "pnl_pct": -4.8,
+      "outcome": "loss",
+      "exit_trigger": "ai_approved:negative_drift",
+      "legs": [
+        {
+          "leg_id": "leg_1f0178ef",
+          "platform": "polymarket",
+          "type": "prediction_yes",
+          "asset_id": "0x903a1387e6414be5529efc8f7757e30371e6698de9d68fa4ce33252009db69ef:YES",
+          "entry_price": 0.175,
+          "exit_price": 0.17,
+          "quantity": 1142.857142857143,
+          "cost": 200.0,
+          "exit_value": 194.2857,
+          "buy_fees": 0.0,
+          "sell_fees": 3.8857,
+          "leg_pnl": -9.6,
+          "leg_pnl_pct": -4.8,
+          "status": "closed"
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_e5f8ec38",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 25
+          },
+          "active": true,
+          "created_at": 1773882369.8894506
+        },
+        {
+          "rule_id": "rule_438cdc91",
+          "type": "stop_loss",
+          "params": {
+            "stop_pct": -20
+          },
+          "active": true,
+          "created_at": 1773882369.8894532
+        },
+        {
+          "rule_id": "rule_fb6648bd",
+          "type": "trailing_stop",
+          "params": {
+            "current": 12,
+            "bound_min": 5,
+            "bound_max": 30
+          },
+          "active": true,
+          "created_at": 1773882369.889455
+        }
+      ],
+      "execution_log": [
+        {
+          "action": "buy",
+          "leg_id": "leg_1f0178ef",
+          "platform": "polymarket",
+          "tx_id": "paper_d814ce0f15fb",
+          "price": 0.175,
+          "quantity": 1142.857142857143,
+          "fees": 0.0,
+          "timestamp": 1773882370.141232
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_1f0178ef",
+          "platform": "polymarket",
+          "tx_id": "paper_3f49e4054cd3",
+          "price": 0.17,
+          "fees": 3.8857,
+          "trigger": "ai_approved:negative_drift",
+          "timestamp": 1773884504.2868247
+        }
+      ],
+      "hold_duration_hours": 0.6,
+      "peak_value": 200.0,
+      "max_drawdown_from_peak": 2.86,
+      "created_at": 1773882369.8894365,
+      "closed_at": 1773884504.2868752
+    },
+    {
+      "id": "journal_807c4650",
+      "package_id": "pkg_d3eb2431504d",
+      "name": "Auto: Will Bitcoin be the top performing crypto for the week of Ma",
+      "strategy_type": "pure_prediction",
+      "ai_strategy": "balanced",
+      "mode": "paper",
+      "total_cost": 200.0,
+      "exit_value": 200.0,
+      "total_fees": 4.0,
+      "buy_fees": 0.0,
+      "sell_fees": 4.0,
+      "pnl": -4.0,
+      "pnl_pct": -2.0,
+      "outcome": "loss",
+      "exit_trigger": "ai_approved:time_decay",
+      "legs": [
+        {
+          "leg_id": "leg_ba846b70",
+          "platform": "polymarket",
+          "type": "prediction_yes",
+          "asset_id": "0xbff48aeca85048e900fe2e0670123351f6c557869cbd365086e02d691ee4b05d:YES",
+          "entry_price": 0.09,
+          "exit_price": 0.09,
+          "quantity": 2222.222222222222,
+          "cost": 200.0,
+          "exit_value": 200.0,
+          "buy_fees": 0.0,
+          "sell_fees": 4.0,
+          "leg_pnl": -4.0,
+          "leg_pnl_pct": -2.0,
+          "status": "closed"
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_b8ef54fa",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 25
+          },
+          "active": true,
+          "created_at": 1773883872.9770374
+        },
+        {
+          "rule_id": "rule_6f81416d",
+          "type": "stop_loss",
+          "params": {
+            "stop_pct": -20
+          },
+          "active": true,
+          "created_at": 1773883872.9770434
+        },
+        {
+          "rule_id": "rule_af416962",
+          "type": "trailing_stop",
+          "params": {
+            "current": 12,
+            "bound_min": 5,
+            "bound_max": 30
+          },
+          "active": true,
+          "created_at": 1773883872.9770467
+        }
+      ],
+      "execution_log": [
+        {
+          "action": "buy",
+          "leg_id": "leg_ba846b70",
+          "platform": "polymarket",
+          "tx_id": "paper_74142b55619c",
+          "price": 0.09,
+          "quantity": 2222.222222222222,
+          "fees": 0.0,
+          "timestamp": 1773883873.1682806
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_ba846b70",
+          "platform": "polymarket",
+          "tx_id": "paper_73ac3f5ef1e5",
+          "price": 0.09,
+          "fees": 4.0,
+          "trigger": "ai_approved:time_decay",
+          "timestamp": 1773884901.3283107
+        }
+      ],
+      "hold_duration_hours": 0.3,
+      "peak_value": 200.0,
+      "max_drawdown_from_peak": 0.0,
+      "created_at": 1773883872.977017,
+      "closed_at": 1773884901.3283472
+    },
+    {
+      "id": "journal_2dc760a3",
+      "package_id": "pkg_bc922cfc275d",
+      "name": "Auto: Will the price of Bitcoin be between $74,000 and $76,000 on ",
+      "strategy_type": "pure_prediction",
+      "ai_strategy": "balanced",
+      "mode": "paper",
+      "total_cost": 200.0,
+      "exit_value": 200.0,
+      "total_fees": 4.0,
+      "buy_fees": 0.0,
+      "sell_fees": 4.0,
+      "pnl": -4.0,
+      "pnl_pct": -2.0,
+      "outcome": "loss",
+      "exit_trigger": "ai_approved:time_decay",
+      "legs": [
+        {
+          "leg_id": "leg_258d3e77",
+          "platform": "polymarket",
+          "type": "prediction_yes",
+          "asset_id": "0x7d072348cc9c998c3ac12f4377a1b798aee40b785000e9ae2417d66cbe1e255c:YES",
+          "entry_price": 0.12,
+          "exit_price": 0.12,
+          "quantity": 1666.6666666666667,
+          "cost": 200.0,
+          "exit_value": 200.0,
+          "buy_fees": 0.0,
+          "sell_fees": 4.0,
+          "leg_pnl": -4.0,
+          "leg_pnl_pct": -2.0,
+          "status": "closed"
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_093c35c7",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 25
+          },
+          "active": true,
+          "created_at": 1773884182.6481438
+        },
+        {
+          "rule_id": "rule_f9733327",
+          "type": "stop_loss",
+          "params": {
+            "stop_pct": -20
+          },
+          "active": true,
+          "created_at": 1773884182.6481485
+        },
+        {
+          "rule_id": "rule_12427408",
+          "type": "trailing_stop",
+          "params": {
+            "current": 12,
+            "bound_min": 5,
+            "bound_max": 30
+          },
+          "active": true,
+          "created_at": 1773884182.648151
+        }
+      ],
+      "execution_log": [
+        {
+          "action": "buy",
+          "leg_id": "leg_258d3e77",
+          "platform": "polymarket",
+          "tx_id": "paper_4822b2bfa46e",
+          "price": 0.12,
+          "quantity": 1666.6666666666667,
+          "fees": 0.0,
+          "timestamp": 1773884182.8674204
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_258d3e77",
+          "platform": "polymarket",
+          "tx_id": "paper_9ea996a9fbc6",
+          "price": 0.12,
+          "fees": 4.0,
+          "trigger": "ai_approved:time_decay",
+          "timestamp": 1773885348.702684
+        }
+      ],
+      "hold_duration_hours": 0.3,
+      "peak_value": 200.0,
+      "max_drawdown_from_peak": 0.0,
+      "created_at": 1773884182.6480772,
+      "closed_at": 1773885348.70272
+    }
+  ],
+  "saved_at": 1773885348.70298
+}
