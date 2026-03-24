@@ -238,8 +238,28 @@ async def delete_rule(pkg_id: str, rule_id: str):
 
 @router.get("/dashboard")
 async def dashboard():
+    """Return dashboard statistics, including per-platform executor status."""
     pm = _require_pm()
-    return pm.get_dashboard_stats()
+    stats = pm.get_dashboard_stats()
+
+    # Add per-platform executor stats
+    executor_details = {}
+    for name, executor in pm.executors.items():
+        try:
+            bal = await executor.get_balance()
+            executor_details[name] = {
+                "active": True,
+                "available_balance": bal.available,
+                "total_balance": bal.total,
+                "trade_count": await executor.get_trade_count() if hasattr(executor, 'get_trade_count') else 0,
+                "is_paper_trading": getattr(executor, 'is_paper', False)
+            }
+        except Exception as e:
+            logger.warning(f"Could not get executor details for {name}: {e}")
+            executor_details[name] = {"active": False, "error": str(e)}
+    
+    stats["executor_details"] = executor_details
+    return stats
 
 @router.get("/dashboard/alerts")
 async def get_alerts():
