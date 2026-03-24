@@ -78,6 +78,7 @@ try:
     from positions.auto_trader import AutoTrader
     from positions.probability_model import ProbabilityModel
     from positions.insider_tracker import InsiderTracker
+    from positions.kalshi_whale_tracker import KalshiWhaleTracker
     from positions.decision_log import DecisionLogger
     from positions.news_scanner import NewsScanner
     from positions.news_ai import NewsAI
@@ -390,6 +391,14 @@ async def lifespan(app: FastAPI):
             arb_scanner = get_scanner() if _ARBITRAGE_AVAILABLE else None
             insider = InsiderTracker(data_dir=DATA_DIR / "positions")
             insider.start()
+            # Kalshi anonymous whale tracker — feeds cross-platform convergence signals
+            try:
+                kalshi_adapter = arb_registry.get("kalshi") if _ARBITRAGE_AVAILABLE else None
+            except NameError:
+                kalshi_adapter = None
+            kalshi_whale = KalshiWhaleTracker(data_dir=DATA_DIR / "positions", kalshi_adapter=kalshi_adapter)
+            kalshi_whale.start()
+            insider.kalshi_whale_tracker = kalshi_whale  # Wire for cross-platform convergence
             global _auto_trader_ref, _probability_model
             _probability_model = ProbabilityModel()
             _auto_trader = AutoTrader(pm, scanner=arb_scanner, insider_tracker=insider,

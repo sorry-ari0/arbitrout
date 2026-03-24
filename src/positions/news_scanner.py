@@ -299,11 +299,13 @@ class NewsScanner:
                 continue
             headline = new_headlines[headline_idx]
 
-            # Find matched market by title (fuzzy — AI may abbreviate)
+            # Find matched market by title + keywords (fuzzy — AI may abbreviate)
             market_title = result.get("market_title", "")
-            market = self._find_market(market_title)
+            search_keywords = result.get("search_keywords", [])
+            market = self._find_market(market_title, search_keywords)
             if not market:
-                logger.debug("News scanner: AI matched to unknown market: %s", market_title[:60])
+                logger.info("News scanner: no market match for AI signal: %s (keywords=%s)",
+                            market_title[:60], ",".join(search_keywords[:3]))
                 continue
 
             confidence = result.get("confidence", 0)
@@ -538,9 +540,11 @@ class NewsScanner:
         if market_id:
             self.cooldowns[market_id] = time.time()
 
-        # Size: confidence/10 * max_trade_size
+        # Size: confidence/10 * max_trade_size, capped at $50 per trade
+        # (matches auto_trader sizing — news signals are uncertain, limit risk)
+        NEWS_MAX_SINGLE_TRADE = 50.0
         trade_size = (confidence / 10) * self._max_trade_size
-        trade_size = max(self._min_trade_size, min(trade_size, self._max_trade_size))
+        trade_size = max(self._min_trade_size, min(trade_size, self._max_trade_size, NEWS_MAX_SINGLE_TRADE))
 
         # Clamp to remaining budget
         open_pkgs = self.pm.list_packages("open")
@@ -721,34 +725,85 @@ class NewsScanner:
         except Exception as e:
             logger.error("News scanner: market cache refresh failed: %s", e)
 
-    def _find_market(self, market_title: str) -> dict | None:
-        """Find a cached market by title (fuzzy — AI may abbreviate)."""
+    # Stop-words excluded from keyword matching to avoid false positives
+    _STOP_WORDS = frozenset({
+        "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+        "will", "would", "could", "should", "may", "might", "can", "shall",
+        "to", "of", "in", "for", "on", "at", "by", "with", "from", "as",
+        "into", "through", "about", "above", "below", "between", "after",
+        "before", "during", "until", "and", "or", "but", "not", "if", "then",
+        "than", "that", "this", "it", "its", "he", "she", "they", "we",
+        "his", "her", "their", "our", "my", "your", "who", "what", "which",
+        "when", "where", "how", "all", "each", "every", "both", "few",
+        "more", "most", "other", "some", "such", "no", "nor", "only",
+        "own", "same", "so", "very", "just", "over", "under", "up", "down",
+        "price", "market", "yes", "no", "above", "below", "end",
+    })
+
+    def _find_market(self, market_title: str, search_keywords: list[str] | None = None) -> dict | None:
+        """Find a cached market by title (fuzzy — AI may abbreviate).
+
+        Args:
+            market_title: The market title string from AI output
+            search_keywords: Optional extra search terms from AI (e.g. ["bitcoin", "BTC", "crypto price"])
+        """
         if not market_title:
             return None
         title_lower = market_title.lower().strip()
+
         # Exact match first
         for m in self._market_cache:
             if m["title"].lower().strip() == title_lower:
                 return m
+
         # Substring match
         for m in self._market_cache:
             mt = m["title"].lower()
             if title_lower in mt or mt in title_lower:
                 return m
-        # Word overlap match (>60%)
-        title_words = set(title_lower.split())
+
+        # Keyword extraction: pull meaningful words from AI's market title + search keywords
+        all_search_terms = set(title_lower.split()) - self._STOP_WORDS
+        if search_keywords:
+            for kw in search_keywords:
+                all_search_terms |= set(kw.lower().split()) - self._STOP_WORDS
+        # Remove very short words (likely noise)
+        all_search_terms = {w for w in all_search_terms if len(w) >= 3}
+
+        # Score each cached market by keyword overlap
         best_match = None
-        best_overlap = 0.0
+        best_score = 0.0
         for m in self._market_cache:
-            m_words = set(m["title"].lower().split())
-            if not m_words or not title_words:
+            m_words = set(m["title"].lower().split()) - self._STOP_WORDS
+            m_words = {w for w in m_words if len(w) >= 3}
+            if not m_words or not all_search_terms:
                 continue
-            overlap = len(title_words & m_words) / min(len(title_words), len(m_words))
-            if overlap > best_overlap:
-                best_overlap = overlap
+
+            matching_words = all_search_terms & m_words
+            n_matching = len(matching_words)
+            if n_matching == 0:
+                continue
+
+            # Score: combination of overlap ratio and absolute match count
+            # This way "Bitcoin price above $100,000" matching "Will Bitcoin be above $100,000?"
+            # gets credit for both overlap % and the 3 matching words
+            overlap = n_matching / min(len(all_search_terms), len(m_words))
+            # Bonus for multiple matching words (2+ words matching is much more likely correct)
+            abs_bonus = min(0.2, (n_matching - 1) * 0.1) if n_matching >= 2 else 0
+            score = overlap + abs_bonus
+
+            if score > best_score:
+                best_score = score
                 best_match = m
-        if best_overlap >= 0.6:
-            return best_match
+
+        # Thresholds: 50% overlap for 2+ word matches, 70% for single-word
+        if best_match:
+            matching = all_search_terms & (set(best_match["title"].lower().split()) - self._STOP_WORDS)
+            if len(matching) >= 2 and best_score >= 0.4:
+                return best_match
+            elif len(matching) == 1 and best_score >= 0.7:
+                return best_match
+
         return None
 
     # ── Deduplication ────────────────────────────────────────────────────────

@@ -138,6 +138,7 @@ class TradeJournal:
             ) if pkg.get("peak_value", 0) > 0 else 0,
             "created_at": pkg.get("created_at"),
             "closed_at": time.time(),
+            "_code_version": "v2-fee-fix",
         }
 
         self.entries.append(entry)
