@@ -376,6 +376,131 @@
     cursor: default;
 }
 
+/* === INSIDER SIGNALS === */
+#insider-signals-list {
+    /* Uses .arb-section-content padding */
+}
+
+.insider-stat-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px dashed var(--arb-border);
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    color: var(--arb-text);
+}
+
+.insider-stat-row .insider-label {
+    color: var(--arb-muted);
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+
+.insider-stat-row .insider-value {
+    color: var(--arb-accent);
+    font-weight: 700;
+}
+
+.insider-subsection-header {
+    font-family: 'Courier New', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: var(--arb-muted);
+    margin: 12px 0 6px 0;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--arb-border);
+    padding-bottom: 4px;
+}
+
+.insider-movement-entry,
+.insider-signal-entry,
+.insider-convergence-alert {
+    padding: 6px 0;
+    border-bottom: 1px solid var(--arb-border);
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    color: var(--arb-text);
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.insider-movement-entry:last-child,
+.insider-signal-entry:last-child,
+.insider-convergence-alert:last-child {
+    border-bottom: none;
+}
+
+.insider-time {
+    color: var(--arb-muted);
+    font-size: 10px;
+    white-space: nowrap;
+}
+
+.insider-movement-type {
+    font-weight: 700;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 9px;
+    white-space: nowrap;
+}
+
+.insider-movement-type.entry {
+    background: rgba(0, 230, 118, 0.15);
+    color: var(--arb-green);
+}
+
+.insider-movement-type.exit {
+    background: rgba(255, 23, 68, 0.15);
+    color: var(--arb-red);
+}
+
+.insider-signal-type {
+    font-weight: 700;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 9px;
+    white-space: nowrap;
+}
+
+.insider-signal-type.buy-signal {
+    background: rgba(0, 230, 118, 0.15);
+    color: var(--arb-green);
+}
+.insider-signal-type.sell-signal {
+    background: rgba(255, 23, 68, 0.15);
+    color: var(--arb-red);
+}
+
+.insider-market-link {
+    color: var(--arb-accent);
+    text-decoration: none;
+    font-weight: 700;
+}
+
+.insider-market-link:hover {
+    text-decoration: underline;
+}
+
+.insider-signal-price {
+    color: var(--arb-muted);
+    font-size: 10px;
+    white-space: nowrap;
+}
+
+.insider-convergence-alert {
+    background: rgba(255, 167, 38, 0.1); /* Highlight for alerts */
+    border-left: 3px solid #ffa726;
+    padding-left: 5px;
+}
+
+.insider-alert-text {
+    color: #ffa726;
+    flex: 1; /* Allow text to take available space */
+}
 
 /* === STATUS BAR === */
 .arb-status {

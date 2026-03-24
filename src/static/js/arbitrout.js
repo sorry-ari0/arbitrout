@@ -11,12 +11,14 @@ let feedItems = [];
 let lastLoadedOpportunities = []; // To hold opportunities for restoring selected
 let lastSelectedOppId = localStorage.getItem('arbSelectedOppId') || null; // For restoring selected opportunity
 
-// NEW: For hedge packages, saved markets, and news
+// NEW: For hedge packages, saved markets, news, and insider signals
 let hedgePackages = [];
 let savedMarkets = [];
 let newsItems = [];
+let insiderSignals = { wallets_count: 0, recent_movements: [], active_signals: [], convergence_alerts: [] }; // NEW: Insider data structure
 let arbHedgePollingInterval = null; // New interval for hedge packages
 let arbNewsPollingInterval = null; // NEW interval for news scanner
+let arbInsiderPollingInterval = null; // NEW interval for insider signals
 
 // === PIXEL ART (CSS grid of div cells) ===
 function createPixelGrid(colorMap, scale) {
@@ -74,7 +76,7 @@ function getTroutPixelArt() {
 [_,N,T,N,O,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,R,S,S,S,G,O,O,_,_,H,L,H,_,_],
 [_,_,N,N,_,O,S,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,K,S,S,S,O,O,_,_,_,H,L,L,H,_,_],
 [_,_,_,_,_,_,O,K,K,W,W,K,K,W,K,K,W,W,K,K,W,W,K,K,W,W,K,K,K,O,O,N,N,_,_,_,_,_,_,H,H,_,_,_],
-[_,_,_,_,_,_,_,O,W,W,W,W,W,W,W,W,W,W,W,W,W,W,W,W,W,W,O,O,O,_,N,T,_,_,_,_,_,_,_,_,C,_,_,_],
+[_,_,_,_,_,_,_,O,W,W,W,W,W,W,W,W,W,W,W,W,W,W,W,O,O,O,_,N,T,_,_,_,_,_,_,_,_,_,_,_,C,_,_,_],
 [_,_,_,_,_,_,_,_,O,O,W,W,W,W,W,W,W,W,W,W,W,W,W,O,O,O,_,_,_,_,_,_,_,_,_,_,_,_,_,_,C,_,_,_],
 [_,_,_,_,_,_,_,_,_,_,O,O,O,O,O,O,O,O,O,O,O,O,O,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,C,_,_,_],
 [D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D,D],
@@ -185,11 +187,13 @@ function startArbPolling() {
     loadSavedMarkets();
     loadHedgePackages(); // NEW: Load hedge packages
     loadNews(); // NEW: Load news
+    loadInsiderSignals(); // NEW: Load insider signals
 
     arbPollingInterval = setInterval(loadOpportunities, 15000);
     arbScanInterval = setInterval(triggerScan, 60000);
     arbHedgePollingInterval = setInterval(loadHedgePackages, 30000); // NEW: Poll hedge packages every 30s
     arbNewsPollingInterval = setInterval(loadNews, 60000); // NEW: Poll news every 60s
+    arbInsiderPollingInterval = setInterval(loadInsiderSignals, 30000); // NEW: Poll insider signals every 30s
     connectArbWs();
 }
 
@@ -209,6 +213,10 @@ function stopArbPolling() {
     if (arbNewsPollingInterval) { // NEW: Clear news polling interval
         clearInterval(arbNewsPollingInterval);
         arbNewsPollingInterval = null;
+    }
+    if (arbInsiderPollingInterval) { // NEW: Clear insider polling interval
+        clearInterval(arbInsiderPollingInterval);
+        arbInsiderPollingInterval = null;
     }
     if (arbWs) {
         arbWs.close();
@@ -757,7 +765,7 @@ function renderFeed() {
     });
 }
 
-// === STACKED PANELS (NEWS, SAVED, HEDGE) ===
+// === STACKED PANELS (NEWS, SAVED, HEDGE, INSIDER) ===
 // This function renders all three sections in the bottom-right panel
 function renderAllStackedPanels() {
     // Target the bottom-right arb-panel, assuming arbitrout-container is a 2x2 grid
@@ -784,6 +792,17 @@ function renderAllStackedPanels() {
             panelBody.removeChild(panelBody.firstChild);
         }
     }
+
+    // --- Render Insider Signals Section ---
+    var insiderHeader = document.createElement('div');
+    insiderHeader.className = 'arb-section-header';
+    insiderHeader.textContent = 'INSIDER SIGNALS';
+    panelBody.appendChild(insiderHeader);
+    var insiderList = document.createElement('div');
+    insiderList.id = 'insider-signals-list';
+    insiderList.className = 'arb-section-content';
+    renderInsiderSignalsContent(insiderList, insiderSignals);
+    panelBody.appendChild(insiderList);
 
     // --- Render News Scanner Section ---
     var newsHeader = document.createElement('div');
@@ -1077,6 +1096,150 @@ function renderNewsContent(container, newsData) {
         }
         container.appendChild(newsEntry);
     });
+}
+
+// === INSIDER SIGNALS (NEW SECTION) ===
+function loadInsiderSignals() {
+    fetch('/api/arbitrage/insider-signals')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            insiderSignals = data || { wallets_count: 0, recent_movements: [], active_signals: [], convergence_alerts: [] };
+            renderAllStackedPanels();
+        })
+        .catch(function(err) { console.error('Insider signals fetch error:', err); });
+}
+
+function renderInsiderSignalsContent(container, data) {
+    while (container.firstChild) {
+        container.removeChild(container.firstChild);
+    }
+
+    if (!data || (data.wallets_count === 0 && data.recent_movements.length === 0 && data.active_signals.length === 0 && data.convergence_alerts.length === 0)) {
+        var empty = document.createElement('div');
+        empty.className = 'arb-empty';
+        empty.textContent = 'Scanning for insider activity...';
+        container.appendChild(empty);
+        return;
+    }
+
+    // Tracked Wallets Count
+    if (data.wallets_count > 0) {
+        var walletsCountEl = document.createElement('div');
+        walletsCountEl.className = 'insider-stat-row';
+        walletsCountEl.innerHTML = '<span class="insider-label">TRACKED WALLETS:</span> <span class="insider-value">' + data.wallets_count + '</span>';
+        container.appendChild(walletsCountEl);
+    }
+
+    // Recent Movements
+    if (data.recent_movements && data.recent_movements.length > 0) {
+        var movementsHeader = document.createElement('div');
+        movementsHeader.className = 'insider-subsection-header';
+        movementsHeader.textContent = 'RECENT MOVEMENTS';
+        container.appendChild(movementsHeader);
+
+        data.recent_movements.slice(0, 10).forEach(function(movement) { // Limit to 10
+            var movementEl = document.createElement('div');
+            movementEl.className = 'insider-movement-entry';
+            
+            var timestampSpan = document.createElement('span');
+            timestampSpan.className = 'insider-time';
+            timestampSpan.textContent = new Date(movement.timestamp).toLocaleTimeString() + ' ';
+            movementEl.appendChild(timestampSpan);
+
+            var typeSpan = document.createElement('span');
+            typeSpan.className = 'insider-movement-type ' + (movement.type === 'entry' ? 'entry' : 'exit');
+            typeSpan.textContent = movement.type.toUpperCase();
+            movementEl.appendChild(typeSpan);
+            
+            movementEl.appendChild(document.createTextNode(' ' + (movement.size_usd ? '$' + movement.size_usd.toFixed(0) : '') + ' on '));
+
+            var marketLink = document.createElement('a');
+            marketLink.className = 'insider-market-link';
+            marketLink.textContent = movement.market_title || 'Unknown Market';
+            marketLink.href = movement.market_url || '#';
+            marketLink.target = '_blank';
+            marketLink.rel = 'noopener';
+            movementEl.appendChild(marketLink);
+
+            movementEl.appendChild(document.createTextNode(' by ' + (movement.wallet_label || movement.wallet_address.substring(0,6) + '...')));
+            
+            container.appendChild(movementEl);
+        });
+    }
+
+    // Active Signals
+    if (data.active_signals && data.active_signals.length > 0) {
+        var signalsHeader = document.createElement('div');
+        signalsHeader.className = 'insider-subsection-header';
+        signalsHeader.textContent = 'ACTIVE SIGNALS';
+        container.appendChild(signalsHeader);
+
+        data.active_signals.slice(0, 5).forEach(function(signal) { // Limit to 5
+            var signalEl = document.createElement('div');
+            signalEl.className = 'insider-signal-entry';
+            
+            var type = signal.signal_type || 'UNKNOWN';
+            var typeSpan = document.createElement('span');
+            typeSpan.className = 'insider-signal-type';
+            if (type.includes('BUY')) {
+                typeSpan.classList.add('buy-signal');
+            } else if (type.includes('SELL')) {
+                typeSpan.classList.add('sell-signal');
+            }
+            typeSpan.textContent = type;
+            signalEl.appendChild(typeSpan);
+
+            var marketLink = document.createElement('a');
+            marketLink.className = 'insider-market-link';
+            marketLink.textContent = signal.market_title || 'Unknown Market';
+            marketLink.href = signal.market_url || '#';
+            marketLink.target = '_blank';
+            marketLink.rel = 'noopener';
+            signalEl.appendChild(marketLink);
+
+            var priceSpan = document.createElement('span');
+            priceSpan.className = 'insider-signal-price';
+            priceSpan.textContent = ' @ ' + (signal.price * 100).toFixed(0) + '\u00A2';
+            signalEl.appendChild(priceSpan);
+
+            container.appendChild(signalEl);
+        });
+    }
+
+    // Convergence Alerts
+    if (data.convergence_alerts && data.convergence_alerts.length > 0) {
+        var convHeader = document.createElement('div');
+        convHeader.className = 'insider-subsection-header';
+        convHeader.textContent = 'CONVERGENCE ALERTS';
+        container.appendChild(convHeader);
+
+        data.convergence_alerts.slice(0, 3).forEach(function(alert) { // Limit to 3
+            var alertEl = document.createElement('div');
+            alertEl.className = 'insider-convergence-alert';
+            
+            var timeSpan = document.createElement('span');
+            timeSpan.className = 'insider-time';
+            timeSpan.textContent = new Date(alert.timestamp).toLocaleTimeString() + ' ';
+            alertEl.appendChild(timeSpan);
+
+            var alertText = document.createElement('span');
+            alertText.className = 'insider-alert-text';
+            alertText.textContent = alert.message;
+            alertEl.appendChild(alertText);
+
+            if (alert.market_url) {
+                var marketLink = document.createElement('a');
+                marketLink.className = 'insider-market-link';
+                marketLink.textContent = ' \u2197'; // External link icon
+                marketLink.href = alert.market_url;
+                marketLink.target = '_blank';
+                marketLink.rel = 'noopener';
+                alertEl.appendChild(marketLink);
+            }
+
+            container.appendChild(alertEl);
+        });
+    }
 }
 
 
