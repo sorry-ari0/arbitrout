@@ -294,15 +294,45 @@ def _build_range_synthetic_info(yes_market: NormalizedEvent,
     if win_count <= loss_count:
         return None
 
-    # Estimate loss probability using market-implied probabilities
-    # For range: YES price ≈ P(in range), NO price ≈ P(outside range)
-    # For directional "above X": YES price ≈ P(above X), NO price ≈ P(below X)
-    loss_prob = 0.0
-    for s in scenarios.values():
-        if s["return_pct"] <= 0:
-            # Estimate zone probability from market prices
-            # This is rough but better than assuming equal probability
-            loss_prob += 1.0 / len(scenarios)
+    # Estimate loss probability using MARKET-IMPLIED probabilities.
+    # Range YES price ≈ P(price in [low, high]).
+    # Directional "above X" YES price ≈ P(price > X), NO price ≈ P(price ≤ X).
+    # Use these to estimate each zone's probability.
+    p_in_range = range_market.yes_price if range_is_yes else range_market.no_price
+    if dir_direction in ("above", "over"):
+        p_above_dir = dir_market.yes_price
+    elif dir_direction in ("below", "under"):
+        p_above_dir = 1.0 - dir_market.yes_price
+    else:
+        p_above_dir = dir_market.yes_price
+
+    # Assign probabilities to each zone using market prices
+    zone_probs = {}
+    for key, s in scenarios.items():
+        cond = s["condition"]
+        if f"${range_low:,.0f}" in cond and f"${range_high:,.0f}" in cond:
+            # Zone is the range [low, high]
+            zone_probs[key] = p_in_range
+        elif f"${dir_target:,.0f}" in cond and ">" in cond:
+            # Zone is above directional target
+            zone_probs[key] = p_above_dir
+        elif f"${dir_target:,.0f}" in cond and "<" in cond:
+            # Zone is below directional target
+            zone_probs[key] = 1.0 - p_above_dir
+        else:
+            # Gap zone between range boundary and directional target
+            # Residual probability = 1 - sum of known zones
+            zone_probs[key] = None
+
+    # Fill in residual zones
+    known_sum = sum(v for v in zone_probs.values() if v is not None)
+    residual = max(0.0, 1.0 - known_sum)
+    residual_count = sum(1 for v in zone_probs.values() if v is None)
+    for key in zone_probs:
+        if zone_probs[key] is None:
+            zone_probs[key] = residual / max(residual_count, 1)
+
+    loss_prob = sum(zone_probs.get(k, 0) for k, s in scenarios.items() if s["return_pct"] <= 0)
 
     if loss_prob > 0.60:
         return None

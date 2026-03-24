@@ -1,17 +1,21 @@
 """Insider/whale tracker — monitors top Polymarket traders and their positions.
 
 Uses Polymarket's public Data API to:
-1. Fetch top traders from the leaderboard (by PNL)
-2. Track their current positions on specific markets
+1. Fetch top traders from the leaderboard (by PNL) across multiple categories
+2. Track their current positions on specific markets (tiered polling)
 3. Detect suspicious patterns (high win rates, pre-resolution trades)
-4. Provide signals to the auto trader for position scoring
+4. Detect insider exits (conviction traders leaving markets)
+5. Scan whale-sized trades and market holders for additional signals
+6. Provide signals to the auto trader for position scoring
 
 Data API: https://data-api.polymarket.com (no auth required)
 """
 import asyncio
 import json
 import logging
+import os
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 try:
@@ -24,14 +28,18 @@ logger = logging.getLogger("positions.insider_tracker")
 DATA_API = "https://data-api.polymarket.com"
 
 # Thresholds
-MIN_PNL_USD = 10000          # Only track traders with >$10K lifetime PNL
+MIN_PNL_USD = 2000           # Track traders with >$2K lifetime PNL (lowered to catch mid-size edge traders)
 MIN_WIN_RATE = 0.65          # Flag traders with >65% win rate
 SUSPICIOUS_WIN_RATE = 0.80   # Highly suspicious above 80%
 MIN_POSITION_SIZE = 100      # Minimum $100 position to count as signal
-LEADERBOARD_SIZE = 50        # Top 50 traders to monitor
+LEADERBOARD_SIZE = 100       # Top 100 traders per category to monitor
 SCAN_INTERVAL = 900          # 15 minutes between full scans
 CACHE_TTL = 600              # Cache insider data for 10 minutes
 CONVERGENCE_THRESHOLD = 3    # 3+ wallets entering same market = convergence signal
+
+# Leaderboard categories — expanded to cover politics/economics specialists
+LEADERBOARD_CATEGORIES = ["OVERALL", "CRYPTO", "POLITICS", "ECONOMICS", "FINANCE"]
+LEADERBOARD_TIME_PERIODS = ["ALL", "MONTH", "WEEK"]
 
 # Wallet classification thresholds
 # Conviction = consistently winning at high rates, regardless of volume
@@ -39,18 +47,44 @@ ROI_CONVICTION_MIN = 0.15    # >15% ROI = conviction trader (consistent winners)
 ROI_MARKET_MAKER_MAX = 0.05  # <5% ROI = market maker (spread capture, noise)
 VOL_MARKET_MAKER_MIN = 100_000_000  # >$100M volume + low ROI = market maker
 
-# High-conviction watchlist: known profitable directional traders
+# Statistical edge detection — identifies traders profiting beyond chance
+# A trader with >12% ROI at $50K+ volume has ~95% probability of real edge
+# (random trading at fair prices converges to 0% ROI by law of large numbers)
+EDGE_ROI_MIN = 0.12          # >12% ROI signals likely information advantage
+EDGE_VOLUME_MIN = 50_000     # Minimum $50K volume to distinguish from luck
+EDGE_HIGH_ROI = 0.25         # >25% ROI at any volume = extremely strong signal
+
+# Auto-promotion thresholds
+AUTO_PROMOTE_PNL = 500_000      # $500K+ PNL (lowered to catch mid-size edge traders)
+AUTO_PROMOTE_ROI = 0.18         # 18%+ ROI
+AUTO_PROMOTE_SCANS = 2          # Must appear on 2+ consecutive scans
+AUTO_DEMOTE_SCANS = 10          # Drop off leaderboard for 10+ scans → demote
+
+# Whale trade scanning
+WHALE_TRADE_MIN_USD = 5000      # $5K+ trades count as whale activity
+WHALE_TRADE_WINDOW = 3600       # 1-hour rolling window for whale trade tracking
+
+# High-conviction watchlist: CURRENTLY ACTIVE profitable directional traders
 # These get 5x signal weight and bypass normal ROI thresholds
-# Source: Polymarket leaderboard analysis (2026-03-20)
+# Source: Polymarket position data analysis (2026-03-23)
+# NOTE: Previous watchlist (Theo4, Fredi9999, etc.) were 2024 election traders
+#        who stopped trading Nov 2024 and returned 0 positions on every scan.
 HIGH_CONVICTION_WATCHLIST = {
-    "0x56687bf447db6ffa42ffe2204a05edaa20f55839": "Theo4",        # $22M PNL, 51% ROI
-    "0x1f2dd6d473f3e824cd2f8a89d9c69fb96f6ad0cf": "Fredi9999",    # $16.6M PNL, 22% ROI
-    "0x863134d00841b2e200492805a01e1e2f5defaa53": "RepTrump",     # $7.5M PNL, 54% ROI
-    "0x78b9ac44a6d7d7a076c14e0ad518b301b63c6b76": "Len9311238",   # $8.7M PNL, 53% ROI
-    "0x885783a5e42d297c3532081ebf5c14ba0e9b0a44": "BetTom42",     # $5.6M PNL, 50% ROI
-    "0x23786fdad0073692157c6d7dc81f281843a35fcb": "mikatrade77",  # $5.2M PNL, 47% ROI
-    "0xd0c042f8ac8f16a957f75de8c2e1e64e30e625c1": "alexmulti",    # $4.8M PNL, 48% ROI
-    "0x16f91d4d0c17c5de07d2f01bceac542c4e4a05a8": "Jenzigo",      # $4.1M PNL, 43% ROI
+    # Tier A: Massive active positions + high ROI
+    "0x660622caad009a8cc1f38038c0913be658621338": "manekineko",          # 122% ROI, 12 markets, $371K open value
+    "0xfa8fc6a3e706bc4aa7556d060564c154322ad61b": "singaporesling",      # 87% ROI, 50 markets, $247K open value
+    "0x44c1dfe43260c94ed4f1d00de2e1f80fb113ebc1": "aenews2",             # $2M PNL, 15 markets, $240K open value
+    "0x94a428cfa4f84b264e01f70d93d02bc96cb36356": "GCottrell93",         # $3.4M PNL, 22% ROI, 5 markets, $104K open
+    "0x29d683970afb6f722ea1f9d4417c7ee7057cd57f": "Labtrador",           # 265% ROI, $98K open value
+    # Tier B: High ROI edge traders with smaller but active positions
+    "0xf195721ad850377c96cd634457c70cd9e8308057": "CERTuo",              # $1.8M PNL, 26% ROI, 4 markets, $16K open
+    "0x23415ad0f4867d412d5d10e564d62f7938573535": "GEMBLER",             # 328% ROI, 4 markets, $17K open
+    "0x17bf9e17bc58980772907a666e318a2a30e46731": "Paradise Capital",    # 272% ROI, 7 markets, $17K open
+    "0x714b8a6e115fe36061a2b5922964b654b82a6c2f": "benj002",             # 40% ROI, 3 markets, $20K open
+    "0x46a11dd783dfa2dcaf59255bada232497ba0774b": "19sdfg8088",          # 50% ROI, 1 market, $22K open
+    # Tier C: Large PNL traders — monitor for re-entry signals
+    "0x59a0744db1f39ff3afccd175f80e6e8dfc239a09": "Blessed-Sunshine",    # $842K PNL, 21% ROI (currently idle)
+    "0x8c80d213c0cbad777d06ee3f58f6ca4bc03102c3": "SecondWindCapital",   # $501K PNL, 33% ROI (currently idle)
 }
 
 # Known market makers (high volume, low ROI — exclude from directional signals)
@@ -78,6 +112,21 @@ class InsiderTracker:
         self._last_scan: float = 0
         self._task = None
         self._running = False
+        self._scan_count: int = 0  # For tiered polling rotation
+
+        # Auto-promotion tracking: wallet -> consecutive scan count
+        self._consecutive_scans: dict[str, int] = {}
+
+        # Staleness tracking: wallet -> consecutive scans with 0 positions returned
+        self._empty_scan_count: dict[str, int] = {}
+        STALE_SCAN_THRESHOLD = 5  # Demote after 5 consecutive empty scans
+
+        # Whale trade cache: condition_id -> [{size, side, timestamp}]
+        self._whale_trades: dict[str, list[dict]] = {}
+
+        # Market holders cache: condition_id -> {holders: [...], fetched_at: float}
+        self._holders_cache: dict[str, dict] = {}
+
         # Conviction watchlist: start with hardcoded defaults, then override from disk
         self._conviction_watchlist: dict[str, str] = dict(HIGH_CONVICTION_WATCHLIST)
         self._load_watchlist()
@@ -133,6 +182,9 @@ class InsiderTracker:
                 self._wallet_accuracy = data.get("wallet_accuracy", {})
                 self._movement_alerts = data.get("movement_alerts", [])
                 self._last_scan = data.get("last_scan", 0)
+                self._consecutive_scans = data.get("consecutive_scans", {})
+                self._whale_trades = data.get("whale_trades", {})
+                self._empty_scan_count = data.get("empty_scan_count", {})
                 logger.info("Loaded %d tracked insiders from cache", len(self._flagged_wallets))
             except (json.JSONDecodeError, OSError) as e:
                 logger.warning("Failed to load insider cache: %s", e)
@@ -141,7 +193,6 @@ class InsiderTracker:
         """Persist insider data to disk."""
         path = self.data_dir / "insider_signals.json"
         tmp = str(path) + ".tmp"
-        import os
         data = {
             "top_traders": self._top_traders,
             "insider_positions": self._insider_positions,
@@ -150,6 +201,9 @@ class InsiderTracker:
             "wallet_accuracy": self._wallet_accuracy,
             "movement_alerts": self._movement_alerts[-100:],  # Keep last 100 alerts
             "last_scan": self._last_scan,
+            "consecutive_scans": self._consecutive_scans,
+            "whale_trades": self._whale_trades,
+            "empty_scan_count": self._empty_scan_count,
             "saved_at": time.time(),
         }
         with open(tmp, "w", encoding="utf-8") as f:
@@ -179,6 +233,10 @@ class InsiderTracker:
                 logger.error("Insider tracker scan error: %s", e)
             await asyncio.sleep(SCAN_INTERVAL)
 
+    # ================================================================
+    # MAIN SCAN
+    # ================================================================
+
     async def scan(self):
         """Full scan cycle: fetch leaderboard, get positions, detect movements, flag insiders."""
         if not httpx:
@@ -187,28 +245,43 @@ class InsiderTracker:
 
         # Save previous positions for movement detection
         self._prev_positions = dict(self._insider_positions)
+        self._scan_count += 1
 
         async with httpx.AsyncClient(timeout=20.0) as client:
-            # Step 1: Fetch top traders by PNL
+            # Step 1: Fetch top traders by PNL (expanded categories)
             await self._fetch_leaderboard(client)
 
-            # Step 2: For flagged wallets, fetch their current positions
+            # Step 2: Auto-promote/demote watchlist based on leaderboard data
+            self._auto_refresh_watchlist()
+
+            # Step 3: Tiered position polling for flagged wallets
             await self._fetch_insider_positions(client)
 
-        # Step 3: Detect significant movements (new positions, exits, size changes)
+            # Step 4: Scan whale-sized trades across all markets
+            await self._scan_whale_trades(client)
+
+        # Step 5: Detect movements — entries, exits, size changes, convergence
         self._detect_movements()
+
+        # Prune stale whale trades (older than 1 hour)
+        self._prune_whale_trades()
 
         self._last_scan = time.time()
         self._save_cache()
-        logger.info("Insider scan: %d tracked, %d flagged, %d signals, %d movement alerts",
-                     len(self._top_traders), len(self._flagged_wallets),
-                     len(self._insider_positions), len(self._movement_alerts))
+        logger.info("Insider scan #%d: %d tracked, %d flagged, %d markets, %d alerts, %d whale trades",
+                     self._scan_count, len(self._top_traders), len(self._flagged_wallets),
+                     len(self._insider_positions), len(self._movement_alerts),
+                     sum(len(v) for v in self._whale_trades.values()))
+
+    # ================================================================
+    # TASK 1: LEADERBOARD (expanded categories + auto-refresh)
+    # ================================================================
 
     async def _fetch_leaderboard(self, client: "httpx.AsyncClient"):
-        """Fetch top traders from Polymarket leaderboard."""
+        """Fetch top traders from Polymarket leaderboard across multiple categories."""
         traders = []
-        for category in ["OVERALL", "CRYPTO"]:
-            for time_period in ["ALL", "MONTH"]:
+        for category in LEADERBOARD_CATEGORIES:
+            for time_period in LEADERBOARD_TIME_PERIODS:
                 try:
                     r = await client.get(f"{DATA_API}/v1/leaderboard", params={
                         "category": category,
@@ -221,7 +294,6 @@ class InsiderTracker:
                         if isinstance(data, list):
                             traders.extend(data)
                         elif isinstance(data, dict):
-                            # Some endpoints wrap in an object
                             traders.extend(data.get("leaderboard", data.get("data", [])))
                 except Exception as e:
                     logger.warning("Leaderboard fetch failed (%s/%s): %s", category, time_period, e)
@@ -236,10 +308,19 @@ class InsiderTracker:
                 seen.add(wallet)
                 unique_traders.append(t)
 
-        self._top_traders = unique_traders[:LEADERBOARD_SIZE * 2]  # Keep top 100
+        self._top_traders = unique_traders[:300]  # Keep top 300 (5 categories x 3 periods x 100)
+
+        # Track which wallets appeared this scan for auto-promotion
+        current_wallets = set()
+
+        # Pre-compute lowercase sets for O(1) lookups (avoid rebuilding per iteration)
+        watchlist_lower = {k.lower() for k in self._conviction_watchlist}
+        mm_lower = {k.lower() for k in KNOWN_MARKET_MAKERS}
 
         # Flag wallets with high PNL or suspicious patterns
-        # Classify into conviction traders vs market makers
+        # Classify: conviction > edge_trader > market_maker > unknown
+        # "edge_trader" = mid-size accounts with statistically improbable returns,
+        # likely profiting from information advantage (not just big whales)
         for t in self._top_traders:
             wallet = t.get("proxyWallet", "")
             pnl = float(t.get("pnl", 0) or 0)
@@ -248,26 +329,37 @@ class InsiderTracker:
             if pnl < MIN_PNL_USD:
                 continue
 
-            # Estimate win rate from PNL/volume ratio
+            current_wallets.add(wallet)
+
+            # ROI = PNL/volume. At scale, random trading converges to ~0% ROI.
+            # High ROI over significant volume = statistical evidence of real edge.
             roi = pnl / volume if volume > 0 else 0
-            is_suspicious = roi > 0.12  # >12% ROI is noteworthy (consistent winners)
+            is_suspicious = roi > EDGE_ROI_MIN
 
             # Classify wallet type
-            # Priority: watchlist > known MM > ROI-based classification
-            # Conviction = consistently winning at high rates (ROI), regardless of volume
-            if wallet.lower() in {k.lower() for k in self._conviction_watchlist}:
+            # Priority: watchlist > known MM > high-ROI conviction > edge trader > unknown
+            if wallet.lower() in watchlist_lower:
                 wallet_type = "conviction"
                 signal_weight = 5.0  # Watchlist wallets get 5x weight
-            elif wallet.lower() in {k.lower() for k in KNOWN_MARKET_MAKERS}:
+            elif wallet.lower() in mm_lower:
                 wallet_type = "market_maker"
                 signal_weight = 0.0  # Market makers excluded from directional signals
             elif roi >= ROI_CONVICTION_MIN:
-                # High win rate = conviction, no volume gate
+                # High ROI = proven conviction trader (big or small account)
                 wallet_type = "conviction"
                 signal_weight = 3.0 + min(roi * 5, 2.0)  # 3-5x weight, scales with ROI
+            elif roi >= EDGE_HIGH_ROI:
+                # Very high ROI at any volume = extremely strong statistical edge
+                wallet_type = "edge_trader"
+                signal_weight = 3.5  # Strong signal even at smaller account size
+            elif roi >= EDGE_ROI_MIN and volume >= EDGE_VOLUME_MIN:
+                # Moderate ROI over meaningful volume = likely information advantage
+                # A 12%+ ROI over $50K+ volume is statistically unlikely by chance alone
+                wallet_type = "edge_trader"
+                signal_weight = 2.0 + min(roi * 8, 2.0)  # 2-4x weight
             elif roi <= ROI_MARKET_MAKER_MAX and volume >= VOL_MARKET_MAKER_MIN:
                 wallet_type = "market_maker"
-                signal_weight = 0.0  # Low ROI, high volume = spread capture
+                signal_weight = 0.0
             else:
                 wallet_type = "unknown"
                 signal_weight = 1.0
@@ -287,22 +379,134 @@ class InsiderTracker:
                 "verified": t.get("verifiedBadge", False),
             }
 
-        logger.info("Leaderboard: %d unique traders, %d flagged (>$%dK PNL)",
-                     len(self._top_traders), len(self._flagged_wallets), MIN_PNL_USD // 1000)
+        # Update consecutive scan counts for auto-promotion tracking
+        for wallet in current_wallets:
+            self._consecutive_scans[wallet] = self._consecutive_scans.get(wallet, 0) + 1
+        # Wallets that disappeared: reset count
+        for wallet in list(self._consecutive_scans.keys()):
+            if wallet not in current_wallets:
+                self._consecutive_scans[wallet] = self._consecutive_scans.get(wallet, 0) - 1
+                if self._consecutive_scans[wallet] <= -AUTO_DEMOTE_SCANS:
+                    del self._consecutive_scans[wallet]
+
+        logger.info("Leaderboard: %d unique traders from %d categories, %d flagged (>$%dK PNL)",
+                     len(self._top_traders), len(LEADERBOARD_CATEGORIES),
+                     len(self._flagged_wallets), MIN_PNL_USD // 1000)
+
+    def _auto_refresh_watchlist(self):
+        """Auto-promote wallets that meet criteria; auto-demote stale ones."""
+        promoted = []
+        demoted = []
+
+        for wallet, info in self._flagged_wallets.items():
+            wallet_lower = wallet.lower()
+            # Skip if already in hardcoded sets
+            if wallet_lower in {k.lower() for k in HIGH_CONVICTION_WATCHLIST}:
+                continue
+            if wallet_lower in {k.lower() for k in KNOWN_MARKET_MAKERS}:
+                continue
+
+            pnl = info.get("pnl", 0)
+            roi = info.get("roi_pct", 0) / 100.0
+            consecutive = self._consecutive_scans.get(wallet, 0)
+
+            # Auto-promote: high PNL + high ROI + consistent presence
+            if (pnl >= AUTO_PROMOTE_PNL and roi >= AUTO_PROMOTE_ROI
+                    and consecutive >= AUTO_PROMOTE_SCANS
+                    and wallet not in self._conviction_watchlist):
+                self._conviction_watchlist[wallet] = info.get("username", wallet[:12])
+                info["wallet_type"] = "conviction"
+                info["signal_weight"] = 4.0  # Below manual 5.0
+                promoted.append(info.get("username", wallet[:12]))
+
+        # Auto-demote: wallets that fell off leaderboard for too long
+        for wallet in list(self._conviction_watchlist.keys()):
+            if wallet.lower() in {k.lower() for k in HIGH_CONVICTION_WATCHLIST}:
+                continue  # Never demote hardcoded
+            consecutive = self._consecutive_scans.get(wallet, 0)
+            if consecutive <= -AUTO_DEMOTE_SCANS:
+                name = self._conviction_watchlist.pop(wallet, wallet[:12])
+                demoted.append(name)
+
+        if promoted or demoted:
+            if promoted:
+                logger.info("Watchlist auto-promoted: %s", ", ".join(promoted))
+            if demoted:
+                logger.info("Watchlist auto-demoted: %s", ", ".join(demoted))
+            # Persist updated watchlist
+            self.update_watchlist(self._conviction_watchlist)
+
+    # ================================================================
+    # TASK 5: TIERED POSITION POLLING
+    # ================================================================
 
     async def _fetch_insider_positions(self, client: "httpx.AsyncClient"):
-        """Fetch current positions for flagged wallets."""
-        self._insider_positions = {}
+        """Fetch current positions for flagged wallets using tiered polling.
 
-        # Only check top 20 flagged wallets to stay within rate limits
-        sorted_wallets = sorted(
-            self._flagged_wallets.values(),
-            key=lambda w: w.get("pnl", 0),
-            reverse=True
-        )[:20]
+        Tier 1 (every scan): conviction watchlist + top accuracy wallets (10)
+        Tier 2 (every 2nd scan): high-PNL wallets (15)
+        Tier 3 (every 4th scan): remaining flagged wallets (25)
 
-        for trader in sorted_wallets:
+        Only clears positions for wallets actually polled this scan to avoid
+        false exit alerts for wallets that were simply not queried this cycle.
+        """
+        polled_wallets: set[str] = set()  # Track which wallets we actually query
+
+        # Remove old positions for wallets we'll poll (they'll be re-fetched).
+        # Keep positions for wallets NOT polled this cycle (they're still valid).
+        # This is done after we know which wallets to poll — see below.
+
+        # Build tiered wallet list sorted by signal quality, not raw PNL
+        # Wallets that return 0 positions for 5+ consecutive scans get demoted
+        def _wallet_priority(w):
+            acc = self._wallet_accuracy.get(w.get("wallet", ""), {})
+            accuracy_bonus = acc.get("accuracy", 0.5) if acc.get("total", 0) >= 3 else 0.5
+            base = w.get("signal_weight", 1.0) * accuracy_bonus
+            # Staleness penalty: halve priority for each 5 consecutive empty scans
+            empty_count = self._empty_scan_count.get(w.get("wallet", ""), 0)
+            if empty_count >= 5:
+                base *= 0.5 ** (empty_count // 5)
+            return base
+
+        all_wallets = sorted(self._flagged_wallets.values(),
+                             key=_wallet_priority, reverse=True)
+
+        # Tier 1: conviction + edge_traders + top accuracy (always polled)
+        # Exclude wallets stale for 10+ scans from Tier 1 entirely
+        tier1 = [w for w in all_wallets
+                 if w.get("wallet_type") in ("conviction", "edge_trader")
+                 and self._empty_scan_count.get(w.get("wallet", ""), 0) < 10][:15]
+        tier1_addrs = {w["wallet"] for w in tier1}
+
+        # Tier 2: next best by priority (every 2nd scan)
+        tier2 = [w for w in all_wallets
+                 if w["wallet"] not in tier1_addrs][:20]
+        tier2_addrs = {w["wallet"] for w in tier2}
+
+        # Tier 3: remaining (every 4th scan)
+        tier3 = [w for w in all_wallets
+                 if w["wallet"] not in tier1_addrs and w["wallet"] not in tier2_addrs][:30]
+
+        # Decide which tiers to poll this scan
+        wallets_to_poll = list(tier1)  # Always poll tier 1
+        if self._scan_count % 2 == 0:
+            wallets_to_poll.extend(tier2)
+        if self._scan_count % 4 == 0:
+            wallets_to_poll.extend(tier3)
+
+        # Clear old positions ONLY for wallets we're about to poll
+        wallets_to_clear = {w["wallet"] for w in wallets_to_poll}
+        for cid in list(self._insider_positions.keys()):
+            self._insider_positions[cid] = [
+                p for p in self._insider_positions[cid] if p["wallet"] not in wallets_to_clear
+            ]
+            if not self._insider_positions[cid]:
+                del self._insider_positions[cid]
+
+        for trader in wallets_to_poll:
             wallet = trader["wallet"]
+            polled_wallets.add(wallet)
+            positions_found = 0
             try:
                 r = await client.get(f"{DATA_API}/positions", params={
                     "user": wallet,
@@ -320,7 +524,12 @@ class InsiderTracker:
                         cid = pos.get("conditionId", "")
                         if not cid:
                             continue
+                        # Skip resolved/expired positions (current_value = 0)
+                        cv = float(pos.get("currentValue", 0) or 0)
+                        if cv <= 0:
+                            continue
 
+                        positions_found += 1
                         if cid not in self._insider_positions:
                             self._insider_positions[cid] = []
 
@@ -334,23 +543,161 @@ class InsiderTracker:
                             "outcome": pos.get("outcome", ""),
                             "size": float(pos.get("size", 0) or 0),
                             "avg_price": float(pos.get("avgPrice", 0) or 0),
-                            "current_value": float(pos.get("currentValue", 0) or 0),
+                            "current_value": cv,
                             "cash_pnl": float(pos.get("cashPnl", 0) or 0),
                             "pct_pnl": float(pos.get("percentPnl", 0) or 0),
                             "title": pos.get("title", ""),
                         })
             except Exception as e:
                 logger.warning("Position fetch failed for %s: %s", wallet[:10], e)
+            # Track staleness: consecutive scans with 0 active positions
+            if positions_found == 0:
+                self._empty_scan_count[wallet] = self._empty_scan_count.get(wallet, 0) + 1
+            else:
+                self._empty_scan_count[wallet] = 0  # Reset on any active data
             await asyncio.sleep(0.3)  # Rate limit: 150 req/10s
+
+        logger.info("Position poll: %d wallets (T1=%d T2=%d T3=%d), %d markets",
+                     len(wallets_to_poll), len(tier1),
+                     len(tier2) if self._scan_count % 2 == 0 else 0,
+                     len(tier3) if self._scan_count % 4 == 0 else 0,
+                     len(self._insider_positions))
+
+    # ================================================================
+    # TASK 6: WHALE TRADE SCANNING + MARKET HOLDERS
+    # ================================================================
+
+    async def _scan_whale_trades(self, client: "httpx.AsyncClient"):
+        """Scan for whale-sized trades ($5K+) across all Polymarket markets."""
+        try:
+            r = await client.get(f"{DATA_API}/trades", params={
+                "filterType": "CASH",
+                "filterAmount": str(WHALE_TRADE_MIN_USD),
+                "limit": "100",
+                "takerOnly": "true",
+            })
+            if r.status_code != 200:
+                return
+
+            trades = r.json()
+            if not isinstance(trades, list):
+                trades = trades.get("trades", trades.get("data", []))
+
+            now = time.time()
+            new_count = 0
+            for t in trades:
+                cid = t.get("conditionId", "")
+                if not cid:
+                    continue
+                ts = t.get("timestamp", 0)
+                # Convert string timestamps if needed
+                if isinstance(ts, str):
+                    try:
+                        ts = datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+                    except Exception:
+                        ts = now
+                # Only track recent trades (within window)
+                if now - ts > WHALE_TRADE_WINDOW:
+                    continue
+
+                if cid not in self._whale_trades:
+                    self._whale_trades[cid] = []
+
+                # Deduplicate by trade hash if available
+                tx_hash = t.get("transactionHash", "")
+                existing_hashes = {wt.get("tx_hash", "") for wt in self._whale_trades[cid]}
+                if tx_hash and tx_hash in existing_hashes:
+                    continue
+
+                side = t.get("side", "").upper()
+                outcome = (t.get("outcome", "") or "").upper()
+                # Determine direction: BUY YES vs BUY NO vs SELL YES etc.
+                if "YES" in outcome:
+                    direction = "YES" if side == "BUY" else "NO"
+                elif "NO" in outcome:
+                    direction = "NO" if side == "BUY" else "YES"
+                else:
+                    direction = side
+
+                size = float(t.get("size", 0) or 0)
+                price = float(t.get("price", 0) or 0)
+                usd_value = size * price if price > 0 else size
+
+                self._whale_trades[cid].append({
+                    "size": round(usd_value, 2),
+                    "direction": direction,
+                    "timestamp": ts,
+                    "wallet": t.get("proxyWallet", ""),
+                    "tx_hash": tx_hash,
+                    "title": t.get("title", ""),
+                })
+                new_count += 1
+
+            if new_count > 0:
+                logger.info("Whale trade scan: %d new trades >$%d across %d markets",
+                            new_count, WHALE_TRADE_MIN_USD,
+                            len(self._whale_trades))
+
+        except Exception as e:
+            logger.warning("Whale trade scan failed: %s", e)
+
+    async def fetch_market_holders(self, client: "httpx.AsyncClient",
+                                   condition_id: str) -> list[dict]:
+        """Fetch top 20 holders for a specific market. Cached for 10 min."""
+        cached = self._holders_cache.get(condition_id)
+        if cached and time.time() - cached.get("fetched_at", 0) < CACHE_TTL:
+            return cached.get("holders", [])
+
+        try:
+            r = await client.get(f"{DATA_API}/holders", params={
+                "market": condition_id,
+                "limit": "20",
+            })
+            if r.status_code == 200:
+                data = r.json()
+                holders = []
+                # Response is array of {token, holders: [...]}
+                if isinstance(data, list):
+                    for token_group in data:
+                        for h in token_group.get("holders", []):
+                            holders.append({
+                                "wallet": h.get("proxyWallet", ""),
+                                "amount": float(h.get("amount", 0) or 0),
+                                "outcome_index": h.get("outcomeIndex", 0),
+                                "name": h.get("name", h.get("pseudonym", "")),
+                            })
+                self._holders_cache[condition_id] = {
+                    "holders": holders,
+                    "fetched_at": time.time(),
+                }
+                return holders
+        except Exception as e:
+            logger.warning("Holders fetch failed for %s: %s", condition_id[:12], e)
+
+        return []
+
+    def _prune_whale_trades(self):
+        """Remove whale trades older than the tracking window."""
+        cutoff = time.time() - WHALE_TRADE_WINDOW
+        for cid in list(self._whale_trades.keys()):
+            self._whale_trades[cid] = [
+                t for t in self._whale_trades[cid] if t.get("timestamp", 0) > cutoff
+            ]
+            if not self._whale_trades[cid]:
+                del self._whale_trades[cid]
+
+    # ================================================================
+    # TASK 4: MOVEMENT DETECTION (entries + exits + size changes)
+    # ================================================================
 
     def _detect_movements(self):
         """Compare current vs previous positions to detect significant movements.
 
-        Triggers auto-trade when:
-        - Multiple insiders enter a market they weren't in before
-        - Insider position size increases by >50%
-        - Suspicious wallet enters a near-expiry market
-        - 3+ wallets converge on same market (new convergence signal)
+        Detects:
+        - Mass entry: 2+ insiders entering a market they weren't in before
+        - Size increase: existing position grows >50% and >$1K
+        - Whale convergence: 3+ wallets entering same market in same scan
+        - Insider exit: conviction traders leaving a market (NEW)
         """
         if not self._prev_positions:
             return  # First scan, nothing to compare
@@ -365,7 +712,6 @@ class InsiderTracker:
             # New insiders entering this market
             new_entrants = curr_wallets - prev_wallets
             if len(new_entrants) >= 2:
-                # Multiple insiders entering at once — strong signal
                 new_positions = [p for p in positions if p["wallet"] in new_entrants]
                 total_new_value = sum(p.get("current_value", 0) for p in new_positions)
                 suspicious_new = sum(1 for p in new_positions if p.get("suspicious"))
@@ -416,7 +762,6 @@ class InsiderTracker:
                     new_alerts.append(alert)
 
         # Whale convergence detection: 3+ wallets entering the same market
-        # in this scan window is a very strong directional signal
         for cid, positions in self._insider_positions.items():
             prev = self._prev_positions.get(cid, [])
             prev_wallets = {p["wallet"] for p in prev}
@@ -425,7 +770,7 @@ class InsiderTracker:
                 direction = self._get_direction(new_entrants)
                 conviction_new = sum(
                     1 for p in new_entrants
-                    if self._flagged_wallets.get(p.get("wallet", ""), {}).get("wallet_type") == "conviction"
+                    if self._flagged_wallets.get(p.get("wallet", ""), {}).get("wallet_type") in ("conviction", "edge_trader")
                 )
                 total_value = sum(p.get("current_value", 0) for p in new_entrants)
                 alert = {
@@ -437,22 +782,60 @@ class InsiderTracker:
                     "total_value": round(total_value, 2),
                     "direction": direction,
                     "timestamp": time.time(),
-                    "auto_triggered": True,  # Convergence always triggers
+                    "auto_triggered": True,
                 }
                 new_alerts.append(alert)
                 logger.info("WHALE CONVERGENCE: %d wallets (%d conviction) entered %s (%s, $%.0f)",
                             len(new_entrants), conviction_new, cid[:16],
                             direction, total_value)
 
+        # TASK 4: Insider EXIT detection — conviction traders leaving a market
+        for cid, prev_positions in self._prev_positions.items():
+            curr = self._insider_positions.get(cid, [])
+            curr_wallets = {p["wallet"] for p in curr}
+            prev_wallets = {p["wallet"] for p in prev_positions}
+
+            exited_wallets = prev_wallets - curr_wallets
+            for wallet in exited_wallets:
+                trader = self._flagged_wallets.get(wallet, {})
+                if trader.get("wallet_type") not in ("conviction", "edge_trader"):
+                    continue  # Only alert on conviction/edge trader exits
+
+                prev_pos = next((p for p in prev_positions if p["wallet"] == wallet), None)
+                if not prev_pos:
+                    continue
+
+                prev_value = prev_pos.get("current_value", 0)
+                if prev_value < 500:
+                    continue  # Skip tiny positions
+
+                alert = {
+                    "type": "insider_exit",
+                    "condition_id": cid,
+                    "title": prev_pos.get("title", ""),
+                    "wallet": wallet,
+                    "username": trader.get("username", prev_pos.get("username", "")),
+                    "prev_value": round(prev_value, 2),
+                    "direction": (prev_pos.get("outcome", "") or prev_pos.get("asset", "")).upper(),
+                    "wallet_type": trader.get("wallet_type", "conviction"),
+                    "signal_weight": trader.get("signal_weight", 5.0),
+                    "timestamp": time.time(),
+                    "auto_triggered": False,  # Exits are informational, not auto-traded
+                }
+                new_alerts.append(alert)
+                logger.info("INSIDER EXIT: %s exited %s (%s, was $%.0f)",
+                            trader.get("username", wallet[:12]), cid[:16],
+                            alert["direction"], prev_value)
+
         self._movement_alerts.extend(new_alerts)
-        # Keep only last 100 alerts
         self._movement_alerts = self._movement_alerts[-100:]
 
         if new_alerts:
+            exit_count = sum(1 for a in new_alerts if a.get("type") == "insider_exit")
             convergence_count = sum(1 for a in new_alerts if a.get("type") == "whale_convergence")
-            logger.info("Insider movements: %d alerts (%d auto-triggered, %d convergence)",
+            logger.info("Insider movements: %d alerts (%d auto-triggered, %d convergence, %d exits)",
                         len(new_alerts), sum(1 for a in new_alerts if a.get("auto_triggered")),
-                        convergence_count)
+                        convergence_count, exit_count)
 
     def _get_direction(self, positions: list[dict]) -> str:
         yes_count = sum(1 for p in positions if "YES" in (p.get("outcome", "") or p.get("asset", "")).upper())
@@ -462,6 +845,10 @@ class InsiderTracker:
         elif no_count > yes_count:
             return "NO"
         return "MIXED"
+
+    # ================================================================
+    # ACCURACY TRACKING
+    # ================================================================
 
     def record_resolution(self, condition_id: str, resolved_outcome: str):
         """Record market resolution to track insider accuracy.
@@ -508,29 +895,43 @@ class InsiderTracker:
                 "value": pos.get("current_value", 0),
                 "timestamp": time.time(),
             })
-            # Keep history manageable
             acc["history"] = acc["history"][-50:]
 
         self._save_cache()
         logger.info("Resolution recorded for %s (%s): %d insiders tracked",
                      condition_id[:16], resolved_outcome, len(positions))
 
-    def get_insider_signal(self, condition_id: str) -> dict:
+    # ================================================================
+    # SIGNAL GENERATION (TASK 7: position-relative sizing)
+    # ================================================================
+
+    def get_insider_signal(self, condition_id: str, market_volume: float = 0) -> dict:
         """Get insider signal strength for a specific market.
+
+        Args:
+            condition_id: The Polymarket condition ID
+            market_volume: Optional market volume for position-relative sizing boost
 
         Returns:
             {
                 "has_signal": bool,
-                "insider_count": int,          # How many insiders have positions
-                "suspicious_count": int,       # How many are flagged suspicious
-                "net_direction": "YES"|"NO"|"MIXED",  # Which side insiders favor
-                "total_insider_value": float,  # Total $ value of insider positions
-                "signal_strength": float,      # 0-1 score (1 = very strong insider signal)
-                "insiders": [...]              # Individual insider position details
+                "insider_count": int,
+                "suspicious_count": int,
+                "net_direction": "YES"|"NO"|"MIXED",
+                "total_insider_value": float,
+                "signal_strength": float,      # 0-1 score
+                "has_convergence": bool,
+                "convergence_wallets": int,
+                "whale_trade_count": int,       # NEW: whale trades in last hour
+                "whale_trade_direction": str,   # NEW: net direction of whale trades
+                "has_insider_exits": bool,       # NEW: conviction traders exited recently
+                "insiders": [...]
             }
         """
         positions = self._insider_positions.get(condition_id, [])
-        if not positions:
+        whale_trades = self._whale_trades.get(condition_id, [])
+
+        if not positions and not whale_trades:
             return {
                 "has_signal": False,
                 "insider_count": 0,
@@ -540,13 +941,15 @@ class InsiderTracker:
                 "signal_strength": 0,
                 "has_convergence": False,
                 "convergence_wallets": 0,
+                "whale_trade_count": 0,
+                "whale_trade_direction": "NONE",
+                "has_insider_exits": False,
                 "insiders": [],
             }
 
         yes_value = 0
         no_value = 0
-        conviction_yes = 0
-        conviction_no = 0
+        raw_total_value = 0  # Unweighted, for concentration ratio
         suspicious_count = 0
         conviction_count = 0
         market_maker_count = 0
@@ -560,20 +963,17 @@ class InsiderTracker:
 
             if w_type == "market_maker":
                 market_maker_count += 1
-                continue  # Exclude market makers from directional signal
+                continue
 
-            if w_type == "conviction":
+            if w_type in ("conviction", "edge_trader"):
                 conviction_count += 1
 
+            raw_total_value += val
             weighted_val = val * weight
             if "YES" in outcome or outcome == "0":
                 yes_value += weighted_val
-                if w_type == "conviction":
-                    conviction_yes += weighted_val
             else:
                 no_value += weighted_val
-                if w_type == "conviction":
-                    conviction_no += weighted_val
             if p.get("suspicious"):
                 suspicious_count += 1
 
@@ -585,46 +985,78 @@ class InsiderTracker:
         else:
             direction = "MIXED"
 
-        # Accuracy-weighted signal: insiders with proven track records get more weight
+        # Accuracy-weighted signal
         avg_accuracy = 0
         accuracy_count = 0
         for p in positions:
             if self._flagged_wallets.get(p["wallet"], {}).get("wallet_type") == "market_maker":
-                continue  # Don't count market maker accuracy
+                continue
             acc = self._wallet_accuracy.get(p["wallet"])
-            if acc and acc["total"] >= 3:  # Need at least 3 resolved markets
+            if acc and acc["total"] >= 3:
                 avg_accuracy += acc["accuracy"]
                 accuracy_count += 1
-        avg_accuracy = avg_accuracy / accuracy_count if accuracy_count > 0 else 0.5  # Default 50%
+        avg_accuracy = avg_accuracy / accuracy_count if accuracy_count > 0 else 0.5
 
         # Signal strength: conviction-weighted
-        # Conviction traders drive the signal; market makers are excluded
         non_mm_count = len(positions) - market_maker_count
         count_score = min(non_mm_count / 5, 1.0)
         value_score = min(total_value / 50000, 1.0)
-        conviction_score = min(conviction_count / 2, 1.0)  # Cap at 2 conviction traders
+        conviction_score = min(conviction_count / 2, 1.0)
         accuracy_score = avg_accuracy
 
         strength = (count_score * 0.15 + value_score * 0.25 +
                     conviction_score * 0.35 + accuracy_score * 0.25)
 
-        # Whale convergence boost: 3+ wallets on same market = very strong signal
-        # Check recent convergence alerts for this condition_id
+        # Whale convergence boost
         has_convergence = False
         convergence_wallets = 0
-        for alert in self._movement_alerts[-20:]:  # Check recent alerts
+        for alert in self._movement_alerts[-20:]:
             if (alert.get("type") == "whale_convergence"
                     and alert.get("condition_id") == condition_id
                     and time.time() - alert.get("timestamp", 0) < SCAN_INTERVAL * 2):
                 has_convergence = True
                 convergence_wallets = alert.get("converging_wallets", 0)
-                # Convergence boost: +0.2 per converging wallet above threshold
                 convergence_boost = 0.2 * (convergence_wallets - CONVERGENCE_THRESHOLD + 1)
                 strength = min(1.0, strength + convergence_boost)
                 break
 
+        # TASK 6: Whale trade signal boost
+        whale_trade_count = len(whale_trades)
+        whale_yes = sum(1 for t in whale_trades if t.get("direction") == "YES")
+        whale_no = sum(1 for t in whale_trades if t.get("direction") == "NO")
+        if whale_yes > whale_no * 1.5:
+            whale_direction = "YES"
+        elif whale_no > whale_yes * 1.5:
+            whale_direction = "NO"
+        elif whale_trade_count > 0:
+            whale_direction = "MIXED"
+        else:
+            whale_direction = "NONE"
+
+        # Boost signal if whale trades align with insider direction
+        if whale_trade_count >= 3 and whale_direction == direction and direction != "MIXED":
+            whale_boost = min(0.15, whale_trade_count * 0.03)
+            strength = min(1.0, strength + whale_boost)
+
+        # TASK 7: Position-relative sizing boost (uses raw value, not weight-inflated)
+        if market_volume > 0 and raw_total_value > 0:
+            concentration = raw_total_value / market_volume
+            if concentration > 0.10:
+                strength = min(1.0, strength + 0.25)
+            elif concentration > 0.05:
+                strength = min(1.0, strength + 0.15)
+
+        # TASK 4: Check for recent insider exits (bearish signal)
+        has_insider_exits = False
+        for alert in self._movement_alerts[-20:]:
+            if (alert.get("type") == "insider_exit"
+                    and alert.get("condition_id") == condition_id
+                    and time.time() - alert.get("timestamp", 0) < SCAN_INTERVAL * 2):
+                has_insider_exits = True
+                break
+
         return {
-            "has_signal": non_mm_count > 0,
+            "has_signal": non_mm_count > 0 or whale_trade_count >= 3,
             "insider_count": non_mm_count,
             "conviction_count": conviction_count,
             "market_maker_count": market_maker_count,
@@ -636,13 +1068,136 @@ class InsiderTracker:
             "signal_strength": round(strength, 3),
             "has_convergence": has_convergence,
             "convergence_wallets": convergence_wallets,
+            "whale_trade_count": whale_trade_count,
+            "whale_trade_direction": whale_direction,
+            "has_insider_exits": has_insider_exits,
             "insiders": [p for p in positions
                          if self._flagged_wallets.get(p.get("wallet", ""), {}).get("wallet_type") != "market_maker"],
         }
 
+    # ================================================================
+    # EXIT SIGNAL (for exit engine integration)
+    # ================================================================
+
+    def get_exit_signals(self, condition_id: str) -> list[dict]:
+        """Return recent exit alerts for a market (conviction traders leaving).
+
+        Used by the exit engine to detect when smart money exits our positions.
+        """
+        recent_exits = []
+        cutoff = time.time() - SCAN_INTERVAL * 2  # Last 2 scan windows
+        for alert in self._movement_alerts:
+            if (alert.get("type") == "insider_exit"
+                    and alert.get("condition_id") == condition_id
+                    and alert.get("timestamp", 0) > cutoff):
+                recent_exits.append(alert)
+        return recent_exits
+
+    # ================================================================
+    # CROSS-PLATFORM CONVERGENCE (Phase 2 Task 3)
+    # ================================================================
+
+    def get_cross_platform_signal(self, polymarket_cid: str, kalshi_ticker: str,
+                                  kalshi_volume_24h: float = 0) -> dict:
+        """Get combined cross-platform whale signal.
+
+        If Polymarket conviction traders AND Kalshi anonymous whales both
+        show activity on the same event with the same direction, the combined
+        signal gets a 1.5x boost. Opposite directions cancel to 0.
+
+        Args:
+            polymarket_cid: Polymarket condition ID
+            kalshi_ticker: Kalshi market ticker
+            kalshi_volume_24h: Kalshi 24h volume for spike detection
+
+        Returns:
+            {
+                "has_signal": bool,
+                "poly_signal": dict,       # Polymarket insider signal
+                "kalshi_signal": dict,      # Kalshi whale signal
+                "convergence": "aligned"|"conflicting"|"single"|"none",
+                "combined_strength": float, # 0-1
+                "direction": "YES"|"NO"|"MIXED"|"NONE",
+            }
+        """
+        tracker = getattr(self, 'kalshi_whale_tracker', None)
+
+        # Get Polymarket insider signal
+        poly_signal = self.get_insider_signal(polymarket_cid) if polymarket_cid else {
+            "has_signal": False, "signal_strength": 0, "net_direction": "NONE"
+        }
+
+        # Get Kalshi whale signal
+        kalshi_signal = {"has_signal": False, "signal_strength": 0, "net_direction": "NONE"}
+        if tracker and kalshi_ticker:
+            kalshi_signal = tracker.get_whale_signal(kalshi_ticker, volume_24h=kalshi_volume_24h)
+
+        poly_has = poly_signal.get("has_signal", False)
+        kalshi_has = kalshi_signal.get("has_signal", False)
+        poly_strength = poly_signal.get("signal_strength", 0)
+        kalshi_strength = kalshi_signal.get("signal_strength", 0)
+        poly_dir = poly_signal.get("net_direction", "NONE")
+        kalshi_dir = kalshi_signal.get("net_direction", "NONE")
+
+        if poly_has and kalshi_has:
+            # Both platforms have signals — check alignment
+            poly_directional = poly_dir in ("YES", "NO")
+            kalshi_directional = kalshi_dir in ("YES", "NO")
+
+            if poly_directional and kalshi_directional and poly_dir == kalshi_dir:
+                # Same direction — strong convergence, 1.5x boost
+                combined = min(1.0, max(poly_strength, kalshi_strength) * 1.5)
+                convergence = "aligned"
+                direction = poly_dir
+            elif poly_directional and kalshi_directional and poly_dir != kalshi_dir:
+                # Opposite directions — conflicting, suppress signal
+                combined = 0.0
+                convergence = "conflicting"
+                direction = "MIXED"
+            else:
+                # One or both non-directional — use the directional one if available
+                combined = max(poly_strength, kalshi_strength)
+                convergence = "single"
+                direction = poly_dir if poly_directional else kalshi_dir
+        elif poly_has:
+            combined = poly_strength
+            convergence = "single"
+            direction = poly_dir
+        elif kalshi_has:
+            combined = kalshi_strength
+            convergence = "single"
+            direction = kalshi_dir
+        else:
+            combined = 0.0
+            convergence = "none"
+            direction = "NONE"
+
+        result = {
+            "has_signal": combined > 0.1,
+            "poly_signal": poly_signal,
+            "kalshi_signal": kalshi_signal,
+            "convergence": convergence,
+            "combined_strength": round(combined, 3),
+            "direction": direction,
+        }
+
+        # Log convergence events
+        if convergence == "aligned" and combined > 0.3:
+            logger.info(
+                "Cross-platform convergence: %s + %s → %s direction, strength=%.2f",
+                polymarket_cid[:12] if polymarket_cid else "?",
+                kalshi_ticker[:20] if kalshi_ticker else "?",
+                direction, combined,
+            )
+
+        return result
+
+    # ================================================================
+    # STATS & UTILITIES
+    # ================================================================
+
     def get_stats(self) -> dict:
         """Return tracker statistics for the API."""
-        # Top accuracy wallets (minimum 3 resolved markets)
         proven_wallets = sorted(
             [a for a in self._wallet_accuracy.values() if a["total"] >= 3],
             key=lambda a: a["accuracy"],
@@ -651,15 +1206,21 @@ class InsiderTracker:
 
         return {
             "running": self._running,
+            "scan_count": self._scan_count,
             "tracked_traders": len(self._top_traders),
             "flagged_wallets": len(self._flagged_wallets),
+            "conviction_watchlist_size": len(self._conviction_watchlist),
             "markets_with_signals": len(self._insider_positions),
+            "markets_with_whale_trades": len(self._whale_trades),
+            "total_whale_trades": sum(len(v) for v in self._whale_trades.values()),
             "wallets_with_accuracy_data": len([a for a in self._wallet_accuracy.values() if a["total"] >= 3]),
             "recent_movement_alerts": len([a for a in self._movement_alerts if time.time() - a.get("timestamp", 0) < 3600]),
             "total_movement_alerts": len(self._movement_alerts),
             "auto_triggered_alerts": len([a for a in self._movement_alerts if a.get("auto_triggered")]),
+            "exit_alerts": len([a for a in self._movement_alerts if a.get("type") == "insider_exit"]),
             "last_scan": self._last_scan,
             "last_scan_ago_min": round((time.time() - self._last_scan) / 60, 1) if self._last_scan else None,
+            "leaderboard_categories": LEADERBOARD_CATEGORIES,
             "top_flagged": sorted(
                 self._flagged_wallets.values(),
                 key=lambda w: w.get("pnl", 0),
