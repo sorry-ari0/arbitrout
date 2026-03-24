@@ -1,7 +1,7 @@
 # Project: Arbitrout (Prediction Market Arbitrage + Auto Trading)
 Status: ACTIVE
 Phase: BUILD
-Last Updated: 2026-03-22
+Last Updated: 2026-03-24
 Repo: https://github.com/sorry-ari0/arbitrout.git
 Branch: main
 
@@ -283,7 +283,7 @@ Package: "Auto: Will ETH hit $5000?"
   Package level: ITM if unrealized_pnl > 0, OTM if < 0
 ```
 
-The exit engine evaluates 21 triggers organized in 7 categories:
+The exit engine evaluates 22 triggers organized in 8 categories:
 
 ```
 PROFIT TAKING (1-3):     target hit, trailing stop, partial profit
@@ -292,8 +292,9 @@ SPREAD / ARB (7-9):      spread inversion*, spread compression, volume dry-up
 TIME (10-12):            time <24h, time <6h, time decay (3-7 days)
 VOLATILITY (13-15):      vol spike (>15% move), vol crush, negative drift
 PLATFORM (16-18):        platform error (3+ consecutive), liquidity gap, fee spike
-RESEARCH (19-20):        stale position, longshot decay
+RESEARCH (19-20):        stale position (3 days, auto-execute), longshot decay
 POLITICAL (21):          political event resolved* (leg price <=0.01 or >=0.99)
+STALENESS (22):          market resolved* (any leg at 0.99+/0.01-, auto-exit)
 
 * = SAFETY OVERRIDE — executes immediately, bypasses AI
 
@@ -323,7 +324,9 @@ For each crypto market opportunity:
   SKIP if: yes_price > 0.92 or < 0.08  (near-resolved, no edge)
   SKIP if: 0.42 < yes_price < 0.58     (near-50/50, no conviction)
   SKIP if: hours_to_expiry < 1           (short-duration, bot-dominated)
+         BYPASS: multi_outcome_arb + portfolio_no (guaranteed profit at any duration)
   SKIP if: days_to_expiry <= 2          (time_24h safety would close immediately)
+         BYPASS: multi_outcome_arb + portfolio_no (resolve at $1.00 regardless)
 
   score = net_profit
   if crypto keyword in title:     score *= 2.0
@@ -355,7 +358,9 @@ For each crypto market opportunity:
   ENTER if: score >= 8.0 AND net_profit >= 8% (MIN_SPREAD_PCT)
   STRATEGY: directional bet (one side) on same-platform, arb (both sides) on cross-platform
   SIZE: variable Kelly — 1/4 for favorites (>=0.70), 1/5 mid-range, 1/8 for longshots (<=0.30)
-  LIMITS: 7 concurrent, $700 auto exposure, 3 trades/day cap (session-scoped, not restart)
+  LIMITS: 10 concurrent + 3 insider extra + 2 news extra = 13 hard max
+          $700 auto exposure, 3 trades/day cap (session-scoped, not restart)
+  EXTRA SLOTS: when at 10+ positions, only insider-signaled or news-driven trades enter
   CONCENTRATION: 50% max per category; multi_outcome_arb + portfolio_no bypass concentration
   DAILY LIMIT: guaranteed-profit strategies (multi_outcome_arb, portfolio_no) bypass daily cap
   ORDERS: limit orders (GTC) for entries + exits = 0% maker fee on Polymarket

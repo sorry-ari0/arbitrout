@@ -16,9 +16,11 @@ let hedgePackages = [];
 let savedMarkets = [];
 let newsItems = [];
 let insiderSignals = { wallets_count: 0, recent_movements: [], active_signals: [], convergence_alerts: [] }; // NEW: Insider data structure
+let whaleSignals = { scan_count: 0, active_signals: 0, signals: {} }; // Kalshi whale data
 let arbHedgePollingInterval = null; // New interval for hedge packages
 let arbNewsPollingInterval = null; // NEW interval for news scanner
 let arbInsiderPollingInterval = null; // NEW interval for insider signals
+let arbWhalePollingInterval = null; // Kalshi whale signals interval
 
 // === PIXEL ART (CSS grid of div cells) ===
 function createPixelGrid(colorMap, scale) {
@@ -188,12 +190,14 @@ function startArbPolling() {
     loadHedgePackages(); // NEW: Load hedge packages
     loadNews(); // NEW: Load news
     loadInsiderSignals(); // NEW: Load insider signals
+    loadWhaleSignals(); // Load Kalshi whale signals
 
     arbPollingInterval = setInterval(loadOpportunities, 15000);
     arbScanInterval = setInterval(triggerScan, 60000);
     arbHedgePollingInterval = setInterval(loadHedgePackages, 30000); // NEW: Poll hedge packages every 30s
     arbNewsPollingInterval = setInterval(loadNews, 60000); // NEW: Poll news every 60s
     arbInsiderPollingInterval = setInterval(loadInsiderSignals, 30000); // NEW: Poll insider signals every 30s
+    arbWhalePollingInterval = setInterval(loadWhaleSignals, 30000); // Poll Kalshi whale signals every 30s
     connectArbWs();
 }
 
@@ -217,6 +221,10 @@ function stopArbPolling() {
     if (arbInsiderPollingInterval) { // NEW: Clear insider polling interval
         clearInterval(arbInsiderPollingInterval);
         arbInsiderPollingInterval = null;
+    }
+    if (arbWhalePollingInterval) { // Clear Kalshi whale polling interval
+        clearInterval(arbWhalePollingInterval);
+        arbWhalePollingInterval = null;
     }
     if (arbWs) {
         arbWs.close();
@@ -804,6 +812,17 @@ function renderAllStackedPanels() {
     renderInsiderSignalsContent(insiderList, insiderSignals);
     panelBody.appendChild(insiderList);
 
+    // --- Render Kalshi Whale Signals Section ---
+    var whaleHeader = document.createElement('div');
+    whaleHeader.className = 'arb-section-header';
+    whaleHeader.textContent = 'KALSHI WHALE SIGNALS';
+    panelBody.appendChild(whaleHeader);
+    var whaleList = document.createElement('div');
+    whaleList.id = 'whale-signals-list';
+    whaleList.className = 'arb-section-content';
+    renderWhaleSignalsContent(whaleList, whaleSignals);
+    panelBody.appendChild(whaleList);
+
     // --- Render News Scanner Section ---
     var newsHeader = document.createElement('div');
     newsHeader.className = 'arb-section-header';
@@ -1240,6 +1259,156 @@ function renderInsiderSignalsContent(container, data) {
             container.appendChild(alertEl);
         });
     }
+}
+
+// === KALSHI WHALE SIGNALS ===
+function loadWhaleSignals() {
+    fetch('/api/derivatives/whales')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            whaleSignals = data || { scan_count: 0, active_signals: 0, signals: {} };
+            renderAllStackedPanels();
+        })
+        .catch(function(err) { console.error('Whale signals fetch error:', err); });
+}
+
+function renderWhaleSignalsContent(container, data) {
+    while (container.firstChild) {
+        container.removeChild(container.firstChild);
+    }
+
+    var signals = data.signals || {};
+    var signalKeys = Object.keys(signals);
+
+    if (signalKeys.length === 0) {
+        var empty = document.createElement('div');
+        empty.className = 'arb-empty';
+        empty.textContent = data.scan_count > 0 ? 'No active whale signals' : 'Scanning for whale activity...';
+        container.appendChild(empty);
+        return;
+    }
+
+    // Summary stats row
+    var statsRow = document.createElement('div');
+    statsRow.className = 'whale-stat-row';
+    var lbl1 = document.createElement('span');
+    lbl1.className = 'whale-label';
+    lbl1.textContent = 'ACTIVE SIGNALS:';
+    statsRow.appendChild(lbl1);
+    var val1 = document.createElement('span');
+    val1.className = 'whale-value';
+    val1.textContent = ' ' + signalKeys.length;
+    statsRow.appendChild(val1);
+    var lbl2 = document.createElement('span');
+    lbl2.className = 'whale-label';
+    lbl2.style.marginLeft = '12px';
+    lbl2.textContent = 'SCANS:';
+    statsRow.appendChild(lbl2);
+    var val2 = document.createElement('span');
+    val2.className = 'whale-value';
+    val2.textContent = ' ' + (data.scan_count || 0);
+    statsRow.appendChild(val2);
+    var lbl3 = document.createElement('span');
+    lbl3.className = 'whale-label';
+    lbl3.style.marginLeft = '12px';
+    lbl3.textContent = 'TRACKED:';
+    statsRow.appendChild(lbl3);
+    var val3 = document.createElement('span');
+    val3.className = 'whale-value';
+    val3.textContent = ' ' + (data.watched_tickers || 0);
+    statsRow.appendChild(val3);
+    container.appendChild(statsRow);
+
+    // Sort by signal strength descending
+    var sortedKeys = signalKeys.sort(function(a, b) {
+        return (signals[b].signal_strength || 0) - (signals[a].signal_strength || 0);
+    });
+
+    sortedKeys.slice(0, 10).forEach(function(ticker) {
+        var sig = signals[ticker];
+        var entry = document.createElement('div');
+        entry.className = 'whale-signal-entry';
+
+        // Direction badge
+        var dirBadge = document.createElement('span');
+        dirBadge.className = 'whale-direction';
+        var dir = sig.net_direction || 'NONE';
+        if (dir === 'YES') {
+            dirBadge.classList.add('dir-yes');
+        } else if (dir === 'NO') {
+            dirBadge.classList.add('dir-no');
+        } else if (dir === 'MIXED') {
+            dirBadge.classList.add('dir-mixed');
+        }
+        dirBadge.textContent = dir;
+        entry.appendChild(dirBadge);
+
+        // Ticker
+        var tickerSpan = document.createElement('span');
+        tickerSpan.className = 'whale-ticker';
+        tickerSpan.textContent = ticker;
+        entry.appendChild(tickerSpan);
+
+        // Signal strength bar
+        var strengthWrap = document.createElement('span');
+        strengthWrap.className = 'whale-strength-wrap';
+        var strengthBar = document.createElement('span');
+        strengthBar.className = 'whale-strength-bar';
+        var pct = Math.round((sig.signal_strength || 0) * 100);
+        strengthBar.style.width = pct + '%';
+        if (pct >= 70) {
+            strengthBar.classList.add('strength-high');
+        } else if (pct >= 40) {
+            strengthBar.classList.add('strength-med');
+        } else {
+            strengthBar.classList.add('strength-low');
+        }
+        strengthWrap.appendChild(strengthBar);
+        var strengthLabel = document.createElement('span');
+        strengthLabel.className = 'whale-strength-label';
+        strengthLabel.textContent = pct + '%';
+        strengthWrap.appendChild(strengthLabel);
+        entry.appendChild(strengthWrap);
+
+        // Details row
+        var details = document.createElement('div');
+        details.className = 'whale-details';
+
+        var tradeCount = sig.large_trade_count || 0;
+        var tradeVol = sig.large_trade_volume || 0;
+        var spikeRatio = sig.volume_spike_ratio || 0;
+        var tilt = sig.orderbook_tilt || 0;
+
+        var d1 = document.createElement('span');
+        d1.className = 'whale-detail-item';
+        d1.textContent = tradeCount + ' trade' + (tradeCount !== 1 ? 's' : '');
+        details.appendChild(d1);
+
+        var d2 = document.createElement('span');
+        d2.className = 'whale-detail-item';
+        d2.textContent = '$' + (tradeVol >= 1000 ? (tradeVol / 1000).toFixed(1) + 'K' : tradeVol.toFixed(0)) + ' vol';
+        details.appendChild(d2);
+
+        if (spikeRatio > 0) {
+            var d3 = document.createElement('span');
+            d3.className = 'whale-detail-item whale-spike';
+            d3.textContent = spikeRatio.toFixed(1) + 'x spike';
+            details.appendChild(d3);
+        }
+
+        var d4 = document.createElement('span');
+        d4.className = 'whale-detail-item whale-tilt';
+        if (tilt > 0.2) {
+            d4.classList.add('tilt-yes');
+        } else if (tilt < -0.2) {
+            d4.classList.add('tilt-no');
+        }
+        d4.textContent = 'tilt ' + (tilt >= 0 ? '+' : '') + tilt.toFixed(2);
+        details.appendChild(d4);
+
+        entry.appendChild(details);
+        container.appendChild(entry);
+    });
 }
 
 
