@@ -1059,6 +1059,105 @@ class InsiderTracker:
         return recent_exits
 
     # ================================================================
+    # CROSS-PLATFORM CONVERGENCE (Phase 2 Task 3)
+    # ================================================================
+
+    def get_cross_platform_signal(self, polymarket_cid: str, kalshi_ticker: str,
+                                  kalshi_volume_24h: float = 0) -> dict:
+        """Get combined cross-platform whale signal.
+
+        If Polymarket conviction traders AND Kalshi anonymous whales both
+        show activity on the same event with the same direction, the combined
+        signal gets a 1.5x boost. Opposite directions cancel to 0.
+
+        Args:
+            polymarket_cid: Polymarket condition ID
+            kalshi_ticker: Kalshi market ticker
+            kalshi_volume_24h: Kalshi 24h volume for spike detection
+
+        Returns:
+            {
+                "has_signal": bool,
+                "poly_signal": dict,       # Polymarket insider signal
+                "kalshi_signal": dict,      # Kalshi whale signal
+                "convergence": "aligned"|"conflicting"|"single"|"none",
+                "combined_strength": float, # 0-1
+                "direction": "YES"|"NO"|"MIXED"|"NONE",
+            }
+        """
+        tracker = getattr(self, 'kalshi_whale_tracker', None)
+
+        # Get Polymarket insider signal
+        poly_signal = self.get_insider_signal(polymarket_cid) if polymarket_cid else {
+            "has_signal": False, "signal_strength": 0, "net_direction": "NONE"
+        }
+
+        # Get Kalshi whale signal
+        kalshi_signal = {"has_signal": False, "signal_strength": 0, "net_direction": "NONE"}
+        if tracker and kalshi_ticker:
+            kalshi_signal = tracker.get_whale_signal(kalshi_ticker, volume_24h=kalshi_volume_24h)
+
+        poly_has = poly_signal.get("has_signal", False)
+        kalshi_has = kalshi_signal.get("has_signal", False)
+        poly_strength = poly_signal.get("signal_strength", 0)
+        kalshi_strength = kalshi_signal.get("signal_strength", 0)
+        poly_dir = poly_signal.get("net_direction", "NONE")
+        kalshi_dir = kalshi_signal.get("net_direction", "NONE")
+
+        if poly_has and kalshi_has:
+            # Both platforms have signals — check alignment
+            poly_directional = poly_dir in ("YES", "NO")
+            kalshi_directional = kalshi_dir in ("YES", "NO")
+
+            if poly_directional and kalshi_directional and poly_dir == kalshi_dir:
+                # Same direction — strong convergence, 1.5x boost
+                combined = min(1.0, max(poly_strength, kalshi_strength) * 1.5)
+                convergence = "aligned"
+                direction = poly_dir
+            elif poly_directional and kalshi_directional and poly_dir != kalshi_dir:
+                # Opposite directions — conflicting, suppress signal
+                combined = 0.0
+                convergence = "conflicting"
+                direction = "MIXED"
+            else:
+                # One or both non-directional — use the directional one if available
+                combined = max(poly_strength, kalshi_strength)
+                convergence = "single"
+                direction = poly_dir if poly_directional else kalshi_dir
+        elif poly_has:
+            combined = poly_strength
+            convergence = "single"
+            direction = poly_dir
+        elif kalshi_has:
+            combined = kalshi_strength
+            convergence = "single"
+            direction = kalshi_dir
+        else:
+            combined = 0.0
+            convergence = "none"
+            direction = "NONE"
+
+        result = {
+            "has_signal": combined > 0.1,
+            "poly_signal": poly_signal,
+            "kalshi_signal": kalshi_signal,
+            "convergence": convergence,
+            "combined_strength": round(combined, 3),
+            "direction": direction,
+        }
+
+        # Log convergence events
+        if convergence == "aligned" and combined > 0.3:
+            logger.info(
+                "Cross-platform convergence: %s + %s → %s direction, strength=%.2f",
+                polymarket_cid[:12] if polymarket_cid else "?",
+                kalshi_ticker[:20] if kalshi_ticker else "?",
+                direction, combined,
+            )
+
+        return result
+
+    # ================================================================
     # STATS & UTILITIES
     # ================================================================
 

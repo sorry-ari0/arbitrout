@@ -702,6 +702,39 @@ class AutoTrader:
                     opp["insider_signal"] = insider_signal
                     opp["_insider_driven"] = conviction_count > 0
 
+            # Cross-platform whale convergence: if both Polymarket insiders AND
+            # Kalshi anonymous whales are active on the same event, boost/suppress
+            cross_platform_mult = 1.0
+            if self.insider_tracker and hasattr(self.insider_tracker, 'get_cross_platform_signal'):
+                poly_cid = ""
+                kalshi_ticker = ""
+                kalshi_vol = 0
+                yes_plat = opp.get("buy_yes_platform", "")
+                no_plat = opp.get("buy_no_platform", "")
+                yes_mid = opp.get("buy_yes_market_id", "")
+                no_mid = opp.get("buy_no_market_id", "")
+                if yes_plat == "polymarket":
+                    poly_cid = yes_mid
+                elif no_plat == "polymarket":
+                    poly_cid = no_mid
+                if yes_plat == "kalshi":
+                    kalshi_ticker = yes_mid
+                    kalshi_vol = opp.get("volume", 0)
+                elif no_plat == "kalshi":
+                    kalshi_ticker = no_mid
+                    kalshi_vol = opp.get("volume", 0)
+                if poly_cid and kalshi_ticker:
+                    xplat = self.insider_tracker.get_cross_platform_signal(
+                        poly_cid, kalshi_ticker, kalshi_volume_24h=kalshi_vol)
+                    if xplat.get("convergence") == "aligned" and xplat.get("combined_strength", 0) > 0.2:
+                        cross_platform_mult = 1.5
+                        score *= cross_platform_mult
+                        opp["cross_platform_signal"] = xplat
+                    elif xplat.get("convergence") == "conflicting":
+                        cross_platform_mult = 0.3  # Heavy penalty for conflicting signals
+                        score *= cross_platform_mult
+                        opp["cross_platform_signal"] = xplat
+
             # Cross-platform disagreement boost: if platforms disagree >10%,
             # there may be an informational edge worth capturing
             if self.probability_model:
@@ -744,6 +777,7 @@ class AutoTrader:
                 "favorite_mult": favorite_mult,
                 "insider_mult": round(insider_mult, 4),
                 "kyle_mult": round(kyle_mult, 4),
+                "cross_platform_mult": round(cross_platform_mult, 4),
                 "entry_price": favored,
                 "side": "YES" if buy_yes_price <= buy_no_price else "NO",
             }
