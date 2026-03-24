@@ -294,10 +294,12 @@
 
 ## Quality & Infrastructure
 
-41. TODO - Add thread safety to arbitrage scanner shared state
-   - `_previous_prices` dict and scanner state accessed from multiple async tasks without locks
-   - Add asyncio.Lock for scanner state mutations
-   - Prevent race conditions between auto-scan loop and manual scan triggers
+41. IN_PROGRESS - Add asyncio.Lock to arbitrage scanner shared state
+   - In ArbitrageScanner class, add `self._lock = asyncio.Lock()` in __init__
+   - Wrap `_previous_prices` mutations in `async with self._lock:` blocks
+   - Wrap the `scan()` method body in `async with self._lock:`
+   - This prevents race conditions between auto-scan loop and manual WebSocket scan triggers
+   - Do NOT change any logic, only add locking
    - File: src/arbitrage_engine.py
 
 42. TODO - Add integration tests for adapter fetch cycles
@@ -345,14 +347,14 @@
 
 ## Multi-Platform Trading (2026-03-18)
 
-48. TODO - Auto trader performance tuning
+48. BLOCKED - Auto trader performance tuning (requires manual analysis)
    - Current stats: 10.5% win rate, -$36.71 total P&L, 1.9% fee drag, 15-trade loss streak
    - AI time_decay exits all lose (-$21.07 across 5 trades), manual exits are the only winners (18% WR)
    - Investigate: (1) Is time_decay trigger too aggressive? (2) Should trailing_stop bounds be wider? (3) Should entry filters be tighter (currently 3% min spread)?
    - Tune parameters and monitor results
    - File: src/positions/auto_trader.py, src/positions/exit_engine.py
 
-49. TODO - Fix cross-platform arb execution quality
+49. BLOCKED - Fix cross-platform arb execution quality (requires runtime investigation)
    - Cross-platform arb has 0% win rate (-$4.62 across 2 trades)
    - Investigate: are arb spreads real or disappearing by execution time?
    - Check if matcher is correctly identifying same-event pairs across limitless/polymarket
@@ -365,29 +367,29 @@
    - Run tools/update-file-map.py or manually update section maps
    - File: FILE_MAP.md
 
-51. TODO - Add Kalshi API key and enable trading
+51. BLOCKED - Add Kalshi API key and enable trading (needs user to provide API key)
    - Kalshi adapter returns 401 (needs API key)
    - Get API key from Kalshi dashboard, add KALSHI_API_KEY + KALSHI_RSA_PRIVATE_KEY to src/.env
    - Kalshi has the most liquid prediction markets after Polymarket
    - File: src/.env (not committed)
 
-52. TODO - Add Opinion Labs API key and enable trading
+52. BLOCKED - Add Opinion Labs API key and enable trading (needs user to provide API key)
    - Opinion Labs adapter returns 401 (needs API key)
    - Get OPINION_LABS_API_KEY, add to src/.env
    - File: src/.env (not committed)
 
-53. TODO - Fix Robinhood scraper returning 0 events
+53. BLOCKED - Fix Robinhood scraper returning 0 events (needs runtime browser debugging)
    - Robinhood adapter connects OK but scrapes 0 events from prediction markets page
    - Likely a Scrapling selector issue — page structure may have changed
    - Investigate with Scrapling debug, update selectors
    - File: src/adapters/robinhood.py
 
-54. TODO - Fix Coinbase scraper returning 0 events
+54. BLOCKED - Fix Coinbase scraper returning 0 events (needs runtime browser debugging)
    - Coinbase adapter connects OK but scrapes 0 events
    - Same Scrapling selector issue as Robinhood
    - File: src/adapters/coinbase.py
 
-55. TODO - Add Kraken API keys for real crypto trading
+55. BLOCKED - Add Kraken API keys for real crypto trading (needs user to provide API keys)
    - Kraken CLI executor works for price lookups (public API)
    - Real trading requires API keys configured via `wsl -d Ubuntu -- bash -c 'kraken auth'`
    - Also configure KRAKEN_API_KEY + KRAKEN_API_SECRET in src/.env for CCXT executor
@@ -403,6 +405,92 @@
    - Dashboard should show which executors are active, their paper balances, and trade counts per platform
    - Currently only shows aggregate stats — need per-platform breakdown
    - File: src/static/js/arbitrout.js, src/positions/position_router.py
+
+## Insider Tracking Improvements (2026-03-23)
+
+58. COMPLETED - Create Kalshi anonymous whale detector
+   - Created src/positions/kalshi_whale_tracker.py (~370 lines)
+   - Polls large trades ($1K+), volume spikes (2x 7-day avg), orderbook tilt
+   - Background polling every 5 min, signal caching with 10-min TTL
+   - Signal strength: 40% trade score + 35% volume score + 25% orderbook score
+   - Persists volume baselines to kalshi_whale_signals.json
+   - File: src/positions/kalshi_whale_tracker.py (new)
+
+59. COMPLETED - Add cross-platform convergence detection
+   - Added get_cross_platform_signal() to insider_tracker.py
+   - Combines Polymarket insider + Kalshi whale signals
+   - Aligned convergence: 1.5x boost, conflicting: 0.3x suppression
+   - Wired into auto_trader.py scoring loop
+   - File: src/positions/insider_tracker.py, src/positions/auto_trader.py
+
+60. COMPLETED - Fix insider signal pipeline (dead watchlist + stale wallets)
+   - Replaced 8 dead 2024 election wallets with 12 active traders (manekineko 122% ROI, singaporesling 87% ROI, etc.)
+   - Added staleness-based demotion: _empty_scan_count tracking, exponential priority decay (0.5^(count//5))
+   - Expanded leaderboard: 5 categories (added POLITICS, ECONOMICS, FINANCE), 3 time periods (added WEEK)
+   - Increased tracking: 300 traders (was 150), T1=15/T2=20/T3=30 (was 10/15/25)
+   - Added position-relative sizing signals (market_volume parameter)
+   - File: src/positions/insider_tracker.py
+
+61. COMPLETED - Add insider exit detection
+   - Detects wallets that were in prev_positions but absent from current positions
+   - Added "insider_exit" alert type with wallet info, previous position size, direction
+   - Added get_exit_signals(condition_id) method
+   - File: src/positions/insider_tracker.py
+
+62. COMPLETED - Add /holders and /trades whale scanning endpoints
+   - Added _fetch_market_holders() for top 20 holders per market
+   - Added _scan_whale_trades() for $5K+ trades across all markets
+   - Cross-references with flagged_wallets for known conviction trader detection
+   - File: src/positions/insider_tracker.py
+
+63. COMPLETED - Add insider extra slots to bypass MAX_CONCURRENT
+   - Added INSIDER_EXTRA_SLOTS = 3 constant (7 normal + 3 insider-only = 10 max)
+   - When at MAX_CONCURRENT, enters insider_only_mode instead of blocking
+   - Only trades with insider_mult > 1.0 or cross_platform_mult > 1.0 get through extra slots
+   - Exposure cap and Kelly portfolio cap still apply as hard limits
+   - File: src/positions/auto_trader.py
+
+## Insider Signal Pipeline Fixes (2026-03-24)
+
+64. TODO - Fix insider market ID matching in auto_trader scoring
+   - Around line 683, `market_id = opp.get("buy_yes_market_id", "")` is often empty
+   - When empty, fall back to extracting from matched_event: `matched = opp.get("matched_event", {}); markets = matched.get("markets", []); for m in markets: if m.get("platform") == "polymarket": market_id = m.get("market_id", m.get("id", ""))`
+   - Also check `buy_no_market_id` if `buy_yes_platform` is not polymarket
+   - This is a 5-line fix in the insider signal block
+   - File: src/positions/auto_trader.py
+
+65. TODO - Add insider signal dashboard panel to Arbitrout UI
+   - Insider tracker is running but has no UI representation on the dashboard
+   - Add a panel showing: tracked wallets count, recent insider movements, active signals per market
+   - Show conviction trader entries/exits with timestamps and position sizes
+   - Display cross-platform convergence alerts when Polymarket + Kalshi signals align
+   - File: src/static/js/arbitrout.js, src/static/css/arbitrout.css
+
+66. TODO - Add Kalshi whale signal dashboard panel
+   - KalshiWhaleTracker runs in background but results are invisible to user
+   - Add panel showing: large trades detected (count, volume, direction), volume spike alerts, orderbook tilt indicators
+   - Show signal strength per actively watched market
+   - File: src/static/js/arbitrout.js, src/static/css/arbitrout.css
+
+67. TODO - Log insider_only_mode activations to decision log
+   - In _scan_and_trade(), after `insider_only_mode = True` is set (around line 399), add: `if self.dlog: self.dlog.log_scan_skip("insider_only_mode", open_positions=len(open_pkgs))`
+   - At end of scoring loop, after all opportunities processed, if insider_only_mode was True log how many passed the insider filter vs how many were skipped
+   - Add a counter `insider_mode_passed = 0` incremented when a trade passes the insider_only_mode check
+   - File: src/positions/auto_trader.py
+
+68. TODO - Add accuracy-weighted wallet ranking to insider tracker API
+   - GET /api/derivatives/insiders currently returns raw wallet data
+   - Add sorting by accuracy * signal_weight to surface the most reliable wallets
+   - Add field showing each wallet's recent hit/miss record
+   - Useful for evaluating if the new watchlist is performing better than the old one
+   - File: src/positions/insider_tracker.py, src/server.py
+
+69. TODO - Seed volume baselines on first startup for Kalshi whale tracker
+   - In KalshiWhaleTracker._detect_volume_spikes(), when `_volume_baselines` is empty for a ticker, seed it with `current_volume * 0.8` instead of returning 0
+   - This gives a reasonable baseline immediately instead of waiting 7 days
+   - In _load_state(), if loaded baselines are empty, log "Baselines empty, will seed on first poll"
+   - File: src/positions/kalshi_whale_tracker.py
+
 
 
 
