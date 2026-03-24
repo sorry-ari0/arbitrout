@@ -330,7 +330,7 @@
 
 ## Crypto Derivative Hedging
 
-47. TODO - Build crypto spot + prediction market synthetic derivative package
+47. IN_PROGRESS - Build crypto spot + prediction market synthetic derivative package
    - Create `src/execution/crypto_hedger.py` that implements hedged crypto positions
    - Strategy: Buy crypto on exchange (via CCXT) + simultaneously buy NO on prediction market "crypto > $X" contract
    - If price drops: crypto loses value but NO contract pays out
@@ -486,6 +486,7 @@
    - This gives a reasonable baseline immediately instead of waiting 7 days
    - In _load_state(), if loaded baselines are empty, log "Baselines empty, will seed on first poll"
    - File: src/positions/kalshi_whale_tracker.py
+
 
 
 
