@@ -689,7 +689,23 @@ class AutoTrader:
             # Insider signal boost: conviction traders get massive boost, market makers ignored
             insider_signal = None
             insider_mult = 1.0
-            market_id = opp.get("buy_yes_market_id", "")
+            
+            # Determine Polymarket market_id for insider tracking
+            market_id = ""
+            if opp.get("buy_yes_platform") == "polymarket":
+                market_id = opp.get("buy_yes_market_id", "")
+            elif opp.get("buy_no_platform") == "polymarket":
+                market_id = opp.get("buy_no_market_id", "")
+
+            # Fallback to matched_event if market_id is still empty
+            if not market_id and opp.get("matched_event"):
+                matched_markets = opp["matched_event"].get("markets", [])
+                for m in matched_markets:
+                    if m.get("platform") == "polymarket":
+                        market_id = m.get("market_id", m.get("id", ""))
+                        if market_id:
+                            break # Found a Polymarket ID, stop searching
+
             if self.insider_tracker and market_id:
                 # Pass market volume for position-relative sizing signal
                 opp_volume = opp.get("volume", 0)
@@ -720,17 +736,17 @@ class AutoTrader:
                 kalshi_vol = 0
                 yes_plat = opp.get("buy_yes_platform", "")
                 no_plat = opp.get("buy_no_platform", "")
-                yes_mid = opp.get("buy_yes_market_id", "")
-                no_mid = opp.get("buy_no_market_id", "")
+                yes_mid_id = opp.get("buy_yes_market_id", "")
+                no_mid_id = opp.get("buy_no_market_id", "")
                 if yes_plat == "polymarket":
-                    poly_cid = yes_mid
+                    poly_cid = yes_mid_id
                 elif no_plat == "polymarket":
-                    poly_cid = no_mid
+                    poly_cid = no_mid_id
                 if yes_plat == "kalshi":
-                    kalshi_ticker = yes_mid
+                    kalshi_ticker = yes_mid_id
                     kalshi_vol = opp.get("volume", 0)
                 elif no_plat == "kalshi":
-                    kalshi_ticker = no_mid
+                    kalshi_ticker = no_mid_id
                     kalshi_vol = opp.get("volume", 0)
                 if poly_cid and kalshi_ticker:
                     xplat = self.insider_tracker.get_cross_platform_signal(
@@ -753,17 +769,17 @@ class AutoTrader:
 
             # Kyle's lambda: adverse selection / informed flow signal
             kyle_mult = 1.0
-            if self.kyle_estimator and market_id:
+            if self.kyle_estimator and market_id: # Use the resolved market_id from above
                 poly_platform = opp.get("buy_yes_platform", "")
                 if poly_platform == "polymarket":
                     kyle_direction = "YES"
-                    kyle_market_id = market_id
+                    kyle_market_id = opp.get("buy_yes_market_id", "")
                 elif opp.get("buy_no_platform", "") == "polymarket":
                     kyle_direction = "NO"
-                    kyle_market_id = opp.get("buy_no_market_id", market_id)
+                    kyle_market_id = opp.get("buy_no_market_id", "")
                 else:
                     kyle_direction = "YES"  # fallback
-                    kyle_market_id = market_id
+                    kyle_market_id = market_id # Use the resolved market_id as a last resort
                 kyle_signal = self.kyle_estimator.get_lambda_signal(kyle_market_id, kyle_direction)
                 if kyle_signal:
                     kyle_mult = kyle_signal["multiplier"]
@@ -1454,7 +1470,7 @@ class AutoTrader:
                 #                        YES bets at 0.09-0.17 = almost always losers
                 #
                 # Strategy: bet the side with higher implied probability (the favorite)
-                # - If YES >= 0.60 → bet YES (market already thinks this resolves YES)
+                # - If YES >= 0.60 → bet YES (riding the consensus)
                 # - If YES <= 0.40 → bet NO (market thinks this resolves NO)
                 # - If 0.40 < YES < 0.60 → bet the side closer to 0.50 (coin flip = skip low conviction)
                 #
@@ -1540,7 +1556,7 @@ class AutoTrader:
                     platform=buy_yes_platform if side == "YES" else buy_no_platform,
                     leg_type=leg_type,
                     asset_id=f"{side_id}:{side}",
-                    asset_label=f"{side} @ {buy_yes_platform if side == 'YES' else buy_no_platform}",
+                    asset_label=f"{side} @ {buy_yes_platform if side == "YES" else buy_no_platform}",
                     entry_price=side_price if side_price > 0 else 0.5,
                     cost=sized_trade,
                     expiry=expiry[:10] if expiry else "2026-12-31",
@@ -1651,10 +1667,10 @@ class AutoTrader:
                     cat = self._detect_category(opp_title)
                     category_exposure[cat] = category_exposure.get(cat, 0) + trade_size
                     # Refresh open market IDs so later iterations in this cycle see this trade
-                    if yes_mid:
-                        open_market_ids.add(yes_mid)
-                    if no_mid:
-                        open_market_ids.add(no_mid)
+                    if yes_mid_id:
+                        open_market_ids.add(yes_mid_id)
+                    if no_mid_id:
+                        open_market_ids.add(no_mid_id)
                     logger.info("Auto trader OPENED: %s (spread=%.1f%%, size=$%.2f, score=%.1f)",
                                 pkg_name, spread_pct, trade_size, score)
                     if self.dlog:

@@ -91,7 +91,7 @@
       "current_value": 27.875,
       "peak_value": 53.31875,
       "created_at": 1774209390.970776,
-      "updated_at": 1774348791.4267175,
+      "updated_at": 1774349350.717141,
       "_synthetic_info": {
         "type": "range_vs_directional",
         "high_strike": 2000.0,
@@ -153,7 +153,7 @@
       "_platform_errors": 1,
       "total_buy_fees": 0.0288,
       "estimated_sell_fees": 0.0,
-      "_neg_streak": 520
+      "_neg_streak": 529
     },
     {
       "id": "pkg_0b9bb8513214",
@@ -168,10 +168,10 @@
           "asset_id": "0x78d78fa752ec5ac78d5080c5606d5eeaf09a6484d463d5cd44158bb8a2c1d95a:YES",
           "asset_label": "YES @ polymarket",
           "entry_price": 0.6915,
-          "current_price": 0.656,
+          "current_price": 0.6645,
           "quantity": 14.461315979754158,
           "cost": 10.0,
-          "current_value": 9.4866,
+          "current_value": 9.6095,
           "expiry": "2026-03-31",
           "status": "open",
           "leg_status": "OTM",
@@ -224,13 +224,13 @@
         }
       ],
       "itm_status": "OTM",
-      "unrealized_pnl": -0.5134,
-      "unrealized_pnl_pct": -5.13,
+      "unrealized_pnl": -0.3905,
+      "unrealized_pnl_pct": -3.91,
       "total_cost": 10.0,
-      "current_value": 9.4866,
+      "current_value": 9.6095,
       "peak_value": 10.845986984815617,
       "created_at": 1774209390.973565,
-      "updated_at": 1774348791.5953436,
+      "updated_at": 1774349350.892552,
       "_bet_side": "YES",
       "_entry_conviction": 0.692,
       "_min_hold_until": 1774295790.9735892,
@@ -240,7 +240,7 @@
       "_platform_errors": 0,
       "total_buy_fees": 0.0,
       "estimated_sell_fees": 0.0,
-      "_neg_streak": 256
+      "_neg_streak": 265
     },
     {
       "id": "pkg_f7a2042f99b2",
@@ -423,7 +423,7 @@
       "current_value": 10.1379,
       "peak_value": 10.344827586206897,
       "created_at": 1774209390.9790988,
-      "updated_at": 1774348791.7628841,
+      "updated_at": 1774349351.0738885,
       "_bet_side": "NO",
       "_entry_conviction": 0.725,
       "_min_hold_until": 1774295790.9791188,
@@ -616,7 +616,7 @@
       "current_value": 9.2683,
       "peak_value": 10.08130081300813,
       "created_at": 1774209390.9845083,
-      "updated_at": 1774348791.9370143,
+      "updated_at": 1774349351.2386746,
       "_bet_side": "NO",
       "_entry_conviction": 0.615,
       "_min_hold_until": 1774295790.984528,
@@ -626,7 +626,7 @@
       "_platform_errors": 0,
       "total_buy_fees": 0.0,
       "estimated_sell_fees": 0.0,
-      "_neg_streak": 552
+      "_neg_streak": 561
     },
     {
       "id": "pkg_05a79f037a83",
@@ -703,7 +703,7 @@
       "current_value": 12.1142,
       "peak_value": 12.11421686746988,
       "created_at": 1774209390.9877188,
-      "updated_at": 1774348792.1163523,
+      "updated_at": 1774349351.4100528,
       "_bet_side": "NO",
       "_entry_conviction": 0.83,
       "_min_hold_until": 1774295790.9877386,
@@ -779,7 +779,7 @@
       "current_value": 10.3263,
       "peak_value": 10.395163674762408,
       "created_at": 1774214230.103328,
-      "updated_at": 1774348792.2826488,
+      "updated_at": 1774349351.5727987,
       "_bet_side": "NO",
       "_entry_conviction": 0.947,
       "_hold_to_resolution": true,
@@ -855,7 +855,7 @@
       "current_value": 10.6243,
       "peak_value": 10.624338624338623,
       "created_at": 1774214230.1094813,
-      "updated_at": 1774348792.6990182,
+      "updated_at": 1774349351.9920669,
       "_bet_side": "NO",
       "_entry_conviction": 0.945,
       "_hold_to_resolution": true,
@@ -1466,7 +1466,7 @@
       "current_value": 10.84,
       "peak_value": 10.84,
       "created_at": 1774343229.8424675,
-      "updated_at": 1774348731.004635,
+      "updated_at": 1774349290.2735295,
       "insider_signal": {
         "has_signal": true,
         "insider_count": 2,
@@ -1614,5 +1614,5 @@
       "created_at": 1774301806.7916083
     }
   ],
-  "saved_at": 1774348792.6991656
+  "saved_at": 1774349351.9923606
 }
