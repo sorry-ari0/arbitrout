@@ -5761,3 +5761,112 @@
 {"type": "opportunity_skip", "title": "What price will Ethereum hit in March?", "reason": "low_spread", "spread_pct": 2.82, "timestamp": "2026-03-24T10:53:55.609310Z"}
 {"type": "opportunity_skip", "title": "2026 FIFA World Cup Winner ", "reason": "low_spread", "spread_pct": 1.63, "timestamp": "2026-03-24T10:53:55.609612Z"}
 {"type": "opportunity_skip", "title": "Republican Presidential Nominee 2028", "reason": "low_spread", "spread_pct": 1.37, "timestamp": "2026-03-24T10:53:55.609895Z"}
+{"type": "arb_scan_summary", "events_count": 1259, "matched_count": 1248, "multi_platform_matches": 8, "opportunities_count": 1, "elapsed_ms": 38924, "platform_counts": {"kalshi": 95, "polymarket": 100, "predictit": 819, "limitless": 200, "crypto_spot": 45}, "timestamp": "2026-03-24T11:42:05.934275Z"}
+{"type": "opportunity_detected", "title": "Will Microsoft (MSFT) close at $340-$350 on the final day of trading of the week of Mar 23 \u2013 Mar 27?", "strategy_type": "synthetic_derivative", "spread_pct": 45.95, "platforms": ["polymarket", "limitless"], "yes_price": 0.1015, "no_price": 0.439, "is_synthetic": true, "volume": 991, "event_ids": ["0xbd3b63eb5a915babe1f8b80a933b81fe41e2e38bed850d63bd498cf2e77851d9", "69904"], "timestamp": "2026-03-24T11:42:05.934560Z"}
+{"type": "scan_start", "open_positions": 8, "total_exposure": 122.68, "remaining_budget": 239.18, "remaining_slots": 2, "timestamp": "2026-03-24T11:42:06.457047Z"}
+{"type": "opportunity_skip", "title": "New \"Stranger Things\" episode released by...? ", "reason": "short_duration", "hours": 0, "timestamp": "2026-03-24T11:42:06.457839Z"}
+{"type": "opportunity_skip", "title": "MicroStrategy sells any Bitcoin by ___ ?", "reason": "short_duration", "hours": 0, "timestamp": "2026-03-24T11:42:06.458381Z"}
+{"type": "opportunity_skip", "title": "Will 80 ships transit the Strait of Hormuz on any day in March?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:06.459526Z"}
+{"type": "opportunity_skip", "title": "Will XRP exceed $0.5000 by end of 2026?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:06.460258Z"}
+{"type": "opportunity_skip", "title": "OpenAI receives federal backstop for infrastructure before July?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:06.460778Z"}
+{"type": "opportunity_skip", "title": "Will ADA exceed $0.5000 by end of 2026?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:06.461158Z"}
+{"type": "opportunity_skip", "title": "Will ETH exceed $4,000 by end of 2026?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:06.461526Z"}
+{"type": "opportunity_skip", "title": "Will Microsoft (MSFT) close at $340-$350 on the final day of trading of the week of Mar 23 \u2013 Mar 27?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:06.461890Z"}
+{"type": "opportunity_skip", "title": "Will the highest temperature in Chongqing be 25\u00b0C on March 26?", "reason": "too_near_expiry", "days": 1.804091872314815, "timestamp": "2026-03-24T11:42:06.462245Z"}
+{"type": "opportunity_skip", "title": "Will the Iranian regime fall by April 30?", "reason": "already_open", "timestamp": "2026-03-24T11:42:06.462581Z"}
+{"type": "opportunity_skip", "title": "Will the price of Ethereum be between $1,900 and $2,000 on March 30?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:06.462951Z"}
+{"type": "opportunity_skip", "title": "Will BTC exceed $125,000 by end of 2026?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:06.463255Z"}
+{"type": "opportunity_skip", "title": "Will the highest temperature in Seoul be 16\u00b0C or higher on March 27?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:06.463556Z"}
+{"type": "opportunity_skip", "title": "ETH above $2160.87 on Mar 24, 12:00 UTC?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:06.463930Z"}
+{"type": "opportunity_skip", "title": "Will the highest temperature in Wellington be 23\u00b0C on March 27?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:06.464325Z"}
+{"type": "opportunity_skip", "title": "Will the Republican Party hold exactly 53 Senate seats after the 2026 midterm elections?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:06.464687Z"}
+{"type": "opportunity_skip", "title": "XRP above $1.4311 on Mar 24, 12:00 UTC?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:06.465055Z"}
+{"type": "opportunity_skip", "title": "Netanyahu out by...?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:06.465405Z"}
+{"type": "opportunity_skip", "title": "Will Microsoft (MSFT) close at $340-$350 on the final day of trading of the week of Mar 23 \u2013 Mar 27?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:06.465767Z"}
+{"type": "opportunity_skip", "title": "What will happen before GTA VI?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:06.466105Z"}
+{"type": "opportunity_skip", "title": "US x Iran ceasefire by...?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:06.466443Z"}
+{"type": "opportunity_skip", "title": "Presidential Election Winner 2028", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:06.466808Z"}
+{"type": "opportunity_skip", "title": "Brazil Presidential Election", "reason": "low_spread", "spread_pct": 6.44, "timestamp": "2026-03-24T11:42:06.467209Z"}
+{"type": "opportunity_skip", "title": "Democratic Presidential Nominee 2028", "reason": "low_spread", "spread_pct": 4.93, "timestamp": "2026-03-24T11:42:06.467606Z"}
+{"type": "opportunity_skip", "title": "Venezuela leader end of 2026?", "reason": "low_spread", "spread_pct": 4.28, "timestamp": "2026-03-24T11:42:06.467937Z"}
+{"type": "opportunity_skip", "title": "Which companies will be acquired before 2027?", "reason": "low_spread", "spread_pct": 3.01, "timestamp": "2026-03-24T11:42:06.468270Z"}
+{"type": "opportunity_skip", "title": "MegaETH market cap (FDV) one day after launch?", "reason": "low_spread", "spread_pct": 3.0, "timestamp": "2026-03-24T11:42:06.468671Z"}
+{"type": "opportunity_skip", "title": "What price will Bitcoin hit in March?", "reason": "low_spread", "spread_pct": 2.91, "timestamp": "2026-03-24T11:42:06.469080Z"}
+{"type": "opportunity_skip", "title": "What price will Ethereum hit in March?", "reason": "low_spread", "spread_pct": 2.81, "timestamp": "2026-03-24T11:42:06.469420Z"}
+{"type": "opportunity_skip", "title": "French Ligue 1 Winner ", "reason": "low_spread", "spread_pct": 2.15, "timestamp": "2026-03-24T11:42:06.469747Z"}
+{"type": "opportunity_skip", "title": "2026 FIFA World Cup Winner ", "reason": "low_spread", "spread_pct": 1.52, "timestamp": "2026-03-24T11:42:06.470057Z"}
+{"type": "opportunity_skip", "title": "Republican Presidential Nominee 2028", "reason": "low_spread", "spread_pct": 1.37, "timestamp": "2026-03-24T11:42:06.470370Z"}
+{"type": "news_headline", "title": "Scoop: Bob Woodward's memoir, \"Secrets,\" to reveal stories about deceased \"forever sources\"", "source": "Axios", "category": "macro", "action": "SKIP", "timestamp": "2026-03-24T11:42:28.534603Z"}
+{"type": "news_headline", "title": "Watch: BBC at site of Iranian strike in Tel Aviv", "source": "BBC", "category": "macro", "action": "SKIP", "timestamp": "2026-03-24T11:42:28.535002Z"}
+{"type": "news_headline", "title": "Africa Faces Fertilizer Supply Shock", "source": "Bloomberg Markets", "category": "finance", "action": "SKIP", "timestamp": "2026-03-24T11:42:28.535193Z"}
+{"type": "arb_scan_summary", "events_count": 1259, "matched_count": 1248, "multi_platform_matches": 8, "opportunities_count": 1, "elapsed_ms": 40253, "platform_counts": {"kalshi": 95, "polymarket": 100, "predictit": 819, "limitless": 200, "crypto_spot": 45}, "timestamp": "2026-03-24T11:42:56.211569Z"}
+{"type": "opportunity_detected", "title": "Will Microsoft (MSFT) close at $340-$350 on the final day of trading of the week of Mar 23 \u2013 Mar 27?", "strategy_type": "synthetic_derivative", "spread_pct": 45.95, "platforms": ["polymarket", "limitless"], "yes_price": 0.1015, "no_price": 0.439, "is_synthetic": true, "volume": 991, "event_ids": ["0xbd3b63eb5a915babe1f8b80a933b81fe41e2e38bed850d63bd498cf2e77851d9", "69904"], "timestamp": "2026-03-24T11:42:56.211899Z"}
+{"type": "scan_start", "open_positions": 8, "total_exposure": 122.68, "remaining_budget": 239.18, "remaining_slots": 2, "timestamp": "2026-03-24T11:42:56.740613Z"}
+{"type": "opportunity_skip", "title": "New \"Stranger Things\" episode released by...? ", "reason": "short_duration", "hours": 0, "timestamp": "2026-03-24T11:42:56.741285Z"}
+{"type": "opportunity_skip", "title": "MicroStrategy sells any Bitcoin by ___ ?", "reason": "short_duration", "hours": 0, "timestamp": "2026-03-24T11:42:56.741657Z"}
+{"type": "opportunity_skip", "title": "Will 80 ships transit the Strait of Hormuz on any day in March?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:56.741982Z"}
+{"type": "opportunity_skip", "title": "Will XRP exceed $0.5000 by end of 2026?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:56.743064Z"}
+{"type": "opportunity_skip", "title": "OpenAI receives federal backstop for infrastructure before July?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:56.743588Z"}
+{"type": "opportunity_skip", "title": "Will ADA exceed $0.5000 by end of 2026?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:56.743923Z"}
+{"type": "opportunity_skip", "title": "Will ETH exceed $4,000 by end of 2026?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:56.744258Z"}
+{"type": "opportunity_skip", "title": "Will Microsoft (MSFT) close at $340-$350 on the final day of trading of the week of Mar 23 \u2013 Mar 27?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:56.744627Z"}
+{"type": "opportunity_skip", "title": "Will the highest temperature in Chongqing be 25\u00b0C on March 26?", "reason": "too_near_expiry", "days": 1.8035098968171297, "timestamp": "2026-03-24T11:42:56.744924Z"}
+{"type": "opportunity_skip", "title": "Will the Iranian regime fall by April 30?", "reason": "already_open", "timestamp": "2026-03-24T11:42:56.745191Z"}
+{"type": "opportunity_skip", "title": "ETH above $2160.87 on Mar 24, 12:00 UTC?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:56.745500Z"}
+{"type": "opportunity_skip", "title": "Will the price of Ethereum be between $1,900 and $2,000 on March 30?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:56.745792Z"}
+{"type": "opportunity_skip", "title": "Will BTC exceed $125,000 by end of 2026?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:56.746072Z"}
+{"type": "opportunity_skip", "title": "Will the highest temperature in Seoul be 16\u00b0C or higher on March 27?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:56.746358Z"}
+{"type": "opportunity_skip", "title": "Will the highest temperature in Wellington be 23\u00b0C on March 27?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:56.746636Z"}
+{"type": "opportunity_skip", "title": "Will the Republican Party hold exactly 53 Senate seats after the 2026 midterm elections?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:56.746934Z"}
+{"type": "opportunity_skip", "title": "Will Crude Oil (CL) settle at $90+ in March?", "reason": "commodities_market", "timestamp": "2026-03-24T11:42:56.747198Z"}
+{"type": "opportunity_skip", "title": "Netanyahu out by...?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:56.747469Z"}
+{"type": "opportunity_skip", "title": "Will Microsoft (MSFT) close at $340-$350 on the final day of trading of the week of Mar 23 \u2013 Mar 27?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:56.747745Z"}
+{"type": "opportunity_skip", "title": "What will happen before GTA VI?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:56.748015Z"}
+{"type": "opportunity_skip", "title": "US x Iran ceasefire by...?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:56.748283Z"}
+{"type": "opportunity_skip", "title": "Presidential Election Winner 2028", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:42:56.748589Z"}
+{"type": "opportunity_skip", "title": "Brazil Presidential Election", "reason": "low_spread", "spread_pct": 6.44, "timestamp": "2026-03-24T11:42:56.748844Z"}
+{"type": "opportunity_skip", "title": "Democratic Presidential Nominee 2028", "reason": "low_spread", "spread_pct": 4.93, "timestamp": "2026-03-24T11:42:56.749089Z"}
+{"type": "opportunity_skip", "title": "Venezuela leader end of 2026?", "reason": "low_spread", "spread_pct": 4.28, "timestamp": "2026-03-24T11:42:56.749333Z"}
+{"type": "opportunity_skip", "title": "Which companies will be acquired before 2027?", "reason": "low_spread", "spread_pct": 3.01, "timestamp": "2026-03-24T11:42:56.749576Z"}
+{"type": "opportunity_skip", "title": "MegaETH market cap (FDV) one day after launch?", "reason": "low_spread", "spread_pct": 3.0, "timestamp": "2026-03-24T11:42:56.749823Z"}
+{"type": "opportunity_skip", "title": "What price will Bitcoin hit in March?", "reason": "low_spread", "spread_pct": 2.91, "timestamp": "2026-03-24T11:42:56.750063Z"}
+{"type": "opportunity_skip", "title": "What price will Ethereum hit in March?", "reason": "low_spread", "spread_pct": 2.81, "timestamp": "2026-03-24T11:42:56.750390Z"}
+{"type": "opportunity_skip", "title": "French Ligue 1 Winner ", "reason": "low_spread", "spread_pct": 2.15, "timestamp": "2026-03-24T11:42:56.751609Z"}
+{"type": "opportunity_skip", "title": "2026 FIFA World Cup Winner ", "reason": "low_spread", "spread_pct": 1.52, "timestamp": "2026-03-24T11:42:56.752794Z"}
+{"type": "opportunity_skip", "title": "Republican Presidential Nominee 2028", "reason": "low_spread", "spread_pct": 1.37, "timestamp": "2026-03-24T11:42:56.753521Z"}
+{"type": "arb_scan_summary", "events_count": 1253, "matched_count": 1220, "multi_platform_matches": 8, "opportunities_count": 2, "elapsed_ms": 39509, "platform_counts": {"kalshi": 89, "polymarket": 100, "predictit": 819, "limitless": 200, "crypto_spot": 45}, "timestamp": "2026-03-24T11:43:45.736007Z"}
+{"type": "opportunity_detected", "title": "Will Microsoft (MSFT) close at $340-$350 on the final day of trading of the week of Mar 23 \u2013 Mar 27?", "strategy_type": "synthetic_derivative", "spread_pct": 45.95, "platforms": ["polymarket", "limitless"], "yes_price": 0.1015, "no_price": 0.439, "is_synthetic": true, "volume": 991, "event_ids": ["0xbd3b63eb5a915babe1f8b80a933b81fe41e2e38bed850d63bd498cf2e77851d9", "69904"], "timestamp": "2026-03-24T11:43:45.767281Z"}
+{"type": "opportunity_detected", "title": "Will Trump buy at least part of Greenland?: :: During Trump's term", "strategy_type": "cross_platform_arb", "spread_pct": 15.0, "platforms": ["kalshi", "predictit"], "yes_price": 0.11, "no_price": 0.74, "is_synthetic": false, "volume": 0, "event_ids": ["KXGREENLAND-29-27", "33391"], "timestamp": "2026-03-24T11:43:45.768198Z"}
+{"type": "scan_start", "open_positions": 8, "total_exposure": 122.68, "remaining_budget": 239.18, "remaining_slots": 2, "timestamp": "2026-03-24T11:43:46.283608Z"}
+{"type": "opportunity_skip", "title": "New \"Stranger Things\" episode released by...? ", "reason": "short_duration", "hours": 0, "timestamp": "2026-03-24T11:43:46.285252Z"}
+{"type": "opportunity_skip", "title": "MicroStrategy sells any Bitcoin by ___ ?", "reason": "short_duration", "hours": 0, "timestamp": "2026-03-24T11:43:46.285745Z"}
+{"type": "opportunity_skip", "title": "Will 80 ships transit the Strait of Hormuz on any day in March?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:43:46.286144Z"}
+{"type": "opportunity_skip", "title": "Will XRP exceed $0.5000 by end of 2026?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:43:46.286521Z"}
+{"type": "opportunity_skip", "title": "OpenAI receives federal backstop for infrastructure before July?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:43:46.287002Z"}
+{"type": "opportunity_skip", "title": "Will ADA exceed $0.5000 by end of 2026?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:43:46.287412Z"}
+{"type": "opportunity_skip", "title": "Will ETH exceed $4,000 by end of 2026?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:43:46.287905Z"}
+{"type": "opportunity_skip", "title": "Will Microsoft (MSFT) close at $340-$350 on the final day of trading of the week of Mar 23 \u2013 Mar 27?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:43:46.288534Z"}
+{"type": "opportunity_skip", "title": "Will the highest temperature in Chongqing be 25\u00b0C on March 26?", "reason": "too_near_expiry", "days": 1.8029364673726853, "timestamp": "2026-03-24T11:43:46.289240Z"}
+{"type": "opportunity_skip", "title": "Will the price of Ethereum be between $1,900 and $2,000 on March 30?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:43:46.289774Z"}
+{"type": "opportunity_skip", "title": "Will the Iranian regime fall by April 30?", "reason": "already_open", "timestamp": "2026-03-24T11:43:46.290219Z"}
+{"type": "opportunity_skip", "title": "Will the highest temperature in Seoul be 16\u00b0C or higher on March 27?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:43:46.290902Z"}
+{"type": "opportunity_skip", "title": "Will BTC exceed $125,000 by end of 2026?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:43:46.291408Z"}
+{"type": "opportunity_skip", "title": "Will the highest temperature in Wellington be 23\u00b0C on March 27?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:43:46.291886Z"}
+{"type": "opportunity_skip", "title": "Will the Republican Party hold exactly 53 Senate seats after the 2026 midterm elections?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:43:46.293683Z"}
+{"type": "opportunity_skip", "title": "Will Crude Oil (CL) settle at $90+ in March?", "reason": "commodities_market", "timestamp": "2026-03-24T11:43:46.294256Z"}
+{"type": "opportunity_skip", "title": "Will \"The Super Mario Galaxy Movie\" Opening Weekend Box Office be between 170m and 180m?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:43:46.294652Z"}
+{"type": "opportunity_skip", "title": "Netanyahu out by...?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:43:46.295119Z"}
+{"type": "opportunity_skip", "title": "Will Microsoft (MSFT) close at $340-$350 on the final day of trading of the week of Mar 23 \u2013 Mar 27?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:43:46.295491Z"}
+{"type": "opportunity_skip", "title": "What will happen before GTA VI?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:43:46.295860Z"}
+{"type": "opportunity_skip", "title": "US x Iran ceasefire by...?", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:43:46.296416Z"}
+{"type": "opportunity_skip", "title": "Presidential Election Winner 2028", "reason": "insider_only_mode", "insider_mult": 1.0, "timestamp": "2026-03-24T11:43:46.297005Z"}
+{"type": "opportunity_skip", "title": "Brazil Presidential Election", "reason": "low_spread", "spread_pct": 6.44, "timestamp": "2026-03-24T11:43:46.297452Z"}
+{"type": "opportunity_skip", "title": "Democratic Presidential Nominee 2028", "reason": "low_spread", "spread_pct": 4.93, "timestamp": "2026-03-24T11:43:46.297844Z"}
+{"type": "opportunity_skip", "title": "Venezuela leader end of 2026?", "reason": "low_spread", "spread_pct": 4.28, "timestamp": "2026-03-24T11:43:46.298306Z"}
+{"type": "opportunity_skip", "title": "Which companies will be acquired before 2027?", "reason": "low_spread", "spread_pct": 3.01, "timestamp": "2026-03-24T11:43:46.298638Z"}
+{"type": "opportunity_skip", "title": "MegaETH market cap (FDV) one day after launch?", "reason": "low_spread", "spread_pct": 3.0, "timestamp": "2026-03-24T11:43:46.299020Z"}
+{"type": "opportunity_skip", "title": "What price will Bitcoin hit in March?", "reason": "low_spread", "spread_pct": 2.91, "timestamp": "2026-03-24T11:43:46.299345Z"}
+{"type": "opportunity_skip", "title": "What price will Ethereum hit in March?", "reason": "low_spread", "spread_pct": 2.81, "timestamp": "2026-03-24T11:43:46.299746Z"}
+{"type": "opportunity_skip", "title": "French Ligue 1 Winner ", "reason": "low_spread", "spread_pct": 2.15, "timestamp": "2026-03-24T11:43:46.300050Z"}
+{"type": "opportunity_skip", "title": "2026 FIFA World Cup Winner ", "reason": "low_spread", "spread_pct": 1.52, "timestamp": "2026-03-24T11:43:46.300359Z"}
+{"type": "opportunity_skip", "title": "Republican Presidential Nominee 2028", "reason": "low_spread", "spread_pct": 1.37, "timestamp": "2026-03-24T11:43:46.300705Z"}
