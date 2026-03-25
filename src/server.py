@@ -294,20 +294,10 @@ async def lifespan(app: FastAPI):
     decision_log = DecisionLogger() if _POSITIONS_AVAILABLE else None
     # Init Arbitrage subsystem
     if _ARBITRAGE_AVAILABLE:
-        arb_registry = AdapterRegistry()
-        arb_registry.register(KalshiAdapter())
-        arb_registry.register(PolymarketAdapter())
-        arb_registry.register(PredictItAdapter())
-        arb_registry.register(LimitlessAdapter())
-        # Opinion Labs: not available in US — skip unless API key is set
-        if os.environ.get("OPINION_LABS_API_KEY"):
-            arb_registry.register(OpinionLabsAdapter())
-        arb_registry.register(RobinhoodAdapter())
-        arb_registry.register(CoinbaseAdapter())
-        arb_registry.register(CryptoSpotAdapter())
+        arb_registry = AdapterRegistry()  # auto-registers all adapters in __init__
         init_scanner(arb_registry, decision_logger=decision_log)
         (DATA_DIR / "arbitrage").mkdir(exist_ok=True)
-        logger.info("Arbitrage subsystem initialized with %d adapters", len(arb_registry.list_platforms()))
+        logger.info("Arbitrage subsystem initialized with %d adapters", len(arb_registry._adapters))
         # Start auto-scan background task
         scan_task = asyncio.create_task(_auto_scan_loop())
     # Init Position system
@@ -412,10 +402,15 @@ async def lifespan(app: FastAPI):
             insider.start()
             app.state.insider_tracker = insider # Expose InsiderTracker via app.state
             # Kalshi anonymous whale tracker — feeds cross-platform convergence signals
-            try:
-                kalshi_adapter = arb_registry.get("kalshi") if _ARBITRAGE_AVAILABLE else None
-            except NameError:
-                kalshi_adapter = None
+            kalshi_adapter = None
+            if _ARBITRAGE_AVAILABLE:
+                try:
+                    kalshi_adapter = next(
+                        (a for a in arb_registry._adapters if getattr(a, "PLATFORM_NAME", "") == "kalshi"),
+                        None,
+                    )
+                except Exception:
+                    pass
             kalshi_whale = KalshiWhaleTracker(data_dir=DATA_DIR / "positions", kalshi_adapter=kalshi_adapter)
             kalshi_whale.start()
             app.state.kalshi_whale_tracker = kalshi_whale  # Expose via app.state for API
