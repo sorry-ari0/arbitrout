@@ -16,6 +16,7 @@ import threading
 from adapters.models import NormalizedEvent, MatchedEvent, ArbitrageOpportunity
 from adapters.registry import AdapterRegistry
 from event_matcher import match_events, _extract_crypto
+from arbitrage_history import save_opportunity_history # NEW: Import history saver
 
 logger = logging.getLogger("arbitrage_engine")
 
@@ -34,6 +35,7 @@ _TAKER_FEES = {
     "robinhood": 0.0,
     "coinbase_spot": 0.006,
     "kraken": 0.0026,
+    "manifold": 0.0,        # Manifold markets are fee-free for trading, funds are converted to mana
 }
 _DEFAULT_TAKER_FEE = 0.0
 _PREDICTIT_PROFIT_TAX = 0.10  # 10% of profits at contract resolution
@@ -944,20 +946,27 @@ def unsave_market(match_id: str) -> list[dict]:
 
 
 # ============================================================
-# FEED: RECENT PRICE CHANGES
+# FEED: RECENT PRICE CHANGES & ALERTS (NEW)
 # ============================================================
 _previous_prices: dict[str, tuple[float, float]] = {}  # "platform:event_id" -> (yes_price, timestamp)
 _previous_prices_lock = threading.Lock()
 _MAX_PRICE_ENTRIES = 5000  # Cap to prevent unbounded memory growth
 _PRICE_TTL_SECONDS = 86400  # Prune entries older than 24 hours
 
+# NEW: Track high-profit opportunities for alerts
+_high_profit_alerts: dict[str, float] = {} # match_id -> profit_pct
+_HIGH_PROFIT_THRESHOLD = 25.0 # % net profit for an alert
+_ALERT_TTL_SECONDS = 3600 # Clear alerts after 1 hour
 
-def compute_feed(events: list[NormalizedEvent], max_items: int = 50) -> list[dict]:
-    """Compute recent price changes for the live feed pane."""
-    global _previous_prices
+def compute_feed(events: list[NormalizedEvent],
+                 current_opportunities: list[ArbitrageOpportunity], # NEW: Pass current opps for alerts
+                 max_items: int = 50) -> list[dict]:
+    """Compute recent price changes and new high-profit alerts for the live feed pane."""
+    global _previous_prices, _high_profit_alerts
     feed: list[dict] = []
     now = time.time()
 
+    # Process price changes
     for ev in events:
         key = f"{ev.platform}:{ev.event_id}"
         with _previous_prices_lock:
@@ -968,6 +977,7 @@ def compute_feed(events: list[NormalizedEvent], max_items: int = 50) -> list[dic
         if prev is not None and prev != ev.yes_price:
             change = ev.yes_price - prev
             feed.append({
+                "type": "price_change", # NEW: Add type for feed items
                 "platform": ev.platform,
                 "event_id": ev.event_id,
                 "title": ev.title[:80],
@@ -975,10 +985,45 @@ def compute_feed(events: list[NormalizedEvent], max_items: int = 50) -> list[dic
                 "previous": prev,
                 "change": round(change, 4),
                 "change_pct": round(change / prev * 100, 2) if prev > 0 else 0,
-                "timestamp": ev.last_updated,
+                "timestamp": now, # Use current time for feed display
             })
 
-    # Prune stale entries periodically (when over 80% of cap)
+    # Process high-profit opportunities for alerts
+    new_alerts_detected = []
+    for opp in current_opportunities:
+        match_id = opp.matched_event.match_id
+        net_profit = opp.net_profit_pct
+        
+        # If profit > threshold and it's a new alert or significant increase
+        if net_profit >= _HIGH_PROFIT_THRESHOLD:
+            if match_id not in _high_profit_alerts or net_profit > _high_profit_alerts[match_id] + 5.0: # 5% increase for re-alert
+                new_alerts_detected.append(opp)
+            _high_profit_alerts[match_id] = net_profit
+        # If an alert was previously active but profit dropped below threshold, remove it
+        elif match_id in _high_profit_alerts and net_profit < _HIGH_PROFIT_THRESHOLD:
+            _high_profit_alerts.pop(match_id, None)
+
+    # Add new alerts to the feed
+    for opp in new_alerts_detected:
+        feed.append({
+            "type": "opportunity_alert", # NEW: Type for alert items
+            "platform": opp.buy_yes_platform, # Use one of the platforms for display
+            "event_id": opp.matched_event.match_id,
+            "title": f"New Arb: {opp.matched_event.canonical_title} ({opp.net_profit_pct:.1f}%)",
+            "yes_price": opp.buy_yes_price, # Use relevant price for display
+            "previous": None,
+            "change": opp.net_profit_pct,
+            "change_pct": opp.net_profit_pct,
+            "timestamp": now,
+            "match_id": opp.matched_event.match_id, # For linking to detail
+            "is_synthetic": opp.is_synthetic,
+        })
+    
+    # Prune stale alerts
+    _high_profit_alerts = {k: v for k, v in _high_profit_alerts.items() if (now - _previous_prices.get(k, (0,0))[1]) < _ALERT_TTL_SECONDS}
+
+
+    # Prune stale price entries periodically (when over 80% of cap)
     with _previous_prices_lock:
         if len(_previous_prices) > _MAX_PRICE_ENTRIES * 0.8:
             cutoff = now - _PRICE_TTL_SECONDS
@@ -989,8 +1034,8 @@ def compute_feed(events: list[NormalizedEvent], max_items: int = 50) -> list[dic
                 for k in sorted_keys[:len(_previous_prices) - _MAX_PRICE_ENTRIES]:
                     del _previous_prices[k]
 
-    # Sort by absolute change descending
-    feed.sort(key=lambda f: abs(f["change"]), reverse=True)
+    # Sort feed items by timestamp (newest first)
+    feed.sort(key=lambda f: f["timestamp"], reverse=True)
     return feed[:max_items]
 
 
@@ -1043,8 +1088,8 @@ class ArbitrageScanner:
             self._last_opportunities = opportunities
         arb_ms = int((time.time() - t3) * 1000)
 
-        # 4. Compute feed
-        feed = compute_feed(events)
+        # 4. Compute feed (now includes alerts)
+        feed = compute_feed(events, opportunities) # NEW: Pass opportunities to feed
         with self._lock:
             self._last_feed = feed
 
@@ -1055,11 +1100,15 @@ class ArbitrageScanner:
 
         # 5. Cache to disk
         self._save_cache(events)
+        
+        # 6. NEW: Save opportunity history for tracking
+        for opp in opportunities:
+            save_opportunity_history(opp.matched_event.match_id, opp.profit_pct, opp.net_profit_pct)
 
         multi_platform = sum(1 for m in matched if m.platform_count >= 2)
         elapsed_ms = int((time.time() - scan_start) * 1000)
 
-        # 6. Log scan summary and all detected opportunities
+        # 7. Log scan summary and all detected opportunities
         if self._dlog:
             # Platform breakdown for monitoring
             platform_counts: dict[str, int] = {}

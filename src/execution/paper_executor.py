@@ -12,7 +12,7 @@ logger = logging.getLogger("execution.paper")
 #   PredictIt: 5% on profits + 5% withdrawal
 MAKER_FEE_RATES = {
     "polymarket": 0.0,        # 0% for limit orders
-    "kalshi": 0.005,          # 0.5% maker
+    "kalshi": 0.0,            # 0% (Kalshi has 0% trading fees as of 2026)
     "coinbase_spot": 0.004,   # 0.4% maker
     "predictit": 0.05,        # 5% on profits (simplified)
     "limitless": 0.005,       # ~0.5% estimated
@@ -23,7 +23,7 @@ MAKER_FEE_RATES = {
 }
 TAKER_FEE_RATES = {
     "polymarket": 0.02,       # ~2% for market orders
-    "kalshi": 0.01,           # 1% taker
+    "kalshi": 0.0,            # 0% (Kalshi has 0% trading fees as of 2026)
     "coinbase_spot": 0.006,   # 0.6% taker
     "predictit": 0.05,        # 5% on profits
     "limitless": 0.01,        # ~1% estimated
@@ -34,14 +34,23 @@ TAKER_FEE_RATES = {
 }
 DEFAULT_FEE_RATE = 0.0  # 0% default (maker — all orders now use GTC limit)
 
-# ── Per-category Polymarket fee curve ─────────────────────────────────────────
+# ── Per-category Polymarket fee curve (updated 2026-03-30) ───────────────────
 # Rate = feeRate * (price * (1 - price))^exponent
-# Crypto: feeRate=0.25, exponent=2 → peak 1.5625% at p=0.50
-# Sports: feeRate=0.0175, exponent=1 → peak 0.4375% at p=0.50
-# Politics/entertainment/other: 0% on Polymarket
+# 11 categories: effective March 30, 2026 — Polymarket announcement
+# Maker fees (GTC limit orders): 0% across all categories
+# These are TAKER fee curves only (market/FOK orders):
 _POLY_FEE_PARAMS = {
-    "crypto": (0.25, 2),
-    "sports": (0.0175, 1),
+    "crypto":        (0.2500, 2),  # peak 1.5625% at p=0.50
+    "sports":        (0.0175, 1),  # peak 0.4375% at p=0.50
+    "politics":      (0.0400, 1),  # peak 1.0000% at p=0.50
+    "finance":       (0.0400, 1),  # peak 1.0000% at p=0.50
+    "tech":          (0.0400, 1),  # peak 1.0000% at p=0.50
+    "entertainment": (0.0200, 1),  # peak 0.5000% at p=0.50
+    "science":       (0.0200, 1),  # peak 0.5000% at p=0.50
+    "culture":       (0.0200, 1),  # peak 0.5000% at p=0.50
+    "climate":       (0.0200, 1),  # peak 0.5000% at p=0.50
+    "geopolitical":  (0.0000, 1),  # 0% — free
+    "other":         (0.0200, 1),  # peak 0.5000% at p=0.50
 }
 
 

@@ -418,3 +418,117 @@ async def get_calibration(request: Request):
         return ce.generate_report()
     except Exception as e:
         return {"error": str(e)}
+
+
+# ── Kill Switch ──────────────────────────────────────────────────────────────
+
+@router.post("/kill-switch")
+async def kill_switch():
+    """Emergency: stop auto-trader, cancel all pending orders, close all positions.
+
+    This is the nuclear option — halts all automated trading and attempts to
+    exit every open position at market price. Use when something goes wrong.
+    """
+    _require_pm()
+    results = {"auto_trader_stopped": False, "orders_cancelled": 0, "positions_closed": 0, "errors": []}
+
+    # 1. Stop auto-trader immediately
+    if _auto_trader:
+        try:
+            _auto_trader.stop()
+            results["auto_trader_stopped"] = True
+            logger.warning("KILL SWITCH: Auto trader stopped")
+        except Exception as e:
+            results["errors"].append(f"Failed to stop auto-trader: {e}")
+
+    # 2. Stop exit engine scanning
+    if _exit_engine and hasattr(_exit_engine, "stop"):
+        try:
+            _exit_engine.stop()
+            logger.warning("KILL SWITCH: Exit engine stopped")
+        except Exception:
+            pass
+
+    # 3. Cancel all pending limit orders
+    for pkg in _pm.list_packages("open"):
+        pending = pkg.get("_pending_limit_orders", {})
+        for leg_id, info in list(pending.items()):
+            executor = _pm.executors.get(info["platform"])
+            if executor:
+                try:
+                    cancelled = await executor.cancel_order(info["order_id"])
+                    if cancelled:
+                        results["orders_cancelled"] += 1
+                except Exception as e:
+                    results["errors"].append(f"Cancel order {info['order_id']}: {e}")
+        pkg.pop("_pending_limit_orders", None)
+
+    # 4. Close all open positions at market (FOK)
+    for pkg in _pm.list_packages("open"):
+        for leg in pkg.get("legs", []):
+            if leg.get("status") != "open":
+                continue
+            try:
+                exit_result = await _pm.exit_leg(pkg["id"], leg["leg_id"], trigger="kill_switch")
+                if exit_result.get("success"):
+                    results["positions_closed"] += 1
+                else:
+                    results["errors"].append(f"Exit {leg['leg_id']}: {exit_result.get('error')}")
+            except Exception as e:
+                results["errors"].append(f"Exit {leg['leg_id']}: {e}")
+
+    _pm.save()
+    logger.warning("KILL SWITCH COMPLETE: %d orders cancelled, %d positions closed, %d errors",
+                    results["orders_cancelled"], results["positions_closed"], len(results["errors"]))
+    return results
+
+
+@router.post("/kill-switch/pause")
+async def pause_trading():
+    """Pause auto-trader without closing positions. Reversible via /resume."""
+    if not _auto_trader:
+        return {"paused": False, "message": "Auto trader not initialized"}
+    _auto_trader.stop()
+    logger.warning("Trading PAUSED via kill-switch/pause")
+    return {"paused": True, "open_positions": len(_pm.list_packages("open")) if _pm else 0}
+
+
+@router.post("/kill-switch/resume")
+async def resume_trading():
+    """Resume auto-trader after a pause."""
+    if not _auto_trader:
+        return {"resumed": False, "message": "Auto trader not initialized"}
+    _auto_trader.start()
+    logger.info("Trading RESUMED via kill-switch/resume")
+    return {"resumed": True, "open_positions": len(_pm.list_packages("open")) if _pm else 0}
+
+
+# ── Wallet Health ────────────────────────────────────────────────────────────
+
+@router.get("/wallet-health")
+async def get_wallet_health():
+    """Check wallet balances and connection status for all configured platforms."""
+    _require_pm()
+    health = {}
+    for platform_name, executor in _pm.executors.items():
+        entry = {"configured": False, "balance": 0, "status": "unconfigured"}
+        try:
+            if hasattr(executor, "is_configured") and executor.is_configured():
+                entry["configured"] = True
+                bal = await executor.get_balance()
+                entry["balance"] = round(bal.available, 2)
+                entry["total"] = round(bal.total, 2)
+                entry["status"] = "ok" if bal.available > 0 else "zero_balance"
+            elif hasattr(executor, "real") and hasattr(executor.real, "is_configured"):
+                # Paper executor wrapping a real one
+                entry["configured"] = executor.real.is_configured()
+                entry["status"] = "paper_mode"
+                bal = await executor.get_balance()
+                entry["balance"] = round(bal.available, 2)
+                entry["total"] = round(bal.total, 2)
+        except Exception as e:
+            entry["status"] = "error"
+            entry["error"] = str(e)
+        health[platform_name] = entry
+
+    return health
