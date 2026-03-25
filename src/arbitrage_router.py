@@ -1,18 +1,22 @@
 """Arbitrage API router — all /api/arbitrage/* endpoints."""
 import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response # NEW: Import Response for CSV
 from pydantic import BaseModel
+import csv # NEW: Import csv module
+import io # NEW: Import io module
 
 from adapters.registry import AdapterRegistry
 from arbitrage_engine import ArbitrageScanner, load_saved, save_market, unsave_market
 from event_matcher import add_manual_link, remove_manual_link
 from execution.crypto_hedger import CryptoHedger
+from arbitrage_history import get_opportunity_history # NEW: Import history getter
+from utils.forex_rates import fetch_forex_rates # NEW: Import forex rates fetcher
 
 logger = logging.getLogger("arbitrage_router")
 
 router = APIRouter(prefix="/api/arbitrage", tags=["arbitrage"])
-
+forex_router = APIRouter(prefix="/api/forex", tags=["forex"]) # NEW: Forex router
 
 # ============================================================
 # GLOBAL STATE (set by server.py on startup)
@@ -56,7 +60,7 @@ class SaveRequest(BaseModel):
 
 
 # ============================================================
-# ENDPOINTS
+# ARBITRAGE ENDPOINTS
 # ============================================================
 @router.get("/opportunities")
 async def get_opportunities():
@@ -138,6 +142,69 @@ async def get_hedge_packages():
     packages = await hedger.find_hedge_packages()
     return JSONResponse(content=packages)
 
+
+@router.get("/history/{match_id}") # NEW: Endpoint for historical opportunity data
+async def get_opportunity_history_endpoint(match_id: str):
+    """Get historical profit data for a specific arbitrage opportunity."""
+    history = get_opportunity_history(match_id)
+    return JSONResponse(content=history)
+
+
+@router.get("/opportunities/export/csv") # NEW: Endpoint for CSV export
+async def export_opportunities_csv():
+    """Export current arbitrage opportunities to a CSV file."""
+    scanner = get_scanner()
+    opportunities = scanner.get_opportunities()
+
+    # Prepare CSV data
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    # CSV Header
+    header = [
+        "Match ID", "Canonical Title", "Category", "Is Synthetic",
+        "Buy YES Platform", "Buy YES Price", "Buy NO Platform", "Buy NO Price",
+        "Spread (%)", "Net Profit (%)", "Combined Volume", "Confidence", "URL"
+    ]
+    writer.writerow(header)
+
+    # CSV Rows
+    for opp in opportunities:
+        row = [
+            opp.get("match_id"),
+            opp.get("canonical_title") or opp.get("matched_event", {}).get("canonical_title"),
+            opp.get("matched_event", {}).get("category"),
+            opp.get("is_synthetic"),
+            opp.get("buy_yes_platform"),
+            opp.get("buy_yes_price"),
+            opp.get("buy_no_platform"),
+            opp.get("buy_no_price"),
+            round(opp.get("profit_pct", 0), 2),
+            round(opp.get("net_profit_pct", 0), 2),
+            opp.get("combined_volume"),
+            opp.get("confidence"),
+            (opp.get("matched_event", {}).get("markets", [{}])[0].get("url") if opp.get("matched_event") else "")
+        ]
+        writer.writerow(row)
+
+    csv_string = output.getvalue()
+    
+    # Return as a downloadable file
+    return Response(
+        content=csv_string,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=arbitrage_opportunities.csv"}
+    )
+
+
+# ============================================================
+# FOREX ENDPOINTS (NEW)
+# ============================================================
+@forex_router.get("/rates")
+async def get_forex_rates():
+    """Get current forex rates (USD base)."""
+    rates = await fetch_forex_rates()
+    return JSONResponse(content=rates)
 
 # ============================================================
 # WEBSOCKET

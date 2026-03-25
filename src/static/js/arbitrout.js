@@ -21,6 +21,8 @@ let arbHedgePollingInterval = null; // New interval for hedge packages
 let arbNewsPollingInterval = null; // NEW interval for news scanner
 let arbInsiderPollingInterval = null; // NEW interval for insider signals
 let arbWhalePollingInterval = null; // Kalshi whale signals interval
+let forexPollingInterval = null; // NEW: Forex rates polling interval
+let currentForexRates = {}; // NEW: Store current forex rates
 
 // === PIXEL ART (CSS grid of div cells) ===
 function createPixelGrid(colorMap, scale) {
@@ -191,6 +193,7 @@ function startArbPolling() {
     loadNews(); // NEW: Load news
     loadInsiderSignals(); // NEW: Load insider signals
     loadWhaleSignals(); // Load Kalshi whale signals
+    loadForexRates(); // NEW: Load forex rates
 
     arbPollingInterval = setInterval(loadOpportunities, 15000);
     arbScanInterval = setInterval(triggerScan, 60000);
@@ -198,6 +201,7 @@ function startArbPolling() {
     arbNewsPollingInterval = setInterval(loadNews, 60000); // NEW: Poll news every 60s
     arbInsiderPollingInterval = setInterval(loadInsiderSignals, 30000); // NEW: Poll insider signals every 30s
     arbWhalePollingInterval = setInterval(loadWhaleSignals, 30000); // Poll Kalshi whale signals every 30s
+    forexPollingInterval = setInterval(loadForexRates, 60000); // NEW: Poll forex rates every 60s
     connectArbWs();
 }
 
@@ -225,6 +229,10 @@ function stopArbPolling() {
     if (arbWhalePollingInterval) { // Clear Kalshi whale polling interval
         clearInterval(arbWhalePollingInterval);
         arbWhalePollingInterval = null;
+    }
+    if (forexPollingInterval) { // NEW: Clear forex polling interval
+        clearInterval(forexPollingInterval);
+        forexPollingInterval = null;
     }
     if (arbWs) {
         arbWs.close();
@@ -265,6 +273,7 @@ function connectArbWs() {
             addFeedItem(data.data);
         } else if (data.type === 'news_alert') { // NEW
             addFeedItem({
+                type: 'news_alert', // NEW: Type for news alerts
                 time: new Date().toLocaleTimeString(),
                 platform: 'NEWS ALERT',
                 title: data.data.headline,
@@ -341,6 +350,16 @@ function renderOpportunities(opps) {
 
     // Add sort dropdown
     container.appendChild(createSortDropdown());
+
+    // NEW: Add CSV Export Button
+    var exportBtn = document.createElement('button');
+    exportBtn.textContent = 'EXPORT CSV';
+    exportBtn.style.cssText = 'background:var(--arb-card); color:var(--arb-accent); border:1px solid var(--arb-border); padding:4px 8px; font-family:monospace; font-size:12px; margin-bottom:8px; width:100%; cursor:pointer;';
+    exportBtn.addEventListener('click', function() {
+        window.open('/api/arbitrage/opportunities/export/csv', '_blank');
+    });
+    container.appendChild(exportBtn);
+
 
     // Apply sort
     opps = sortOpportunities(opps);
@@ -431,7 +450,7 @@ function renderOpportunities(opps) {
 }
 
 // === EVENT DETAIL ===
-function showEventDetail(opp) {
+async function showEventDetail(opp) { // NEW: Make function async
     selectedOpp = opp;
     lastSelectedOppId = opp.match_id || (opp.matched_event ? opp.matched_event.match_id : null);
     localStorage.setItem('arbSelectedOppId', lastSelectedOppId); // Save selected opportunity ID
@@ -704,6 +723,34 @@ function showEventDetail(opp) {
         saveMarket(event.match_id || '', event.canonical_title || opp.canonical_title || '', event.category || '');
     });
     container.appendChild(saveBtn);
+
+    // NEW: Display Historical Profit for this opportunity
+    if (lastSelectedOppId) {
+        try {
+            const response = await fetch('/api/arbitrage/history/' + encodeURIComponent(lastSelectedOppId));
+            const historyData = await response.json();
+            if (historyData && historyData.length > 0) {
+                var historyDiv = document.createElement('div');
+                historyDiv.style.cssText = 'padding:10px 8px;border-top:1px solid var(--arb-border);font-family:monospace;font-size:11px;margin-top:8px;';
+                var historyTitle = document.createElement('div');
+                historyTitle.style.cssText = 'color:var(--arb-accent);font-weight:700;font-size:12px;margin-bottom:6px;';
+                historyTitle.textContent = 'HISTORICAL PROFIT (%)';
+                historyDiv.appendChild(historyTitle);
+
+                historyData.forEach(entry => {
+                    var historyEntry = document.createElement('div');
+                    historyEntry.style.cssText = 'padding:2px 0;display:flex;justify-content:space-between;';
+                    var timestamp = new Date(entry.timestamp * 1000).toLocaleString();
+                    var profit = entry.net_profit_pct.toFixed(1) + '%';
+                    historyEntry.innerHTML = `<span>${timestamp}</span> <span style="color: ${entry.net_profit_pct > 0 ? 'var(--arb-green)' : 'var(--arb-red)'}; font-weight:700;">${profit}</span>`;
+                    historyDiv.appendChild(historyEntry);
+                });
+                container.appendChild(historyDiv);
+            }
+        } catch (error) {
+            console.error('Failed to load historical opportunity data:', error);
+        }
+    }
 }
 
 // Function to restore the selected opportunity's detailed view
@@ -749,7 +796,7 @@ function renderFeed() {
 
         var time = document.createElement('span');
         time.className = 'feed-time';
-        time.textContent = (item.time || new Date().toLocaleTimeString()) + ' ';
+        time.textContent = (item.time || new Date(item.timestamp * 1000).toLocaleTimeString()) + ' ';
         el.appendChild(time);
 
         var plat = document.createElement('span');
@@ -761,19 +808,39 @@ function renderFeed() {
         text.textContent = (item.title || '') + ' ';
         el.appendChild(text);
 
-        if (item.direction) {
+        // NEW: Handle different feed item types
+        if (item.type === 'opportunity_alert') {
+            el.style.backgroundColor = 'rgba(0, 229, 204, 0.08)'; // Highlight alerts
+            el.style.borderLeft = '3px solid var(--arb-accent)';
+            el.style.paddingLeft = '5px';
+            text.style.color = 'var(--arb-accent)';
+            text.style.fontWeight = '700';
+            if (item.match_id) {
+                el.style.cursor = 'pointer';
+                el.title = 'View opportunity details';
+                el.addEventListener('click', function() {
+                    var opp = lastLoadedOpportunities.find(o => (o.match_id || (o.matched_event ? o.matched_event.match_id : null)) === item.match_id);
+                    if (opp) showEventDetail(opp);
+                });
+            }
+        } else if (item.type === 'price_change' && item.change) {
             var arrow = document.createElement('span');
-            arrow.className = item.direction === 'up' ? 'feed-price-up' : 'feed-price-down';
-            arrow.textContent = item.direction === 'up' ? '\u25B2' : '\u25BC';
-            if (item.price) arrow.textContent += ' ' + item.price;
+            arrow.className = item.change > 0 ? 'feed-price-up' : 'feed-price-down';
+            arrow.textContent = (item.change > 0 ? '\u25B2' : '\u25BC') + ' ' + (item.yes_price * 100).toFixed(1) + '\u00A2';
             el.appendChild(arrow);
+        } else if (item.type === 'news_alert') {
+            el.style.backgroundColor = 'rgba(255, 140, 0, 0.08)';
+            el.style.borderLeft = '3px solid #ffa726';
+            el.style.paddingLeft = '5px';
+            text.style.color = '#ffa726';
+            text.style.fontWeight = '700';
         }
 
         container.appendChild(el);
     });
 }
 
-// === STACKED PANELS (NEWS, SAVED, HEDGE, INSIDER) ===
+// === STACKED PANELS (NEWS, SAVED, HEDGE, INSIDER, WHALE, FOREX) ===
 // This function renders all three sections in the bottom-right panel
 function renderAllStackedPanels() {
     // Target the bottom-right arb-panel, assuming arbitrout-container is a 2x2 grid
@@ -800,6 +867,17 @@ function renderAllStackedPanels() {
             panelBody.removeChild(panelBody.firstChild);
         }
     }
+
+    // --- Render Forex Rates Section --- (NEW)
+    var forexHeader = document.createElement('div');
+    forexHeader.className = 'arb-section-header';
+    forexHeader.textContent = 'FOREX RATES';
+    panelBody.appendChild(forexHeader);
+    var forexList = document.createElement('div');
+    forexList.id = 'forex-rates-list';
+    forexList.className = 'arb-section-content';
+    renderForexRatesContent(forexList, currentForexRates);
+    panelBody.appendChild(forexList);
 
     // --- Render Insider Signals Section ---
     var insiderHeader = document.createElement('div');
@@ -1411,6 +1489,56 @@ function renderWhaleSignalsContent(container, data) {
     });
 }
 
+// === FOREX RATES (NEW SECTION) ===
+function loadForexRates() {
+    fetch('/api/forex/rates')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            currentForexRates = data;
+            renderAllStackedPanels();
+        })
+        .catch(function(err) { console.error('Forex rates fetch error:', err); });
+}
+
+function renderForexRatesContent(container, ratesData) {
+    while (container.firstChild) {
+        container.removeChild(container.firstChild);
+    }
+
+    if (!ratesData || Object.keys(ratesData).length === 0) {
+        var empty = document.createElement('div');
+        empty.className = 'arb-empty';
+        empty.textContent = 'Fetching forex rates...';
+        container.appendChild(empty);
+        return;
+    }
+
+    // Example rates to display
+    const interestingRates = ['EUR', 'GBP', 'JPY', 'CAD', 'AUD'];
+
+    interestingRates.forEach(function(currency) {
+        if (ratesData[currency]) {
+            var rateEntry = document.createElement('div');
+            rateEntry.style.cssText = 'display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px dashed var(--arb-border);font-family:monospace;font-size:11px;color:var(--arb-text);';
+            var currencyPair = document.createElement('span');
+            currencyPair.style.color = 'var(--arb-muted)';
+            currencyPair.textContent = 'USD/' + currency;
+            var rateValue = document.createElement('span');
+            rateValue.style.color = 'var(--arb-accent)';
+            rateValue.style.fontWeight = '700';
+            rateValue.textContent = ratesData[currency].toFixed(4); // Format to 4 decimal places
+            rateEntry.appendChild(currencyPair);
+            rateEntry.appendChild(rateValue);
+            container.appendChild(rateEntry);
+        }
+    });
+
+    var timeUpdated = ratesData.time_last_update_unix ? new Date(ratesData.time_last_update_unix * 1000).toLocaleTimeString() : 'N/A';
+    var updateTime = document.createElement('div');
+    updateTime.style.cssText = 'font-size:10px;color:var(--arb-muted);margin-top:8px;text-align:right;';
+    updateTime.textContent = 'Last updated: ' + timeUpdated;
+    container.appendChild(updateTime);
+}
 
 // === POSITIONS DASHBOARD ===
 var positionsData = { packages: [], dashboard: {}, alerts: [], config: {} };

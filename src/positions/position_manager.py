@@ -259,6 +259,28 @@ class PositionManager:
                 if cid and cid in open_cids:
                     return {"success": False, "error": f"Duplicate: {cid[:16]}... already open"}
 
+        # Slippage protection: verify prices haven't moved >5% since opportunity was detected
+        max_slippage = float(os.environ.get("MAX_SLIPPAGE_PCT", "5")) / 100
+        for leg in pkg.get("legs", []):
+            if leg.get("platform") == "robinhood":
+                continue
+            executor = self.executors.get(leg["platform"])
+            if not executor:
+                continue
+            try:
+                live_price = await executor.get_current_price(leg["asset_id"])
+                expected = leg.get("entry_price", 0)
+                if live_price > 0 and expected > 0:
+                    slippage = abs(live_price - expected) / expected
+                    if slippage > max_slippage:
+                        return {
+                            "success": False,
+                            "error": f"Slippage {slippage:.1%} > {max_slippage:.0%} on {leg['asset_id']}: "
+                                     f"expected ${expected:.4f} but now ${live_price:.4f}",
+                        }
+            except Exception:
+                pass  # Price fetch failure — proceed anyway, executor has its own checks
+
         # Determine if parallel execution is appropriate:
         # Cross-platform arb legs should execute simultaneously to minimize slippage
         use_parallel = pkg.get("_parallel_execution", False)
