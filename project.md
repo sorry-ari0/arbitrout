@@ -1,7 +1,7 @@
 # Project: Arbitrout (Prediction Market Arbitrage + Auto Trading)
 Status: ACTIVE
 Phase: BUILD
-Last Updated: 2026-03-24
+Last Updated: 2026-03-26
 Repo: https://github.com/sorry-ari0/arbitrout.git
 Branch: main
 
@@ -1077,7 +1077,20 @@ python -m uvicorn server:app --host 127.0.0.1 --port 8500 --log-level info
 - **Universal eval logger:** JSONL logging of all opportunities (entered + skipped), hourly backfill loop, missed opportunity analysis, calibration tracking
 - Spec: `docs/specs/2026-03-19-political-synthetic-analysis-design.md`
 - Plan: `docs/plans/2026-03-19-political-synthetic-analysis.md`
-- **Recent changes (2026-03-21) — Kyle's Lambda, Journal Fixes, Maker Orders:**
+- **Recent changes (2026-03-26) — Live Trading Safety Audit & Fixes:**
+  - **Full audit:** 26 critical issues + 28 warnings identified and addressed across 9 files.
+  - **Entry fill monitor:** New `buy_and_confirm()` + `_poll_until_filled()` in PolymarketExecutor. Polls CLOB for 120s after GTC buy, cancels on timeout. Prevents phantom positions. Position manager routes live executors through `buy_and_confirm` with `max_price = entry_price * 1.05` slippage guard.
+  - **Token ID fix:** `_resolve_token_id_http()` uses `outcome` field for YES/NO ordering (not array index). 24h TTL cache expiry added.
+  - **Network retry:** `_retry()` wrapper (3 attempts, exponential backoff) on `check_order_status` and `cancel_order`.
+  - **Kill switch completeness:** Stops ALL 5 trading subsystems (AutoTrader, ExitEngine, BtcSniper, MarketMaker, NewsScanner). FOK emergency exits (`use_limit=False`). Persistent state via `kill_switch.json` survives restarts. Pause blocks manual trades too (`_trading_paused` flag checked in POST /packages).
+  - **Auth enforcement:** Auto-generates cryptographic API key in live mode when none configured. WebSocket auth via `api_key` query param. Dynamic `_get_api_key()` reads os.environ each call.
+  - **Position management:** Partial fill fee tracking combines limit + FOK fees with weighted average price. Bracket fill resolution and trail adjustments wrapped in `async with self.pm._lock`. Partial exit on FOK failure keeps leg open (was incorrectly closing).
+  - **AutoTrader:** `paper_mode` flag logged at startup. `_hold_to_resolution=True` for portfolio_no strategy. Category concentration 75% for news/insider trades (50% default). Max exposure ratio raised to 50% of bankroll.
+  - **AI advisor:** Removed `stop_loss` from APPROVE line in both single and batched prompts (stop-loss is suppressed system-wide).
+  - **Trade journal:** Backup rotation (`shutil.copy`) before each save.
+  - **Kalshi executor:** `atexit` cleanup for temporary RSA PEM files.
+  - **Startup safety:** `_detect_orphaned_packages()` warns about legs with no tx_id or zero quantity. `_verify_pending_orders()` checks CLOB status of pending limit orders on startup (live mode only). `validate_live_config()` called on startup in live mode.
+- **Previous changes (2026-03-21) — Kyle's Lambda, Journal Fixes, Maker Orders:**
   - **Kyle's Lambda (adverse selection)** — New module `kyle_lambda.py`. Estimates price impact coefficient from Polymarket trade flow using OLS regression. Dual rolling windows (15min + 2hr), spike detection, directional multiplier (0.4–1.5x). Wired into auto-trader scoring after cross-platform disagreement boost. 29 tests.
   - **Journal-driven fixes** — Trade journal analysis (35 trades, 88.6% loss rate) drove: `AI_EXITS_ENABLED=False` (0% win rate on AI exits), stop loss widened to -35% minimum, trailing stop widened to 35% base (was 8%), max trade size $200→$100, max exposure $1400→$700.
   - **Maker orders everywhere** — Polymarket buy() and sell() now use GTC limit orders at spread edge (0% maker fee). Only stop_loss uses FOK. `ROUND_TRIP_FEE_PCT=0.0`, `MIN_SPREAD_PCT` lowered 12%→8%. Fee tables updated across arbitrage_engine, auto_trader, political models.
@@ -1166,6 +1179,34 @@ python -m uvicorn server:app --host 127.0.0.1 --port 8500 --log-level info
   - Split paper executor fee model: buy=maker, sell=taker
   - Alert deduplication, exit_value fix, dashboard P&L fix
   - All 48 tests passing
+
+### Pure Prediction Entry Improvement — Research Notes (2026-03-26)
+
+**Context:** 17 closed pure_prediction trades show 4W/12L/1F, -$21.89. However 15/17 exits were tainted (manual bulk close or broken AI triggers now fixed). The 2 clean resolved trades both won. All 10 open positions are currently profitable (+$10.99 unrealized, +7.0%). No changes implemented yet — waiting for current positions to resolve for clean data.
+
+**System bottleneck (as of 2026-03-26):** 10 open positions = MAX_CONCURRENT, triggering `insider_news_only_mode` which has blocked 1,771 opportunities. 4 positions expire within 1-4 days and should free slots soon.
+
+**Proposed filters — pros/cons from research + journal backtesting:**
+
+| Filter | Pros | Cons | Evidence | Verdict |
+|--------|------|------|----------|---------|
+| **Volume floor ($50K min)** | Markets <$100K are coin-flip accuracy (295K datapoint study). Filters noise without rejecting any current winners. | May block legitimate thin markets with real edge. **Does NOT apply to arb strategies** — coin-flip accuracy is fine when betting both sides. Only relevant for pure_prediction directional bets. Volume now logged on all decision_log skips (2026-03-26) for future analysis. | Academic: Polymarket accuracy study. Now collecting volume data to validate. | **Best candidate for pure_prediction only** — strong theoretical basis, arb strategies exempt |
+| **Cap entry at 0.85** | Research: >90% favorites underperform implied odds (Le 2026 calibration). Max profit only 5-15%. | **All 6 trades at 0.85+ are currently winning** (+$2.20). Would have rejected our only 2 clean resolved wins. | Journal: directly contradicted. Our high-entry trades won. | **Do not implement** — our data says the opposite of the research |
+| **Sweet spot 0.60-0.85** | Enough conviction + upside. Favorite-longshot bias gives real edge in this range. | Would reject 11/25 trades. 15 of the rejected had tainted exits so we can't tell if entries were actually bad. | Untestable — exit bugs corrupt the signal. | **Wait for clean data** |
+| **Min 15% profit potential** | Ensures risk/reward is reasonable. | Same as 0.85 cap — rejects our winners. | Same backtest result. | **Do not implement** |
+| **Domain multipliers** (politics 1.5x, sports 0.5x, entertainment 0.3x) | Research: political markets persistently underconfident, sports most efficient. | No category field in journal to backtest. Would need to add category tagging to decision log first. | Academic: Le 2026 domain decomposition. Cannot validate. | **Needs infrastructure first** — add category to decision log, then evaluate |
+| **Insider signal as scoring multiplier** | Top 0.51% of wallets extract all profit (on-chain studies). We already have insider_tracker data. | Currently used as post-filter only. Promotion to scoring multiplier needs careful tuning to avoid false signals from market makers. | On-chain copy trading analysis. Theoretical but aligns with our existing infrastructure. | **Good candidate** — already have the data, just needs wiring |
+| **Reduce Kelly to 1/8 for pure predictions** | Less capital at risk per trade. Current 1/4-1/5 Kelly with only 2% assumed edge is aggressive. | Smaller positions = smaller wins. At $10/trade already very conservative. | Kelly criterion paper (arxiv 2412.14144). | **Not needed now** — position size already $10-$12 |
+| **Min spread 15% for pure predictions** | Higher bar for directional bets vs arb. 8% MIN_SPREAD fine for arb but loose for directional. | Would reject mid-range opportunities that might be valid. Low_spread already blocks everything under ~7%. | On-chain profit analysis. | **Maybe** — but 8% is already filtering 1,804 opportunities as low_spread |
+
+**Recommended sequence:**
+1. Wait for 4 near-expiry positions to resolve (1-4 days). This gives clean exit data.
+2. Add volume floor ($50K) — zero downside risk, strong research backing.
+3. Add category tagging to decision log for future domain analysis.
+4. Wire insider signal strength into scoring formula (not just post-filter).
+5. Re-evaluate after 20+ clean resolved trades.
+
+**Key insight:** The biggest improvement already happened — fixing exits (blocking stop_loss, trailing_stop, time_decay, negative_drift). The entry filter research is theoretically sound but our 2-trade clean sample can't validate it. More data needed before changing what isn't provably broken.
 
 ## Live Trading Requirements
 To switch from paper to live trading:

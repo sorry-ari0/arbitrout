@@ -188,7 +188,7 @@ The #1 cause of losses is PREMATURE EXITS. Your default should be REJECT.
 
 GUIDELINES:
 - DEFAULT ACTION IS REJECT. Prediction markets resolve to $0 or $1 — patience wins, panic selling loses. Only approve exits when there is overwhelming evidence the position is wrong.
-- stop_loss, target_hit: APPROVE. These are mechanical — the threshold was set for a reason.
+- target_hit: APPROVE. These are mechanical — the threshold was set for a reason.
 - trailing_stop: REJECT unless drawdown exceeds 25% from peak AND the position has been open more than 24 hours. Small drawdowns are normal in prediction markets — a YES at $0.35 routinely swings 20%.
 - time_decay: REJECT in almost all cases. Prediction markets move most in the final hours before resolution — exiting early forfeits the entire thesis. APPROVE only if P&L is deeply negative (< -20%) AND the position has less than 12 hours left.
 - negative_drift: REJECT unless loss exceeds 15% sustained over many ticks. A -5% or -8% dip is normal volatility, not a reason to exit. Markets mean-revert.
@@ -420,7 +420,7 @@ CRITICAL — PERFORMANCE DATA: Every automated exit lost money (17 exits, 0 wins
 
 GUIDELINES:
 - DEFAULT IS REJECT. Prediction markets resolve to $0 or $1 — patience wins, panic selling loses.
-- stop_loss, target_hit: APPROVE. Mechanical triggers.
+- target_hit: APPROVE. Mechanical triggers.
 - trailing_stop: REJECT unless drawdown >25% from peak AND position open >24 hours.
 - time_decay: REJECT almost always. APPROVE only if P&L < -20% AND <12 hours left.
 - negative_drift: REJECT unless loss >15% sustained over many ticks.

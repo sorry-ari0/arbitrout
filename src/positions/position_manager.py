@@ -76,9 +76,10 @@ def create_exit_rule(rule_type: str, params: dict) -> dict:
 class PositionManager:
     """Manages derivative packages — CRUD, persistence, execution, rollback."""
 
-    def __init__(self, data_dir: Path, executors: dict, trade_journal=None, bracket_manager=None):
+    def __init__(self, data_dir: Path, executors: dict, trade_journal=None, bracket_manager=None, mode: str = "paper"):
         self.data_dir = Path(data_dir)
         self.executors = executors  # platform_name -> executor instance
+        self.mode = mode  # "paper" or "live" — separates position files
         self.packages: dict[str, dict] = {}
         self.alerts: list[dict] = []  # pending escalation alerts
         self.trade_journal = trade_journal
@@ -86,13 +87,20 @@ class PositionManager:
         self._bracket_manager = bracket_manager
         self._load()
 
+    @property
+    def _positions_filename(self) -> str:
+        """Return mode-specific positions filename."""
+        return f"positions_{self.mode}.json"
+
     def _load(self):
-        """Load packages from positions.json with backup recovery."""
-        path = self.data_dir / "positions.json"
-        backup = self.data_dir / "positions.json.backup"
+        """Load packages from positions_{mode}.json with backup recovery.
+        Falls back to legacy positions.json for migration."""
+        path = self.data_dir / self._positions_filename
+        backup = self.data_dir / f"{self._positions_filename}.backup"
+        legacy = self.data_dir / "positions.json"
         self._load_failed = False
 
-        for source in [path, backup]:
+        for source in [path, backup, legacy]:
             if not source.exists():
                 continue
             try:
@@ -100,7 +108,10 @@ class PositionManager:
                 if isinstance(data, dict) and "packages" in data:
                     self.packages = {p["id"]: p for p in data["packages"]}
                     self.alerts = data.get("alerts", [])
-                    if source == backup:
+                    if source == legacy:
+                        logger.info("Migrated legacy positions.json → %s", self._positions_filename)
+                        self.save()  # Save to mode-specific file
+                    elif source == backup:
                         logger.warning("Loaded positions from BACKUP (primary was corrupt)")
                     return
             except (json.JSONDecodeError, OSError, KeyError) as e:
@@ -112,14 +123,14 @@ class PositionManager:
             logger.error("All position sources corrupt — save() blocked until manual fix")
 
     def save(self):
-        """Atomic save to positions.json with backup rotation."""
+        """Atomic save to positions_{mode}.json with backup rotation."""
         if getattr(self, "_load_failed", False):
             logger.error("Refusing to save — load failed, would overwrite corrupt data")
             return
 
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        path = self.data_dir / "positions.json"
-        backup = self.data_dir / "positions.json.backup"
+        path = self.data_dir / self._positions_filename
+        backup = self.data_dir / f"{self._positions_filename}.backup"
         tmp = str(path) + ".tmp"
         data = {
             "packages": list(self.packages.values()),
@@ -199,7 +210,7 @@ class PositionManager:
             leg["current_value"] = round(leg_val, 4)
             current_value += leg_val
 
-            # Sell fees: 0% maker (GTC limit orders used for all exits)
+            # Sell fees: 0% maker (all exits use GTC limit orders)
             estimated_sell_fees += 0
 
             # Per-leg ITM/OTM
@@ -323,7 +334,15 @@ class PositionManager:
                 return leg, None, f"No executor for platform: {platform}"
 
             use_limit = pkg.get("_use_limit_orders", False)
-            if use_limit and hasattr(executor, 'buy_limit'):
+            max_price = round(leg["entry_price"] * 1.05, 4) if leg.get("entry_price", 0) > 0 else 0
+
+            if hasattr(executor, 'buy_and_confirm'):
+                result = await executor.buy_and_confirm(
+                    asset_id=leg["asset_id"],
+                    amount_usd=leg["cost"],
+                    max_price=max_price,
+                )
+            elif use_limit and hasattr(executor, 'buy_limit'):
                 result = await executor.buy_limit(
                     asset_id=leg["asset_id"],
                     amount_usd=leg["cost"],
@@ -397,9 +416,18 @@ class PositionManager:
                 await self._rollback(pkg, executed)
                 return {"success": False, "error": f"No executor for platform: {platform}"}
 
-            # Route to limit orders when flag is set (0% maker fees)
+            # Route to fill-confirmed buy for live executors, regular buy for paper
             use_limit = pkg.get("_use_limit_orders", False)
-            if use_limit and hasattr(executor, 'buy_limit'):
+            max_price = round(leg["entry_price"] * 1.05, 4) if leg.get("entry_price", 0) > 0 else 0
+
+            if hasattr(executor, 'buy_and_confirm'):
+                # Live executor: buy + poll until filled (no phantom positions)
+                result = await executor.buy_and_confirm(
+                    asset_id=leg["asset_id"],
+                    amount_usd=leg["cost"],
+                    max_price=max_price,
+                )
+            elif use_limit and hasattr(executor, 'buy_limit'):
                 result = await executor.buy_limit(
                     asset_id=leg["asset_id"],
                     amount_usd=leg["cost"],
@@ -594,15 +622,44 @@ class PositionManager:
                 await executor.cancel_order(order_id)
                 filled_qty = float(status.get("size_matched", 0))
                 remaining = pending["quantity"] - filled_qty
-                if filled_qty > 0:
-                    fill_price = status.get("price", pending["limit_price"])
-                    fill_fee = status.get("fee", 0.0)
-                    leg["quantity"] = remaining
+                limit_fill_fee = status.get("fee", 0.0)
+                limit_fill_price = status.get("price", pending["limit_price"])
+
                 if remaining > 0.001:
                     result = await executor.sell(pending["asset_id"], remaining)
                     if result.success:
-                        self._finalize_exit(pkg, leg, pending["trigger"], result.filled_price,
-                                            pending["quantity"], result.fees, "limit_partial_fok")
+                        # Combine fees from limit fill + FOK fill
+                        total_fees = limit_fill_fee + result.fees
+                        total_qty = pending["quantity"]
+                        # Weighted average price across both fills
+                        if filled_qty > 0:
+                            avg_price = (limit_fill_price * filled_qty +
+                                         result.filled_price * remaining) / total_qty
+                        else:
+                            avg_price = result.filled_price
+                        self._finalize_exit(pkg, leg, pending["trigger"], avg_price,
+                                            total_qty, total_fees, "limit_partial_fok")
+                    else:
+                        # FOK failed — record partial limit fill if any, keep leg open for retry
+                        if filled_qty > 0:
+                            leg["quantity"] = remaining  # Reduce to what we still hold
+                            leg["sell_fees"] = leg.get("sell_fees", 0) + limit_fill_fee
+                            pkg["execution_log"].append({
+                                "action": "partial_sell", "leg_id": leg["leg_id"],
+                                "platform": leg["platform"], "tx_id": None,
+                                "price": limit_fill_price, "fees": limit_fill_fee,
+                                "trigger": pending["trigger"],
+                                "exit_order_type": "limit_partial_only",
+                                "quantity_sold": filled_qty,
+                                "timestamp": time.time(),
+                            })
+                            logger.warning("Partial exit: sold %.4f of %.4f at %.4f, %.4f remaining (FOK failed: %s)",
+                                           filled_qty, pending["quantity"], limit_fill_price,
+                                           remaining, result.error if result else "unknown")
+                elif filled_qty > 0:
+                    # Fully filled by limit (remaining < 0.001 dust)
+                    self._finalize_exit(pkg, leg, pending["trigger"], limit_fill_price,
+                                        filled_qty, limit_fill_fee, "limit_filled")
                 del pkg["_pending_limit_orders"][leg_id]
                 if not pkg["_pending_limit_orders"]:
                     del pkg["_pending_limit_orders"]

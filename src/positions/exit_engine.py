@@ -20,7 +20,9 @@ AI_EXITS_ENABLED = False
 
 # Trigger names that are blocked when AI_EXITS_ENABLED is False.
 # These are the triggers the AI advisor was approving with 0% success.
-_AI_EXIT_TRIGGERS = {"time_decay", "negative_drift", "trailing_stop"}
+# stop_loss added: journal shows stop-loss exits destroy EV on prediction markets
+# (positions resolve at $0/$1 — a temporary drawdown is not a reason to exit).
+_AI_EXIT_TRIGGERS = {"time_decay", "negative_drift", "trailing_stop", "stop_loss"}
 
 # ── Trigger IDs ─────────────────────────────────────────────────────────────
 # Category: Profit Taking (1-3)
@@ -452,61 +454,70 @@ class ExitEngine:
                                    pkg["id"], leg_id, result.get("error", "?"))
 
     async def _resolve_bracket_fills(self):
-        """Check all bracket orders for fills and finalize exits."""
+        """Check all bracket orders for fills and finalize exits.
+
+        Acquires the position lock before modifying state to prevent
+        concurrent corruption with exit_leg operations.
+        """
         if not self._bracket_manager:
             return
         for pkg in self.pm.list_packages("open"):
             if not pkg.get("_brackets"):
                 continue
             fills = await self._bracket_manager.check_brackets(pkg)
-            for fill in fills:
-                leg = next((l for l in pkg["legs"] if l["leg_id"] == fill["leg_id"]), None)
-                if not leg or leg["status"] != "open":
-                    continue
-                # Finalize the exit
-                trigger = f"bracket_{fill['type']}"
-                leg["status"] = "closed"
-                leg["exit_price"] = fill["price"]
-                leg["exit_quantity"] = fill["quantity"]
-                leg["sell_fees"] = fill.get("fee", 0.0)
-                leg["exit_trigger"] = trigger
-                leg["exit_order_type"] = "bracket_maker"
-                leg["exit_value"] = round(fill["quantity"] * fill["price"], 4)
-                leg["current_value"] = round(fill["quantity"] * fill["price"] - fill.get("fee", 0.0), 4)
-                pkg["execution_log"].append({
-                    "action": "sell", "leg_id": fill["leg_id"],
-                    "platform": leg["platform"], "tx_id": fill["order_id"],
-                    "price": fill["price"], "fees": fill.get("fee", 0.0),
-                    "trigger": trigger, "exit_order_type": "bracket_maker",
-                    "timestamp": time.time(),
-                })
-                logger.info("Bracket %s filled for %s/%s @ %.4f (0%% maker fee)",
-                            fill["type"], pkg["id"], fill["leg_id"], fill["price"])
-                if self.dlog:
-                    self.dlog.log_safety_override(pkg["id"], trigger,
-                        f"Bracket {fill['type']} order filled at {fill['price']:.4f}")
+            if not fills:
+                continue
+            # Acquire lock before modifying package/leg state
+            async with self.pm._lock:
+                for fill in fills:
+                    leg = next((l for l in pkg["legs"] if l["leg_id"] == fill["leg_id"]), None)
+                    if not leg or leg["status"] != "open":
+                        continue
+                    # Finalize the exit
+                    trigger = f"bracket_{fill['type']}"
+                    leg["status"] = "closed"
+                    leg["exit_price"] = fill["price"]
+                    leg["exit_quantity"] = fill["quantity"]
+                    leg["sell_fees"] = fill.get("fee", 0.0)
+                    leg["exit_trigger"] = trigger
+                    leg["exit_order_type"] = "bracket_maker"
+                    leg["exit_value"] = round(fill["quantity"] * fill["price"], 4)
+                    leg["current_value"] = round(fill["quantity"] * fill["price"] - fill.get("fee", 0.0), 4)
+                    pkg["execution_log"].append({
+                        "action": "sell", "leg_id": fill["leg_id"],
+                        "platform": leg["platform"], "tx_id": fill["order_id"],
+                        "price": fill["price"], "fees": fill.get("fee", 0.0),
+                        "trigger": trigger, "exit_order_type": "bracket_maker",
+                        "timestamp": time.time(),
+                    })
+                    logger.info("Bracket %s filled for %s/%s @ %.4f (0%% maker fee)",
+                                fill["type"], pkg["id"], fill["leg_id"], fill["price"])
+                    if self.dlog:
+                        self.dlog.log_safety_override(pkg["id"], trigger,
+                            f"Bracket {fill['type']} order filled at {fill['price']:.4f}")
 
-            # Check if package is fully closed
-            if all(l["status"] in ("closed", "advisory") for l in pkg["legs"]):
-                pkg["status"] = "closed"
-                pkg["current_value"] = round(sum(
-                    l.get("quantity", 0) * l.get("exit_price", l.get("current_price", l.get("entry_price", 0)))
-                    for l in pkg["legs"] if l.get("status") != "advisory"
-                ), 4)
-                if not pkg.get("_journal_recorded") and self.pm.trade_journal:
-                    try:
-                        self.pm.trade_journal.record_close(pkg, exit_trigger=trigger)
-                        pkg["_journal_recorded"] = True
-                    except Exception as e:
-                        logger.warning("Failed to record bracket exit: %s", e)
-                pkg["updated_at"] = time.time()
-            self.pm.save()
+                # Check if package is fully closed
+                if all(l["status"] in ("closed", "advisory") for l in pkg["legs"]):
+                    pkg["status"] = "closed"
+                    pkg["current_value"] = round(sum(
+                        l.get("quantity", 0) * l.get("exit_price", l.get("current_price", l.get("entry_price", 0)))
+                        for l in pkg["legs"] if l.get("status") != "advisory"
+                    ), 4)
+                    if not pkg.get("_journal_recorded") and self.pm.trade_journal:
+                        try:
+                            self.pm.trade_journal.record_close(pkg, exit_trigger=trigger)
+                            pkg["_journal_recorded"] = True
+                        except Exception as e:
+                            logger.warning("Failed to record bracket exit: %s", e)
+                    pkg["updated_at"] = time.time()
+                self.pm.save()
 
     async def _adjust_bracket_trails(self):
         """Update leg-level peaks and adjust bracket stop levels (rolling trail).
 
         Stop adjustment is sync (no CLOB orders) — just updates the tracked level.
         Uses >2% of current stop as threshold to avoid noisy adjustments.
+        Acquires position lock to prevent concurrent state corruption.
         """
         if not self._bracket_manager:
             return
@@ -514,19 +525,18 @@ class ExitEngine:
             brackets = pkg.get("_brackets", {})
             if not brackets:
                 continue
-            for leg_id in list(brackets.keys()):
-                # Update leg-level peak from current price
-                leg = next((l for l in pkg["legs"] if l["leg_id"] == leg_id), None)
-                if leg:
-                    self._bracket_manager.update_peak(pkg, leg_id, leg.get("current_price", 0))
+            async with self.pm._lock:
+                for leg_id in list(brackets.keys()):
+                    leg = next((l for l in pkg["legs"] if l["leg_id"] == leg_id), None)
+                    if leg:
+                        self._bracket_manager.update_peak(pkg, leg_id, leg.get("current_price", 0))
 
-                new_stop = self._bracket_manager._compute_trail_price(pkg, leg_id)
-                if new_stop:
-                    current_stop = brackets[leg_id].get("stop_price", 0)
-                    # Only adjust if meaningful move (>2% of current stop to reduce churn)
-                    threshold = max(current_stop * 0.02, 0.005)
-                    if new_stop > current_stop + threshold:
-                        self._bracket_manager.adjust_stop(pkg, leg_id, new_stop)
+                    new_stop = self._bracket_manager._compute_trail_price(pkg, leg_id)
+                    if new_stop:
+                        current_stop = brackets[leg_id].get("stop_price", 0)
+                        threshold = max(current_stop * 0.02, 0.005)
+                        if new_stop > current_stop + threshold:
+                            self._bracket_manager.adjust_stop(pkg, leg_id, new_stop)
 
     async def _tick(self):
         """Process one scan cycle — evaluate all open packages.
