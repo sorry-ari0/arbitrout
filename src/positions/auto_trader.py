@@ -20,7 +20,7 @@ except ImportError:
 logger = logging.getLogger("positions.auto_trader")
 
 # Position limits — derived from bankroll at runtime
-MAX_CONCURRENT = 10          # Max 10 open packages (raised from 7 — was blocking all new trades)
+MAX_CONCURRENT = 20          # Max 20 open packages (raised from 10 — was triggering insider_only_mode too early)
 INSIDER_EXTRA_SLOTS = 3      # Extra slots beyond MAX_CONCURRENT for insider-signaled trades
 NEWS_EXTRA_SLOTS = 2         # Extra slots beyond MAX_CONCURRENT for news-driven trades
 PORTFOLIO_EXPOSURE_CAP = 0.40  # Kelly portfolio rule: never exceed 40% of total bankroll
@@ -28,7 +28,7 @@ PORTFOLIO_EXPOSURE_CAP = 0.40  # Kelly portfolio rule: never exceed 40% of total
 # Bankroll -> dollar limit ratios
 _RATIO_MAX_TRADE = 0.025       # $50 / $2000
 _RATIO_MIN_TRADE = 0.005       # $10 / $2000, with $1.00 floor for Polymarket practicality
-_RATIO_MAX_EXPOSURE = 0.175    # $350 / $2000
+_RATIO_MAX_EXPOSURE = 0.50     # 50% of bankroll ($10 at $20, $1000 at $2000)
 _MIN_TRADE_FLOOR = 1.0         # Polymarket practical minimum
 SCAN_INTERVAL = 300          # 5 minutes between self-initiated scans (safety net)
 MIN_SPREAD_PCT = 8.0         # Minimum 8% spread (reduced: 0% maker fees both sides)
@@ -130,7 +130,8 @@ class AutoTrader:
 
     def __init__(self, position_manager, scanner=None, insider_tracker=None,
                  interval: float = SCAN_INTERVAL, decision_logger=None,
-                 probability_model=None, initial_bankroll: float = 2000.0):
+                 probability_model=None, initial_bankroll: float = 2000.0,
+                 paper_mode: bool = True):
         self.pm = position_manager
         self.scanner = scanner
         self.insider_tracker = insider_tracker
@@ -138,6 +139,7 @@ class AutoTrader:
         self.dlog = decision_logger
         self.probability_model = probability_model
         self._initial_bankroll = initial_bankroll
+        self._paper_mode = paper_mode
         self._task = None
         self._running = False
         self._trades_opened = 0
@@ -204,10 +206,12 @@ class AutoTrader:
         return exposure
 
     def _check_concentration(self, title: str, trade_size: float,
-                             total_exposure: float, category_exposure: dict[str, float]) -> bool:
+                             total_exposure: float, category_exposure: dict[str, float],
+                             max_concentration: float = MAX_CATEGORY_CONCENTRATION) -> bool:
         """Check if adding this trade would exceed category concentration limit.
 
         Returns True if trade is allowed, False if it would over-concentrate.
+        max_concentration: override limit (default 50%, use 75% for news/insider).
         """
         if total_exposure + trade_size <= 0:
             return True
@@ -219,7 +223,7 @@ class AutoTrader:
         new_cat_exposure = category_exposure.get(cat, 0) + trade_size
         new_total = total_exposure + trade_size
         concentration = new_cat_exposure / new_total
-        return concentration <= MAX_CATEGORY_CONCENTRATION
+        return concentration <= max_concentration
 
     @staticmethod
     def _signal_decay(signal_created_at: float) -> float:
@@ -319,7 +323,8 @@ class AutoTrader:
             return
         self._running = True
         self._task = asyncio.ensure_future(self._loop())
-        logger.info("Auto trader started (interval=%.0fs, max_exposure=$%.0f)", self.interval, self._max_total_exposure)
+        mode = "PAPER" if self._paper_mode else "LIVE"
+        logger.info("Auto trader started (mode=%s, interval=%.0fs, max_exposure=$%.0f)", mode, self.interval, self._max_total_exposure)
 
     def stop(self):
         self._running = False
@@ -564,6 +569,8 @@ class AutoTrader:
         opportunities.sort(key=lambda o: o.get("_score", 0), reverse=True)
         for opp in opportunities:
             opp_title = (opp.get("title") or opp.get("canonical_title") or "?")[:100]
+            opp_volume = opp.get("volume", 0)  # Market volume — logged on all skips for analysis
+            opp_strategy = opp.get("opportunity_type", "")
             if trades_this_cycle >= remaining_slots:
                 break
             if directional_budget < self._min_trade_size and arb_budget < self._min_trade_size:
@@ -575,14 +582,16 @@ class AutoTrader:
             if buy_yes_price < 0.01 and buy_no_price < 0.01:
                 self._trades_skipped += 1
                 if self.dlog:
-                    self.dlog.log_opportunity_skip(opp_title, "zero_price")
+                    self.dlog.log_opportunity_skip(opp_title, "zero_price",
+                                                   volume=opp_volume, strategy=opp_strategy)
                 continue
 
             # Filter: require minimum spread (use net profit after fees when available)
             spread_pct = opp.get("net_profit_pct") or opp.get("profit_pct", 0)
             if spread_pct < MIN_SPREAD_PCT:
                 if self.dlog:
-                    self.dlog.log_opportunity_skip(opp_title, "low_spread", spread_pct=spread_pct)
+                    self.dlog.log_opportunity_skip(opp_title, "low_spread", spread_pct=spread_pct,
+                                                   volume=opp_volume, strategy=opp_strategy)
                 continue
 
             # Skip markets we already have positions on (check BOTH sides, case-insensitive)
@@ -593,7 +602,8 @@ class AutoTrader:
             if not has_signal and ((yes_mid and yes_mid in open_market_ids) or (no_mid and no_mid in open_market_ids)):
                 self._trades_skipped += 1
                 if self.dlog:
-                    self.dlog.log_opportunity_skip(opp_title, "already_open")
+                    self.dlog.log_opportunity_skip(opp_title, "already_open",
+                                                   volume=opp_volume, strategy=opp_strategy)
                 continue
 
             # Prioritize crypto-related and near-expiry
@@ -639,7 +649,8 @@ class AutoTrader:
                 self._trades_skipped += 1
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "short_duration",
-                                                   hours=round(hours_to_expiry, 1))
+                                                   hours=round(hours_to_expiry, 1),
+                                                   volume=opp_volume, strategy=opp_strategy)
                 continue
 
             # Skip markets expiring within 2 days
@@ -647,7 +658,8 @@ class AutoTrader:
             if days_to_expiry <= 2 and not guaranteed_profit:
                 self._trades_skipped += 1
                 if self.dlog:
-                    self.dlog.log_opportunity_skip(opp_title, "too_near_expiry", days=days_to_expiry)
+                    self.dlog.log_opportunity_skip(opp_title, "too_near_expiry", days=days_to_expiry,
+                                                   volume=opp_volume, strategy=opp_strategy)
                 continue
 
             # Score: crypto near-expiry > crypto > near-expiry > other
@@ -662,7 +674,8 @@ class AutoTrader:
                 # Exact-score bets: -$24 from 3 trades, 0% win rate. Skip entirely.
                 self._trades_skipped += 1
                 if self.dlog:
-                    self.dlog.log_opportunity_skip(opp_title, "exact_score_market")
+                    self.dlog.log_opportunity_skip(opp_title, "exact_score_market",
+                                                   volume=opp_volume, strategy=opp_strategy)
                 continue
             if is_ncaa:
                 # NCAA: -$68 from 5 trades, 0% win rate (all trailing stop losses at -13.5%)
@@ -674,7 +687,8 @@ class AutoTrader:
             if is_commodities:
                 self._trades_skipped += 1
                 if self.dlog:
-                    self.dlog.log_opportunity_skip(opp_title, "commodities_market")
+                    self.dlog.log_opportunity_skip(opp_title, "commodities_market",
+                                                   volume=opp_volume, strategy=opp_strategy)
                 continue
 
             # Favorite-longshot bias (research-validated):
@@ -819,7 +833,8 @@ class AutoTrader:
                 insider_mode_skipped_filter_count += 1
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "insider_news_only_mode",
-                                                   insider_mult=insider_mult)
+                                                   insider_mult=insider_mult,
+                                                   volume=opp_volume, strategy=opp_strategy)
                 continue
             if insider_only_mode or news_only_mode:
                 insider_mode_passed_filter_count += 1
@@ -829,7 +844,8 @@ class AutoTrader:
                 self._trades_skipped += 1
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "low_score", score=round(score, 1),
-                                                   spread_pct=spread_pct, days_to_expiry=days_to_expiry)
+                                                   spread_pct=spread_pct, days_to_expiry=days_to_expiry,
+                                                   volume=opp_volume, strategy=opp_strategy)
                 continue
 
             # Portfolio concentration check: skip if one category exceeds limit.
@@ -840,14 +856,19 @@ class AutoTrader:
                 self._trades_skipped += 1
                 continue
 
+            # News/insider signal-driven trades get a higher concentration limit (75%)
+            # since the signal provides additional conviction beyond category diversification.
+            is_signal_driven = bool(opp.get("_news_driven") or opp.get("insider_signal"))
+            _max_conc = 0.75 if is_signal_driven else MAX_CATEGORY_CONCENTRATION
             if not guaranteed_profit and not self._check_concentration(
                     opp_title, self._min_trade_size,
-                    total_exposure, category_exposure):
+                    total_exposure, category_exposure, max_concentration=_max_conc):
                 self._trades_skipped += 1
                 cat = self._detect_category(opp_title)
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "concentration_limit",
-                                                   category=cat)
+                                                   category=cat,
+                                                   volume=opp_volume, strategy=opp_strategy)
                 continue
 
             # Size the trade — Kelly for arb/synthetic, pure_prediction uses its own Kelly below
@@ -875,7 +896,8 @@ class AutoTrader:
             if not yes_market_id and not no_market_id:
                 self._trades_skipped += 1
                 if self.dlog:
-                    self.dlog.log_opportunity_skip(opp_title, "no_market_id")
+                    self.dlog.log_opportunity_skip(opp_title, "no_market_id",
+                                                   volume=opp_volume, strategy=opp_strategy)
                 continue
 
             # Skip legs at price ceiling (>= 0.95) — no upside
@@ -923,7 +945,8 @@ class AutoTrader:
             if yes_market_id in recently_closed_ids or no_market_id in recently_closed_ids:
                 self._trades_skipped += 1
                 if self.dlog:
-                    self.dlog.log_opportunity_skip(opp_title, "cooldown_after_exit")
+                    self.dlog.log_opportunity_skip(opp_title, "cooldown_after_exit",
+                                                   volume=opp_volume, strategy=opp_strategy)
                 continue
 
             # Title-based duplicate check: don't re-enter the same event by title
@@ -931,14 +954,16 @@ class AutoTrader:
             if norm_title in recently_closed_titles:
                 self._trades_skipped += 1
                 if self.dlog:
-                    self.dlog.log_opportunity_skip(opp_title, "cooldown_title_match")
+                    self.dlog.log_opportunity_skip(opp_title, "cooldown_title_match",
+                                                   volume=opp_volume, strategy=opp_strategy)
                 continue
 
             # Block markets with too many historical losses
             if market_loss_counts.get(norm_title, 0) >= MAX_LOSSES_PER_MARKET:
                 self._trades_skipped += 1
                 if self.dlog:
-                    self.dlog.log_opportunity_skip(opp_title, f"max_losses_reached ({market_loss_counts[norm_title]} losses)")
+                    self.dlog.log_opportunity_skip(opp_title, f"max_losses_reached ({market_loss_counts[norm_title]} losses)",
+                                                   volume=opp_volume, strategy=opp_strategy)
                 continue
 
             # Price-change requirement: after a loss, require 10% favorable move
@@ -954,7 +979,8 @@ class AutoTrader:
                         if self.dlog:
                             self.dlog.log_opportunity_skip(
                                 opp_title,
-                                f"insufficient_price_change ({price_change:.1%} < 10% since last loss exit)")
+                                f"insufficient_price_change ({price_change:.1%} < 10% since last loss exit)",
+                                volume=opp_volume, strategy=opp_strategy)
                         continue
 
             # Also check open positions by title — don't open duplicates of existing positions
@@ -968,7 +994,8 @@ class AutoTrader:
                 if norm_title in open_titles:
                     self._trades_skipped += 1
                     if self.dlog:
-                        self.dlog.log_opportunity_skip(opp_title, "duplicate_open_position")
+                        self.dlog.log_opportunity_skip(opp_title, "duplicate_open_position",
+                                                       volume=opp_volume, strategy=opp_strategy)
                     continue
 
             # Multi-outcome arbitrage: buy all outcomes when sum < $1.00
@@ -1011,9 +1038,7 @@ class AutoTrader:
                     ))
 
                 # Multi-outcome arb: guaranteed profit — hold to resolution
-                # Widened from -15% to -35%: trade journal showed tight stops
-                # cut arb positions before resolution (88.6% loss rate)
-                pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -35}))
+                # NO stop loss — journal shows stop-losses destroy EV on prediction markets.
                 pkg["_hold_to_resolution"] = True
 
                 if not pkg["legs"]:
@@ -1099,9 +1124,8 @@ class AutoTrader:
                         expiry=opp.get("expiry", "2026-12-31")[:10],
                     ))
 
-                # Near-guaranteed profit — only exit on safety or if overround collapses
-                # Widened from -10% to -35%: tight stops cut winners early
-                pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -35}))
+                # Near-guaranteed profit — hold to resolution
+                # NO stop loss — journal shows stop-losses destroy EV.
                 pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 15}))
 
                 if not pkg["legs"]:
@@ -1116,6 +1140,7 @@ class AutoTrader:
 
                 pkg["_use_limit_orders"] = True
                 pkg["_use_brackets"] = True  # GTC target sell at 0% maker fee
+                pkg["_hold_to_resolution"] = True  # Near-guaranteed profit — hold to resolution
                 pkg_name = pkg.get("name", opp_title)
                 try:
                     result = await self.pm.execute_package(pkg)
@@ -1179,10 +1204,9 @@ class AutoTrader:
                     expiry=opp.get("expiry", opp.get("target_date", ""))[:10],
                 ))
 
-                # Daily weather markets resolve quickly — widened stops
-                # Widened from -25% to -35%: trade journal analysis
+                # Daily weather markets resolve quickly — hold to resolution
+                # NO stop loss — journal shows stop-losses destroy EV.
                 pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 30}))
-                pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -35}))
 
                 pkg["_use_limit_orders"] = True
                 pkg["_use_brackets"] = True  # GTC target sell at 0% maker fee
@@ -1250,8 +1274,7 @@ class AutoTrader:
                     ))
 
                 pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 50}))
-                pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -40}))
-                pkg["exit_rules"].append(create_exit_rule("trailing_stop", {"current": 35, "bound_min": 15, "bound_max": 50}))
+                # NO stop loss or trailing stop — journal shows both destroy EV.
                 pkg["_use_brackets"] = True  # GTC target sell at 0% maker fee
                 pkg["_political_strategy"] = opp.get("strategy", {})
 
@@ -1331,8 +1354,7 @@ class AutoTrader:
                     ))
 
                 pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 50}))
-                pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -40}))
-                pkg["exit_rules"].append(create_exit_rule("trailing_stop", {"current": 35, "bound_min": 15, "bound_max": 50}))
+                # NO stop loss or trailing stop — journal shows both destroy EV.
                 pkg["_use_brackets"] = True
 
                 if not pkg["legs"]:
@@ -1385,7 +1407,30 @@ class AutoTrader:
 
             if is_synthetic:
                 # Synthetics work on same or different platforms — different strike prices
-                # create the edge, not platform differences
+                # create the edge, not platform differences.
+                # Gate: require high EV confidence before entering synthetics.
+                # Journal: synthetic_derivative with low-confidence legs lost -$33.22.
+                # The arb engine already rejects loss_prob > 0.40, but that's too loose —
+                # prediction markets have noisy pricing, so require tighter thresholds.
+                synth_info = opp.get("synthetic_info", {})
+                synth_loss_prob = synth_info.get("loss_probability", 0.5)
+                synth_ev = opp.get("profit_pct", 0)  # fee-adjusted effective EV %
+                if synth_loss_prob > 0.25:
+                    self._trades_skipped += 1
+                    if self.dlog:
+                        self.dlog.log_opportunity_skip(opp_title, "synthetic_high_loss_prob",
+                                                       loss_prob=round(synth_loss_prob, 3),
+                                                       ev_pct=round(synth_ev, 2),
+                                                       volume=opp_volume, strategy=opp_strategy)
+                    continue
+                if synth_ev < 15.0:
+                    self._trades_skipped += 1
+                    if self.dlog:
+                        self.dlog.log_opportunity_skip(opp_title, "synthetic_low_ev",
+                                                       ev_pct=round(synth_ev, 2),
+                                                       loss_prob=round(synth_loss_prob, 3),
+                                                       volume=opp_volume, strategy=opp_strategy)
+                    continue
                 strategy = "synthetic_derivative"
             elif is_cross_platform:
                 strategy = "cross_platform_arb"
@@ -1427,7 +1472,8 @@ class AutoTrader:
                     if self.dlog:
                         self.dlog.log_opportunity_skip(opp_title, "zero_price_multi_leg",
                                                        yes_price=round(buy_yes_price, 4),
-                                                       no_price=round(buy_no_price, 4))
+                                                       no_price=round(buy_no_price, 4),
+                                                       volume=opp_volume, strategy=opp_strategy)
                     continue
 
                 # Need market IDs for both legs
@@ -1436,7 +1482,8 @@ class AutoTrader:
                     if self.dlog:
                         self.dlog.log_opportunity_skip(opp_title, "missing_market_id_multi_leg",
                                                        yes_id=yes_market_id[:12] if yes_market_id else "",
-                                                       no_id=no_market_id[:12] if no_market_id else "")
+                                                       no_id=no_market_id[:12] if no_market_id else "",
+                                                       volume=opp_volume, strategy=opp_strategy)
                     continue
 
                 # For synthetics, size by total cost efficiency
@@ -1514,13 +1561,15 @@ class AutoTrader:
                     self._trades_skipped += 1
                     if self.dlog:
                         self.dlog.log_opportunity_skip(opp_title, "extreme_otm",
-                                                       side=side, price=round(side_price, 4))
+                                                       side=side, price=round(side_price, 4),
+                                                       volume=opp_volume, strategy=opp_strategy)
                     continue
                 if side_price > 0.96:
                     self._trades_skipped += 1
                     if self.dlog:
                         self.dlog.log_opportunity_skip(opp_title, "extreme_itm",
-                                                       side=side, price=round(side_price, 4))
+                                                       side=side, price=round(side_price, 4),
+                                                       volume=opp_volume, strategy=opp_strategy)
                     continue
 
                 # Quarter Kelly position sizing (research-validated: retains 56% of
@@ -1552,7 +1601,8 @@ class AutoTrader:
                 # Bad regime: skip speculative directional bets entirely
                 if self._regime_penalty < 1.0:
                     if self.dlog:
-                        self.dlog.log_opportunity_skip(opp_title, "bad_regime")
+                        self.dlog.log_opportunity_skip(opp_title, "bad_regime",
+                                                       volume=opp_volume, strategy=opp_strategy)
                     continue
 
                 # Apply Kelly fraction to directional budget, capped at _max_trade_size
@@ -1579,22 +1629,18 @@ class AutoTrader:
             # Exit rules — strategy-dependent
             if strategy == "cross_platform_arb":
                 # Cross-platform arb: guaranteed profit at resolution — HOLD TO RESOLUTION
-                # Fee-aware stop: only exit if loss exceeds net spread + fees
                 # The spread is locked in at entry; exiting early forfeits the guarantee
-                net_pct = opp.get("net_profit_pct", spread_pct)
-                # Stop loss = -(net spread + 5% buffer) — only exit on genuine spread collapse
-                arb_stop = round(max(-60, -(net_pct + 5)), 1)
-                pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": arb_stop}))
+                # NO stop loss — journal shows stop-losses destroy EV on prediction markets.
+                # These positions resolve at $0 or $1; temporary drawdowns are noise.
                 # No trailing stop, no time decay — these resolve at $0 or $1
-                # Flag as hold-to-resolution so exit engine skips soft triggers
                 pkg["_hold_to_resolution"] = True
                 pkg["_min_hold_until"] = time.time() + 86400
             elif strategy == "synthetic_derivative":
                 # Synthetics: structural edge from different strike prices — HOLD TO RESOLUTION
                 # The payoff depends on where the underlying lands relative to strikes
-                # Wide stop only — cutting early destroys the structural edge
+                # NO stop loss — journal shows stop-losses destroy EV; synthetics need room.
+                # High-EV gate at entry (loss_prob <= 25%, EV >= 15%) is the protection.
                 pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 80}))
-                pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -50}))
                 # No trailing stop — synthetics need room to breathe
                 pkg["_hold_to_resolution"] = True
                 pkg["_min_hold_until"] = time.time() + 86400
@@ -1612,20 +1658,18 @@ class AutoTrader:
                     max_profit = round(((1.0 - avg_entry) / avg_entry) * 100, 1)
                     pkg["exit_rules"].append(create_exit_rule("target_profit",
                         {"target_pct": max(5, max_profit - 2)}))
-                    # Wide stop only for catastrophic thesis invalidation
-                    pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -60}))
+                    # NO stop loss — journal shows stop-losses destroy EV on prediction
+                    # markets. These resolve at $0 or $1; temporary drawdowns are noise.
                     # No trailing stop — these should resolve, not be scalped
                     pkg["_hold_to_resolution"] = True
                     pkg["_min_hold_until"] = time.time() + 86400
                 else:
-                    # Standard prediction — tuned from 39-trade journal analysis
+                    # Standard prediction — tuned from journal analysis
                     pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 50}))
-                    pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -40}))
-                    # Trailing stop only for favorites (entry >= 0.60).
-                    # Journal: 0/8 trailing stop wins — catches normal prediction market noise.
-                    # Non-favorites rely on bracket target + stop loss only.
-                    if avg_entry >= 0.60:
-                        pkg["exit_rules"].append(create_exit_rule("trailing_stop", {"current": 35, "bound_min": 15, "bound_max": 50}))
+                    # NO stop loss — journal shows stop-losses destroy EV.
+                    # Prediction markets resolve at $0 or $1; the target_profit exit
+                    # captures upside, and resolution handles the rest.
+                    # No trailing stop — 0/8 trailing stop wins in journal.
                     pkg["_min_hold_until"] = time.time() + 86400
 
             # Hold to resolution for short-expiry prediction markets.

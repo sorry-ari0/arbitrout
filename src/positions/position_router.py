@@ -2,6 +2,8 @@
 import asyncio
 import json
 import logging
+import time
+from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request, Security, WebSocket, WebSocketDisconnect
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
@@ -11,13 +13,21 @@ import os
 logger = logging.getLogger("positions.router")
 
 # Auth: reuse the same API key check as server.py
-_API_KEY = os.environ.get("LOBSTERMINAL_API_KEY", "dev-local-only")
+# NOTE: _API_KEY is read at import time. For live mode auto-generated keys,
+# server.py sets os.environ before import, or we re-read dynamically.
 _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
+
+def _get_api_key() -> str:
+    """Get current API key (supports runtime changes from auto-generation)."""
+    return os.environ.get("LOBSTERMINAL_API_KEY", "dev-local-only")
+
+
 async def _verify_api_key(api_key: str = Security(_api_key_header)):
-    if _API_KEY == "dev-local-only":
+    current_key = _get_api_key()
+    if current_key == "dev-local-only":
         return
-    if not api_key or api_key != _API_KEY:
+    if not api_key or api_key != current_key:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 router = APIRouter(prefix="/api/derivatives", tags=["derivatives"], dependencies=[Depends(_verify_api_key)])
@@ -29,20 +39,51 @@ _ai_advisor = None  # AIAdvisor
 _trade_journal = None  # TradeJournal
 _ws_clients: list[WebSocket] = []
 
-
 _auto_trader = None  # AutoTrader
 _insider_tracker = None  # InsiderTracker
+_btc_sniper = None  # BtcSniper
+_market_maker = None  # MarketMaker
+_news_scanner = None  # NewsScanner
+
+# Kill switch state
+_trading_paused = False
+_KILL_SWITCH_FILE = Path(__file__).parent.parent / "data" / "positions" / "kill_switch.json"
 
 
-def init_position_system(pm, exit_engine=None, ai_advisor=None, trade_journal=None, auto_trader=None, insider_tracker=None):
+def _persist_kill_switch(active: bool, reason: str = "manual"):
+    """Write/delete kill switch state file for persistence across restarts."""
+    try:
+        if active:
+            _KILL_SWITCH_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _KILL_SWITCH_FILE.write_text(json.dumps({
+                "active": True, "activated_at": time.time(), "reason": reason
+            }))
+        else:
+            _KILL_SWITCH_FILE.unlink(missing_ok=True)
+    except Exception as e:
+        logger.error("Failed to persist kill switch state: %s", e)
+
+
+def is_kill_switch_active() -> bool:
+    """Check if kill switch was activated in a previous session."""
+    return _KILL_SWITCH_FILE.exists()
+
+
+def init_position_system(pm, exit_engine=None, ai_advisor=None, trade_journal=None,
+                         auto_trader=None, insider_tracker=None,
+                         btc_sniper=None, market_maker=None, news_scanner=None):
     """Called by server.py lifespan to inject dependencies."""
     global _pm, _exit_engine, _ai_advisor, _trade_journal, _auto_trader, _insider_tracker
+    global _btc_sniper, _market_maker, _news_scanner
     _pm = pm
     _exit_engine = exit_engine
     _ai_advisor = ai_advisor
     _trade_journal = trade_journal
     _auto_trader = auto_trader
     _insider_tracker = insider_tracker
+    _btc_sniper = btc_sniper
+    _market_maker = market_maker
+    _news_scanner = news_scanner
 
 
 def _require_pm():
@@ -91,6 +132,8 @@ async def get_package(pkg_id: str):
 
 @router.post("/packages")
 async def create_package(req: CreatePackageRequest):
+    if _trading_paused:
+        raise HTTPException(403, "Trading is paused — POST /kill-switch/resume to re-enable")
     pm = _require_pm()
     from .position_manager import create_package as _create, create_leg, create_exit_rule
 
@@ -321,6 +364,13 @@ async def get_config():
 
 @router.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
+    # WebSocket auth: check API key from query param (FastAPI doesn't run deps on WS)
+    current_key = _get_api_key()
+    if current_key != "dev-local-only":
+        key = ws.query_params.get("api_key", "")
+        if key != current_key:
+            await ws.close(code=1008, reason="Invalid API key")
+            return
     await ws.accept()
     _ws_clients.append(ws)
     try:
@@ -424,32 +474,37 @@ async def get_calibration(request: Request):
 
 @router.post("/kill-switch")
 async def kill_switch():
-    """Emergency: stop auto-trader, cancel all pending orders, close all positions.
+    """Emergency: stop ALL trading subsystems, cancel all pending orders, close all positions.
 
     This is the nuclear option — halts all automated trading and attempts to
-    exit every open position at market price. Use when something goes wrong.
+    exit every open position at market price (FOK). State is persisted to disk
+    so a server restart cannot undo the kill switch.
     """
+    global _trading_paused
     _require_pm()
-    results = {"auto_trader_stopped": False, "orders_cancelled": 0, "positions_closed": 0, "errors": []}
+    results = {"subsystems_stopped": [], "orders_cancelled": 0, "positions_closed": 0, "errors": []}
 
-    # 1. Stop auto-trader immediately
-    if _auto_trader:
-        try:
-            _auto_trader.stop()
-            results["auto_trader_stopped"] = True
-            logger.warning("KILL SWITCH: Auto trader stopped")
-        except Exception as e:
-            results["errors"].append(f"Failed to stop auto-trader: {e}")
+    # 1. Stop ALL trading subsystems
+    for name, subsystem in [("auto_trader", _auto_trader),
+                            ("exit_engine", _exit_engine),
+                            ("btc_sniper", _btc_sniper),
+                            ("market_maker", _market_maker),
+                            ("news_scanner", _news_scanner)]:
+        if subsystem and hasattr(subsystem, "stop"):
+            try:
+                subsystem.stop()
+                results["subsystems_stopped"].append(name)
+                logger.warning("KILL SWITCH: %s stopped", name)
+            except Exception as e:
+                results["errors"].append(f"Failed to stop {name}: {e}")
 
-    # 2. Stop exit engine scanning
-    if _exit_engine and hasattr(_exit_engine, "stop"):
-        try:
-            _exit_engine.stop()
-            logger.warning("KILL SWITCH: Exit engine stopped")
-        except Exception:
-            pass
+    # 2. Block manual trades
+    _trading_paused = True
 
-    # 3. Cancel all pending limit orders
+    # 3. Persist kill switch to disk (survives restart)
+    _persist_kill_switch(True, reason="emergency_kill_switch")
+
+    # 4. Cancel all pending limit orders
     for pkg in _pm.list_packages("open"):
         pending = pkg.get("_pending_limit_orders", {})
         for leg_id, info in list(pending.items()):
@@ -463,13 +518,14 @@ async def kill_switch():
                     results["errors"].append(f"Cancel order {info['order_id']}: {e}")
         pkg.pop("_pending_limit_orders", None)
 
-    # 4. Close all open positions at market (FOK)
+    # 5. Close all open positions at market (FOK — use_limit=False for guaranteed fill)
     for pkg in _pm.list_packages("open"):
         for leg in pkg.get("legs", []):
             if leg.get("status") != "open":
                 continue
             try:
-                exit_result = await _pm.exit_leg(pkg["id"], leg["leg_id"], trigger="kill_switch")
+                exit_result = await _pm.exit_leg(pkg["id"], leg["leg_id"],
+                                                  trigger="kill_switch", use_limit=False)
                 if exit_result.get("success"):
                     results["positions_closed"] += 1
                 else:
@@ -478,29 +534,67 @@ async def kill_switch():
                 results["errors"].append(f"Exit {leg['leg_id']}: {e}")
 
     _pm.save()
-    logger.warning("KILL SWITCH COMPLETE: %d orders cancelled, %d positions closed, %d errors",
-                    results["orders_cancelled"], results["positions_closed"], len(results["errors"]))
+    logger.warning("KILL SWITCH COMPLETE: stopped %s, %d orders cancelled, %d positions closed, %d errors",
+                    results["subsystems_stopped"], results["orders_cancelled"],
+                    results["positions_closed"], len(results["errors"]))
     return results
 
 
 @router.post("/kill-switch/pause")
 async def pause_trading():
-    """Pause auto-trader without closing positions. Reversible via /resume."""
-    if not _auto_trader:
-        return {"paused": False, "message": "Auto trader not initialized"}
-    _auto_trader.stop()
-    logger.warning("Trading PAUSED via kill-switch/pause")
-    return {"paused": True, "open_positions": len(_pm.list_packages("open")) if _pm else 0}
+    """Pause ALL trading subsystems without closing positions. Reversible via /resume."""
+    global _trading_paused
+    _trading_paused = True
+
+    stopped = []
+    for name, subsystem in [("auto_trader", _auto_trader),
+                            ("btc_sniper", _btc_sniper),
+                            ("market_maker", _market_maker),
+                            ("news_scanner", _news_scanner)]:
+        if subsystem and hasattr(subsystem, "stop"):
+            try:
+                subsystem.stop()
+                stopped.append(name)
+            except Exception:
+                pass
+
+    logger.warning("Trading PAUSED via kill-switch/pause — stopped: %s", stopped)
+    return {"paused": True, "stopped": stopped,
+            "open_positions": len(_pm.list_packages("open")) if _pm else 0}
 
 
 @router.post("/kill-switch/resume")
 async def resume_trading():
-    """Resume auto-trader after a pause."""
-    if not _auto_trader:
-        return {"resumed": False, "message": "Auto trader not initialized"}
-    _auto_trader.start()
-    logger.info("Trading RESUMED via kill-switch/resume")
-    return {"resumed": True, "open_positions": len(_pm.list_packages("open")) if _pm else 0}
+    """Resume all trading subsystems after a pause or kill switch."""
+    global _trading_paused
+    _trading_paused = False
+
+    # Clear persistent kill switch state
+    _persist_kill_switch(False)
+
+    resumed = []
+    for name, subsystem in [("auto_trader", _auto_trader),
+                            ("btc_sniper", _btc_sniper),
+                            ("market_maker", _market_maker),
+                            ("news_scanner", _news_scanner)]:
+        if subsystem and hasattr(subsystem, "start"):
+            try:
+                subsystem.start()
+                resumed.append(name)
+            except Exception:
+                pass
+
+    # Restart exit engine (critical for monitoring open positions)
+    if _exit_engine and hasattr(_exit_engine, "start"):
+        try:
+            _exit_engine.start()
+            resumed.append("exit_engine")
+        except Exception:
+            pass
+
+    logger.info("Trading RESUMED via kill-switch/resume — started: %s", resumed)
+    return {"resumed": True, "started": resumed,
+            "open_positions": len(_pm.list_packages("open")) if _pm else 0}
 
 
 # ── Wallet Health ────────────────────────────────────────────────────────────

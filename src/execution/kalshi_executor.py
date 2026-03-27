@@ -56,6 +56,7 @@ class KalshiExecutor(BaseExecutor):
         # Handle inline key by writing to temp file
         key_path = self._rsa_key_path
         if not key_path and self._rsa_key_inline:
+            import atexit
             import tempfile
             tmp = tempfile.NamedTemporaryFile(
                 mode="w", suffix=".pem", delete=False, prefix="kalshi_rsa_"
@@ -63,6 +64,13 @@ class KalshiExecutor(BaseExecutor):
             tmp.write(self._rsa_key_inline)
             tmp.close()
             key_path = tmp.name
+            # Clean up temp PEM file on process exit
+            def _cleanup_pem(path=key_path):
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+            atexit.register(_cleanup_pem)
 
         self._client.set_kalshi_auth(self._api_key, key_path)
         env = "DEMO" if self._demo else "PRODUCTION"
