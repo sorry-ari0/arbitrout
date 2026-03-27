@@ -15,6 +15,7 @@ import asyncio
 import functools
 import logging
 import os
+import time
 
 import httpx
 from .base_executor import BaseExecutor, ExecutionResult, BalanceResult, PositionInfo
@@ -32,8 +33,9 @@ class PolymarketExecutor(BaseExecutor):
         self._client = None
         self._creds = None
         self._http = None
-        # Cache: conditionId -> [yes_token_id, no_token_id]
-        self._token_id_cache: dict[str, list[str]] = {}
+        # Cache: conditionId -> {"tokens": [yes_token_id, no_token_id], "cached_at": float}
+        self._token_id_cache: dict[str, dict] = {}
+        self._token_cache_ttl = 86400  # 24 hours
 
     def is_configured(self) -> bool:
         return bool(self._private_key and self._funder)
@@ -84,15 +86,16 @@ class PolymarketExecutor(BaseExecutor):
         The CLOB uses token_ids (CTF tokens), not conditionIds. Each market
         has two token_ids: index 0 = YES, index 1 = NO.
         """
-        if condition_id in self._token_id_cache:
-            tokens = self._token_id_cache[condition_id]
+        cached = self._token_id_cache.get(condition_id)
+        if cached and (time.time() - cached["cached_at"]) < self._token_cache_ttl:
+            tokens = cached["tokens"]
         else:
             clob = self._get_clob()
             market = await self._run_sync(clob.get_market, condition_id)
             tokens = market.get("clobTokenIds", [])
             if not tokens or len(tokens) < 2:
                 raise ValueError(f"Cannot resolve token_ids for condition {condition_id}: {market}")
-            self._token_id_cache[condition_id] = tokens
+            self._token_id_cache[condition_id] = {"tokens": tokens, "cached_at": time.time()}
             logger.info("Resolved condition %s to tokens YES=%s NO=%s", condition_id[:12], tokens[0][:12], tokens[1][:12])
 
         idx = 0 if side.upper() == "YES" else 1
@@ -104,8 +107,9 @@ class PolymarketExecutor(BaseExecutor):
         Fallback for get_current_price() when the CLOB SDK client is not configured.
         Uses GET /markets/{condition_id} which returns token metadata.
         """
-        if condition_id in self._token_id_cache:
-            tokens = self._token_id_cache[condition_id]
+        cached = self._token_id_cache.get(condition_id)
+        if cached and (time.time() - cached["cached_at"]) < self._token_cache_ttl:
+            tokens = cached["tokens"]
         else:
             http = await self._get_http()
             try:
@@ -117,14 +121,22 @@ class PolymarketExecutor(BaseExecutor):
                 # CLOB REST returns {"tokens": [{"token_id": "...", "outcome": "Yes"}, ...]}
                 tokens_list = market.get("tokens", [])
                 if len(tokens_list) >= 2:
-                    tokens = [tokens_list[0]["token_id"], tokens_list[1]["token_id"]]
+                    # Use outcome field for correct YES/NO ordering (don't assume array order)
+                    yes_tok = next((t["token_id"] for t in tokens_list
+                                    if t.get("outcome", "").upper() == "YES"), None)
+                    no_tok = next((t["token_id"] for t in tokens_list
+                                   if t.get("outcome", "").upper() == "NO"), None)
+                    if yes_tok and no_tok:
+                        tokens = [yes_tok, no_tok]
+                    else:
+                        tokens = [tokens_list[0]["token_id"], tokens_list[1]["token_id"]]
                 else:
                     # Fallback: try clobTokenIds field (some responses use this)
                     tokens = market.get("clobTokenIds", [])
                 if not tokens or len(tokens) < 2:
                     logger.warning("Cannot resolve tokens for %s: got %s", condition_id[:16], tokens_list or tokens)
                     return None
-                self._token_id_cache[condition_id] = tokens
+                self._token_id_cache[condition_id] = {"tokens": tokens, "cached_at": time.time()}
                 logger.info("Resolved condition %s to tokens YES=%s NO=%s (via REST)",
                             condition_id[:12], tokens[0][:12], tokens[1][:12])
             except Exception as e:
@@ -170,12 +182,15 @@ class PolymarketExecutor(BaseExecutor):
             return parts[0], parts[1].upper()
         return asset_id, "YES"
 
-    async def buy(self, asset_id: str, amount_usd: float) -> ExecutionResult:
+    async def buy(self, asset_id: str, amount_usd: float,
+                  max_price: float = 0) -> ExecutionResult:
         """Buy shares using a GTC limit order at the spread edge for 0% maker fees.
 
         Places a limit bid at (best_ask - tick_size) so the order rests on the
         book as the new best bid, qualifying for 0% maker fee instead of 2% taker.
         Falls back to FOK market order only if the order book is empty.
+
+        max_price: if > 0, reject if calculated maker price exceeds this (slippage guard).
         """
         try:
             from py_clob_client.clob_types import OrderArgs, OrderType, PartialCreateOrderOptions
@@ -216,6 +231,13 @@ class PolymarketExecutor(BaseExecutor):
                 if mid <= 0:
                     return ExecutionResult(False, None, 0, 0, 0, f"Cannot get price for {asset_id}")
                 maker_price = round(mid, 4)
+
+            # Max-price protection: reject if spread is too wide
+            if max_price > 0 and maker_price > max_price:
+                return ExecutionResult(
+                    False, None, 0, 0, 0,
+                    f"Price {maker_price:.4f} exceeds max {max_price:.4f} for {asset_id}"
+                )
 
             shares = round(amount_usd / maker_price, 2)
             neg_risk = await self._run_sync(clob.get_neg_risk, token_id)
@@ -532,6 +554,88 @@ class PolymarketExecutor(BaseExecutor):
         except Exception as e:
             logger.warning("cancel_order failed for %s: %s", order_id, e)
             return False
+
+    # ── Retry wrapper ──────────────────────────────────────────────────────
+
+    async def _retry(self, coro_fn, *args, retries: int = 3, delay: float = 2):
+        """Retry an async call with exponential backoff for transient failures."""
+        for attempt in range(retries):
+            try:
+                return await coro_fn(*args)
+            except Exception as e:
+                if attempt == retries - 1:
+                    raise
+                wait = delay * (attempt + 1)
+                logger.debug("Retry %d/%d for %s after %.1fs: %s",
+                             attempt + 1, retries, coro_fn.__name__, wait, e)
+                await asyncio.sleep(wait)
+
+    # ── Fill monitoring ──────────────────────────────────────────────────
+
+    async def buy_and_confirm(self, asset_id: str, amount_usd: float,
+                               max_price: float = 0,
+                               timeout: int = 120, poll_interval: int = 5) -> ExecutionResult:
+        """Buy with fill confirmation. Places GTC order, polls until filled or timeout.
+
+        Returns ExecutionResult with actual fill data from CLOB, not estimates.
+        On timeout: cancels order and returns failure (no phantom positions).
+        On partial fill: cancels remainder, returns what actually filled.
+        """
+        result = await self.buy(asset_id, amount_usd, max_price=max_price)
+        if not result.success:
+            return result
+        return await self._poll_until_filled(result.tx_id, timeout, poll_interval)
+
+    async def _poll_until_filled(self, order_id: str,
+                                  timeout: int = 120,
+                                  poll_interval: int = 5) -> ExecutionResult:
+        """Poll a GTC order until filled, partially filled, or timeout."""
+        start = time.time()
+        while time.time() - start < timeout:
+            try:
+                status = await self._retry(self.check_order_status, order_id)
+            except Exception as e:
+                logger.warning("Fill poll failed for %s: %s", order_id, e)
+                await asyncio.sleep(poll_interval)
+                continue
+
+            order_status = status.get("status", "unknown")
+
+            if order_status == "filled":
+                logger.info("Order %s FILLED: %.2f @ $%.4f (fee=$%.4f)",
+                            order_id, status["size_matched"], status["price"], status["fee"])
+                return ExecutionResult(
+                    True, order_id,
+                    status.get("price", 0),
+                    status.get("size_matched", 0),
+                    status.get("fee", 0.0),
+                    None
+                )
+
+            if order_status == "partially_filled":
+                filled = status.get("size_matched", 0)
+                logger.info("Order %s PARTIAL FILL: %.2f filled, cancelling remainder", order_id, filled)
+                await self._retry(self.cancel_order, order_id)
+                if filled > 0:
+                    return ExecutionResult(
+                        True, order_id,
+                        status.get("price", 0),
+                        filled,
+                        status.get("fee", 0.0),
+                        None
+                    )
+                return ExecutionResult(False, None, 0, 0, 0, "Partial fill cancelled, nothing filled")
+
+            if order_status in ("cancelled",):
+                return ExecutionResult(False, None, 0, 0, 0, f"Order {order_id} was cancelled externally")
+
+            # Still open — wait and retry
+            await asyncio.sleep(poll_interval)
+
+        # Timeout — cancel and fail
+        logger.warning("Order %s timed out after %ds, cancelling", order_id, timeout)
+        await self._retry(self.cancel_order, order_id)
+        return ExecutionResult(False, None, 0, 0, 0, f"Buy order timed out after {timeout}s")
 
     async def close(self):
         if self._http and not self._http.is_closed:

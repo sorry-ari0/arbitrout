@@ -125,15 +125,20 @@ except (ImportError, SyntaxError) as _eval_err:
     _EVAL_AVAILABLE = False
 
 # --- C1 fix: API Key Authentication ---
-API_KEY = os.environ.get("LOBSTERMINAL_API_KEY", "dev-local-only")
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+def _get_api_key() -> str:
+    """Get current API key (supports runtime changes from live-mode auto-generation)."""
+    return os.environ.get("LOBSTERMINAL_API_KEY", "dev-local-only")
 
 
 async def verify_api_key(api_key: str = Security(api_key_header)):
     """Verify API key for protected endpoints. Skip auth for localhost dev."""
-    if API_KEY == "dev-local-only":
+    current_key = _get_api_key()
+    if current_key == "dev-local-only":
         return  # No auth in dev mode
-    if not api_key or api_key != API_KEY:
+    if not api_key or api_key != current_key:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
@@ -276,10 +281,83 @@ def _migrate_legacy_packages(pm):
         logger.info("Migrated %d legacy packages to post-fee-fix format", migrated)
 
 
+def _detect_orphaned_packages(pm):
+    """Detect packages in inconsistent state after crash recovery."""
+    issues = []
+    for pkg_id, pkg in pm.packages.items():
+        if pkg.get("status") not in ("open", "partial_exit"):
+            continue
+        for leg in pkg.get("legs", []):
+            if leg.get("status") == "advisory":
+                continue
+            if leg.get("status") == "open" and not leg.get("tx_id"):
+                issues.append(f"Package {pkg_id}: leg {leg.get('leg_id')} is 'open' but has no tx_id (never executed?)")
+            if leg.get("status") == "open" and leg.get("quantity", 0) <= 0:
+                issues.append(f"Package {pkg_id}: leg {leg.get('leg_id')} is 'open' with zero quantity")
+        if pkg.get("status") == "rollback":
+            issues.append(f"Package {pkg_id}: stuck in 'rollback' state — needs manual resolution")
+    for issue in issues:
+        logger.warning("STARTUP CHECK: %s", issue)
+    return issues
+
+
+async def _verify_pending_orders(pm, executors):
+    """On startup (live mode only), verify pending limit orders still exist on CLOB."""
+    verified = 0
+    for pkg_id, pkg in pm.packages.items():
+        pending = pkg.get("_pending_limit_orders", {})
+        if not pending:
+            continue
+        for leg_id in list(pending.keys()):
+            info = pending[leg_id]
+            executor = executors.get(info.get("platform"))
+            if not executor or not hasattr(executor, 'check_order_status'):
+                continue
+            try:
+                status = await executor.check_order_status(info["order_id"])
+                order_status = status.get("status", "unknown")
+                if order_status in ("filled", "cancelled", "unknown"):
+                    logger.info("Startup: pending order %s for %s is '%s' — will resolve on first tick",
+                                info["order_id"][:12], leg_id, order_status)
+                elif order_status == "open":
+                    logger.info("Startup: pending order %s for %s still open on CLOB",
+                                info["order_id"][:12], leg_id)
+                elif order_status == "partially_filled":
+                    logger.warning("Startup: pending order %s partially filled — will resolve on first tick",
+                                   info["order_id"][:12])
+                verified += 1
+            except Exception as e:
+                logger.warning("Startup: failed to verify pending order %s: %s", info.get("order_id", "?")[:12], e)
+    if verified:
+        logger.info("Startup: verified %d pending orders on CLOB", verified)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s") # Removed, logging configured globally
     DATA_DIR.mkdir(exist_ok=True)
+
+    # Auth enforcement: auto-generate API key in live mode if none set
+    if not is_paper_mode():
+        current_key = os.environ.get("LOBSTERMINAL_API_KEY", "dev-local-only")
+        if current_key == "dev-local-only":
+            import secrets
+            generated_key = secrets.token_urlsafe(32)
+            os.environ["LOBSTERMINAL_API_KEY"] = generated_key
+            logger.warning("=" * 60)
+            logger.warning("LIVE MODE: No API key configured. Auto-generated key:")
+            logger.warning("  %s", generated_key)
+            logger.warning("Add to src/.env:  LOBSTERMINAL_API_KEY=%s", generated_key)
+            logger.warning("Use header:  X-API-Key: %s", generated_key)
+            logger.warning("=" * 60)
+
+        # Validate live configuration
+        try:
+            from positions.wallet_config import validate_live_config
+            issues = validate_live_config()
+            for issue in issues:
+                logger.warning("Live config: %s", issue)
+        except Exception:
+            pass
     # Init watchlist file if missing
     wl_file = DATA_DIR / "watchlist.json"
     if not wl_file.exists():
@@ -346,7 +424,7 @@ async def lifespan(app: FastAPI):
 
             bracket_manager = BracketManager(executors)
             journal = TradeJournal(data_dir=DATA_DIR / "positions", mode=_journal_mode)
-            pm = PositionManager(data_dir=DATA_DIR / "positions", executors=executors, trade_journal=journal, bracket_manager=bracket_manager)
+            pm = PositionManager(data_dir=DATA_DIR / "positions", executors=executors, trade_journal=journal, bracket_manager=bracket_manager, mode=_journal_mode)
 
             # Wire journal into paper executors for persistent PnL tracking
             if is_paper_mode():
@@ -388,6 +466,11 @@ async def lifespan(app: FastAPI):
             # Migrate legacy packages missing post-fee-fix flags (2026-03-22)
             _migrate_legacy_packages(pm)
 
+            # Startup safety checks — detect orphaned packages and verify pending orders
+            _detect_orphaned_packages(pm)
+            if not is_paper_mode():
+                await _verify_pending_orders(pm, executors)
+
             # AI advisor always created — checks for API keys dynamically
             # Live: Anthropic → Groq → Gemini → OpenRouter
             # Paper: Groq → Gemini → OpenRouter (skip Anthropic to save costs)
@@ -420,7 +503,8 @@ async def lifespan(app: FastAPI):
             _auto_trader = AutoTrader(pm, scanner=arb_scanner, insider_tracker=insider,
                                        decision_logger=decision_log,
                                        probability_model=_probability_model,
-                                       initial_bankroll=_initial_bankroll)
+                                       initial_bankroll=_initial_bankroll,
+                                       paper_mode=is_paper_mode())
             _auto_trader.start()
             _auto_trader_ref = _auto_trader
             logger.info("Auto trader started — reacts to arb scanner within seconds, 5min safety-net fallback")
@@ -436,7 +520,9 @@ async def lifespan(app: FastAPI):
             _news_scanner.start()
             exit_engine._news_scanner = _news_scanner
             logger.info("News scanner started — will scan RSS feeds every 2.5 min")
-            init_position_system(pm, exit_engine, ai, trade_journal=journal, auto_trader=_auto_trader, insider_tracker=insider)
+            init_position_system(pm, exit_engine, ai, trade_journal=journal,
+                                 auto_trader=_auto_trader, insider_tracker=insider,
+                                 news_scanner=_news_scanner)
             _exit_task = True
             logger.info("Position system initialized with %d executors", len(executors))
 
@@ -488,6 +574,13 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.warning("Market maker init failed (non-critical): %s", e)
 
+            # Update position router with late-init subsystems (sniper + market maker)
+            from positions.position_router import init_position_system as _update_position_system
+            _update_position_system(pm, exit_engine, ai, trade_journal=journal,
+                                     auto_trader=_auto_trader, insider_tracker=insider,
+                                     btc_sniper=_btc_sniper, market_maker=_market_maker,
+                                     news_scanner=_news_scanner)
+
             # Polymarket WebSocket price feed — real-time prices for open positions
             try:
                 from positions.polymarket_ws import PolymarketPriceFeed
@@ -521,6 +614,23 @@ async def lifespan(app: FastAPI):
 
         except Exception as e:
             logger.error("Position system init failed: %s", e)
+
+    # Check for persistent kill switch from previous session
+    if _POSITIONS_AVAILABLE:
+        from positions.position_router import is_kill_switch_active
+        if is_kill_switch_active():
+            logger.warning("=" * 60)
+            logger.warning("KILL SWITCH ACTIVE from previous session — all trading halted")
+            logger.warning("POST /api/derivatives/kill-switch/resume to re-enable")
+            logger.warning("=" * 60)
+            if _auto_trader:
+                _auto_trader.stop()
+            if _btc_sniper:
+                _btc_sniper.stop()
+            if _market_maker:
+                _market_maker.stop()
+            if _news_scanner:
+                _news_scanner.stop()
 
     # Political synthetic analyzer
     _political_analyzer = None
@@ -633,8 +743,11 @@ async def lifespan(app: FastAPI):
     if scheduler:
         scheduler.shutdown(wait=False)
     if _ARBITRAGE_AVAILABLE:
-        scan_task.cancel()
-        await arb_registry.close_all()
+        try:
+            scan_task.cancel()
+            await arb_registry.close_all()
+        except Exception:
+            pass
     logger.info("Lobsterminal shutting down", extra={"event_type": "server_shutdown"})
 
 

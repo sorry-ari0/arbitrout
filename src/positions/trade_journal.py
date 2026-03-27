@@ -50,6 +50,14 @@ class TradeJournal:
     def save(self):
         self.data_dir.mkdir(parents=True, exist_ok=True)
         path = self.data_dir / self._journal_filename()
+        # Backup rotation before save — protects against corruption
+        backup = str(path) + ".backup"
+        if path.exists():
+            try:
+                import shutil
+                shutil.copy(str(path), backup)
+            except OSError as e:
+                logger.warning("Failed to create journal backup: %s", e)
         tmp = str(path) + ".tmp"
         data = {
             "entries": self.entries,
