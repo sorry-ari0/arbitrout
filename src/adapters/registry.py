@@ -1,113 +1,118 @@
-"""Adapter registry — centralizes all platform adapters."""
 import asyncio
-import logging
 import time
-from typing import Type
+import logging
 
-from httpx import AsyncClient
-
-from .base import BaseAdapter
-from .kalshi import KalshiAdapter
-from .limitless import LimitlessAdapter
-from .polymarket import PolymarketAdapter
-from .predictit import PredictItAdapter
-from .manifold import ManifoldAdapter  # NEW: Import ManifoldAdapter
+from adapters.base import BaseAdapter
+from adapters.kalshi import KalshiAdapter
+from adapters.polymarket import PolymarketAdapter
+from adapters.predictit import PredictItAdapter
+from adapters.limitless import LimitlessAdapter
+from adapters.coinbase import CoinbaseAdapter
+from adapters.manifold import ManifoldAdapter
+from adapters.metaculus import MetaculusAdapter
+from adapters.models import NormalizedEvent
 
 logger = logging.getLogger("adapter_registry")
 
-
-# ============================================================
-# REGISTRY
-# ============================================================
 class AdapterRegistry:
-    """Manages all available platform adapters and their polling."""
-
     def __init__(self):
-        self._adapters: list[BaseAdapter] = []
+        self._adapters: dict[str, BaseAdapter] = {}
+        self._last_fetch_times: dict[str, float] = {}
+        self._status: dict[str, dict] = {}
+        self._error_history: dict[str, list[dict]] = {}  # last 50 errors per adapter
+        self._consecutive_errors: dict[str, int] = {}
         self._register_adapters()
-        self._shared_client: AsyncClient | None = None
-        self._last_fetch_times: dict[str, float] = {}  # platform_name -> timestamp
-        self._status: dict[str, dict] = {} # platform_name -> {status: "ok"/"error", message: ""}
 
     def _register_adapters(self):
-        """Initializes and registers all known adapters."""
-        # NEW: Add ManifoldAdapter to the list of registered adapters
-        adapter_classes: list[Type[BaseAdapter]] = [
-            PolymarketAdapter,
-            PredictItAdapter,
-            KalshiAdapter,
-            LimitlessAdapter,
-            ManifoldAdapter,
-        ]
-        for AdapterClass in adapter_classes:
-            try:
-                adapter = AdapterClass()
-                self._adapters.append(adapter)
-                logger.info("Registered adapter: %s", adapter.PLATFORM_NAME)
-            except Exception as e:
-                logger.error("Failed to register adapter %s: %s", AdapterClass.PLATFORM_NAME, e)
-                self._status[AdapterClass.PLATFORM_NAME] = {"status": "error", "message": str(e)}
+        # Register instances of all known adapters here
+        self.register_adapter(KalshiAdapter())
+        self.register_adapter(PolymarketAdapter())
+        self.register_adapter(PredictItAdapter())
+        self.register_adapter(LimitlessAdapter())
+        self.register_adapter(CoinbaseAdapter())
+        self.register_adapter(ManifoldAdapter())
+        self.register_adapter(MetaculusAdapter())
 
-    async def _get_shared_client(self) -> AsyncClient:
-        """Get a shared httpx client instance."""
-        if self._shared_client is None:
-            self._shared_client = AsyncClient(timeout=20.0)
-        return self._shared_client
 
-    async def fetch_all(self) -> list:
-        """Fetch events from all registered adapters concurrently, respecting rate limits."""
-        all_events = []
+    def register_adapter(self, adapter: BaseAdapter):
+        self._adapters[adapter.PLATFORM_NAME] = adapter
+        self._status[adapter.PLATFORM_NAME] = {
+            "name": adapter.PLATFORM_NAME,
+            "status": "offline",
+            "last_fetch": None,
+            "last_error": None,
+            "event_count": 0,
+            "rate_limit_seconds": adapter.RATE_LIMIT_SECONDS,
+        }
+        logger.info("Registered adapter: %s", adapter.PLATFORM_NAME)
+
+    async def fetch_all(self) -> list[NormalizedEvent]:
+        all_events: list[NormalizedEvent] = []
         tasks = []
-        for adapter in self._adapters:
-            tasks.append(self._fetch_one_adapter(adapter))
+
+        for name, adapter in self._adapters.items():
+            tasks.append(self._fetch_single_adapter(name, adapter))
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        for adapter, res in zip(self._adapters, results):
-            if isinstance(res, Exception):
-                logger.error("Error fetching from %s: %s", adapter.PLATFORM_NAME, res)
-                self._status[adapter.PLATFORM_NAME] = {"status": "error", "message": str(res)}
+        for name, result in zip(self._adapters.keys(), results):
+            if isinstance(result, Exception):
+                logger.error("Error fetching from %s: %s", name, result)
+                self._consecutive_errors[name] = self._consecutive_errors.get(name, 0) + 1
+                err_entry = {"error": str(result), "timestamp": time.time(),
+                             "consecutive": self._consecutive_errors[name]}
+                hist = self._error_history.setdefault(name, [])
+                hist.append(err_entry)
+                if len(hist) > 50:
+                    self._error_history[name] = hist[-50:]
+                self._status[name].update(
+                    {"status": "error", "last_error": str(result), "event_count": 0}
+                )
             else:
-                all_events.extend(res)
-                self._status[adapter.PLATFORM_NAME] = {"status": "ok", "message": f"{len(res)} events fetched"}
-
+                all_events.extend(result)
+                self._consecutive_errors[name] = 0
+                self._status[name].update(
+                    {
+                        "status": "online",
+                        "last_fetch": time.time(),
+                        "last_error": None,
+                        "event_count": len(result),
+                    }
+                )
+                self._last_fetch_times[name] = time.time()
         return all_events
 
-    async def _fetch_one_adapter(self, adapter: BaseAdapter) -> list:
-        """Fetch events for a single adapter, respecting its rate limit."""
-        platform_name = adapter.PLATFORM_NAME
-        last_fetch = self._last_fetch_times.get(platform_name, 0)
-        time_since_last_fetch = time.time() - last_fetch
-        sleep_needed = adapter.RATE_LIMIT_SECONDS - time_since_last_fetch
+    async def _fetch_single_adapter(self, name: str, adapter: BaseAdapter) -> list[NormalizedEvent]:
+        # Enforce rate limiting
+        last_fetch = self._last_fetch_times.get(name, 0)
+        elapsed = time.time() - last_fetch
+        if elapsed < adapter.RATE_LIMIT_SECONDS:
+            await asyncio.sleep(adapter.RATE_LIMIT_SECONDS - elapsed)
 
-        if sleep_needed > 0:
-            await asyncio.sleep(sleep_needed)
-
-        # Ensure adapter uses the shared client
-        adapter._set_client(await self._get_shared_client())
-        events = await adapter._fetch()
-        self._last_fetch_times[platform_name] = time.time()
+        logger.info("Fetching from %s...", name)
+        events = await adapter.fetch_events()
+        logger.info("Fetched %d events from %s.", len(events), name)
         return events
 
-    def get_all_status(self) -> list[dict]:
-        """Return the status of all adapters."""
-        status_list = []
-        for adapter in self._adapters:
-            platform_name = adapter.PLATFORM_NAME
-            last_fetch = self._last_fetch_times.get(platform_name, 0)
-            status_entry = self._status.get(platform_name, {"status": "unknown", "message": "No fetch attempted"})
-            status_list.append({
-                "platform": platform_name,
-                "status": status_entry["status"],
-                "message": status_entry["message"],
-                "last_fetch": last_fetch,
-                "rate_limit_seconds": adapter.RATE_LIMIT_SECONDS,
-            })
-        return status_list
+    def get_adapter(self, name: str) -> BaseAdapter | None:
+        return self._adapters.get(name)
 
-    async def close(self):
-        """Close the shared HTTP client."""
-        if self._shared_client:
-            await self._shared_client.aclose()
-            self._shared_client = None
+    def get_all_status(self) -> list[dict]:
+        now = time.time()
+        status_list = []
+        for name, status_data in self._status.items():
+            current_status = status_data.copy()
+            last_fetch_time = current_status.get("last_fetch")
+            if last_fetch_time:
+                if (now - last_fetch_time) > (current_status["rate_limit_seconds"] * 2):
+                    if current_status["status"] == "online":
+                        current_status["status"] = "stale"
+                current_status["last_fetch_age_seconds"] = int(now - last_fetch_time)
+            current_status["consecutive_errors"] = self._consecutive_errors.get(name, 0)
+            # Count errors in last 24h
+            cutoff_24h = now - 86400
+            hist = self._error_history.get(name, [])
+            current_status["errors_24h"] = sum(1 for e in hist if e["timestamp"] > cutoff_24h)
+            status_list.append(current_status)
+        return status_list
 

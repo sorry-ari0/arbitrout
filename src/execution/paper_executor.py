@@ -100,6 +100,7 @@ class PaperExecutor:
         self.fee_rates = {"maker": self.buy_fee_rate}
 
     async def buy(self, asset_id: str, amount_usd: float, fallback_price: float = 0) -> ExecutionResult:
+        _t0 = time.time()
         if amount_usd > self.balance:
             return ExecutionResult(False, None, 0, 0, 0, f"Insufficient paper balance: {self.balance:.2f} < {amount_usd:.2f}")
         price = await self.real.get_current_price(asset_id)
@@ -124,10 +125,11 @@ class PaperExecutor:
             self.positions[asset_id] = {"quantity": qty, "avg_entry_price": price}
         tx_id = f"paper_{uuid.uuid4().hex[:12]}"
         self.trade_history.append({"action":"buy","asset_id":asset_id,"price":price,"quantity":qty,"amount_usd":amount_usd,"fee":fee,"tx_id":tx_id})
-        return ExecutionResult(True, tx_id, price, qty, fee, None)
+        return ExecutionResult(True, tx_id, price, qty, fee, None, execution_ms=int((time.time() - _t0) * 1000))
 
     async def sell(self, asset_id: str, quantity: float, last_known_price: float = 0,
                    category: str = "") -> ExecutionResult:
+        _t0 = time.time()
         pos = self.positions.get(asset_id)
         if not pos or pos["quantity"] < quantity * 0.999:
             return ExecutionResult(False, None, 0, 0, 0, f"No position or insufficient quantity for {asset_id}")
@@ -150,7 +152,7 @@ class PaperExecutor:
         if pos["quantity"] < 1e-10: del self.positions[asset_id]
         tx_id = f"paper_{uuid.uuid4().hex[:12]}"
         self.trade_history.append({"action":"sell","asset_id":asset_id,"price":price,"quantity":quantity,"proceeds_usd":net_proceeds,"fee":fee,"tx_id":tx_id})
-        return ExecutionResult(True, tx_id, price, quantity, fee, None)
+        return ExecutionResult(True, tx_id, price, quantity, fee, None, execution_ms=int((time.time() - _t0) * 1000))
 
     async def buy_limit(self, asset_id: str, amount_usd: float, price: float) -> ExecutionResult:
         """Simulate a limit buy using maker fee rate (0% for Polymarket).
@@ -158,6 +160,7 @@ class PaperExecutor:
         Uses the provided limit price instead of fetching current price.
         Computes fee inline using MAKER_FEE_RATES — does NOT mutate self.buy_fee_rate.
         """
+        _t0 = time.time()
         if amount_usd > self.balance:
             return ExecutionResult(False, None, 0, 0, 0, f"Insufficient paper balance: {self.balance:.2f} < {amount_usd:.2f}")
         if price <= 0:
@@ -189,7 +192,7 @@ class PaperExecutor:
         tx_id = f"paper_{uuid.uuid4().hex[:12]}"
         self.trade_history.append({"action": "buy_limit", "asset_id": asset_id, "price": price,
                                    "quantity": qty, "amount_usd": amount_usd, "fee": fee, "tx_id": tx_id})
-        return ExecutionResult(True, tx_id, price, qty, fee, None)
+        return ExecutionResult(True, tx_id, price, qty, fee, None, execution_ms=int((time.time() - _t0) * 1000))
 
     async def sell_limit(self, asset_id: str, quantity: float, price: float) -> ExecutionResult:
         """Place a resting sell limit order — reserves position quantity.
@@ -197,6 +200,7 @@ class PaperExecutor:
         Does NOT fill immediately. The order rests until check_order_status
         detects that market price >= limit price (a buyer matches our ask).
         """
+        _t0 = time.time()
         pos = self.positions.get(asset_id)
         if not pos or pos.get("quantity", 0) < quantity * 0.999:
             return ExecutionResult(False, None, 0, 0, 0, f"No position or insufficient quantity for {asset_id}")
@@ -217,7 +221,7 @@ class PaperExecutor:
             "action": "sell_limit_placed", "asset_id": asset_id, "price": price,
             "quantity": quantity, "tx_id": tx_id,
         })
-        return ExecutionResult(True, tx_id, price, quantity, 0.0, None)
+        return ExecutionResult(True, tx_id, price, quantity, 0.0, None, execution_ms=int((time.time() - _t0) * 1000))
 
     async def check_order_status(self, order_id: str) -> dict:
         """Check if a resting order has filled.

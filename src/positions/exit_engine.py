@@ -13,16 +13,18 @@ logger = logging.getLogger("positions.exit_engine")
 # ── Feature flag: AI-recommended exits ────────────────────────────────────────
 # Trade journal analysis (35 trades, 88.6% loss rate) shows AI-approved exits
 # have 0% win rate across 23 trades. auto:trailing_stop averages -$13.86/trade.
-# Disabling AI exit signals for: time_decay, negative_drift, trailing_stop.
-# Mechanical auto-exits (target_hit, stop_loss, auto:trailing_stop) still work.
+# Mechanical auto-exits allowed: target_hit, stale_position, partial_profit only.
 # Set to True to re-enable AI exit approvals after win rate improves.
 AI_EXITS_ENABLED = False
 
-# Trigger names that are blocked when AI_EXITS_ENABLED is False.
-# These are the triggers the AI advisor was approving with 0% success.
-# stop_loss added: journal shows stop-loss exits destroy EV on prediction markets
-# (positions resolve at $0/$1 — a temporary drawdown is not a reason to exit).
-_AI_EXIT_TRIGGERS = {"time_decay", "negative_drift", "trailing_stop", "stop_loss"}
+# !! DO NOT REMOVE entries from this set !!
+# Every trigger here was added because journal data proved it destroys EV:
+#   time_decay     — 0% win rate across 23 AI-approved exits
+#   negative_drift — 0% win rate, premature exits on normal market noise
+#   trailing_stop  — 0/8 wins, avg -$13.86/trade (prediction markets resolve $0/$1)
+#   stop_loss      — caused -$33.22 single-trade loss on ETH synthetic (2026-03-25)
+# Blocked at THREE layers: _tick filter (L635), _auto_execute (L731), _apply_verdicts (L817)
+_AI_EXIT_TRIGGERS = frozenset({"time_decay", "negative_drift", "trailing_stop", "stop_loss"})
 
 # ── Trigger IDs ─────────────────────────────────────────────────────────────
 # Category: Profit Taking (1-3)
@@ -160,13 +162,17 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
                     "action": "partial_exit", "safety_override": False})
 
     # ── 4: Stop Loss ───────────────────────────────────────────────────────
-    for rule in rules:
-        if rule.get("type") == "stop_loss" and rule.get("active"):
-            stop = rule["params"].get("stop_pct", -15)
-            if pnl_pct <= stop:
-                triggers.append({"trigger_id": T_STOP_LOSS, "name": "stop_loss",
-                    "details": f"P&L {pnl_pct:.1f}% <= stop {stop}%",
-                    "action": "full_exit", "safety_override": False})
+    # Skip for hold-to-resolution: these positions resolve at $0 or $1.
+    # A temporary drawdown is not a reason to exit — stop_loss destroyed EV
+    # on the ETH synthetic (-$33.22) by exiting a winning position early.
+    if not pkg.get("_hold_to_resolution"):
+        for rule in rules:
+            if rule.get("type") == "stop_loss" and rule.get("active"):
+                stop = rule["params"].get("stop_pct", -15)
+                if pnl_pct <= stop:
+                    triggers.append({"trigger_id": T_STOP_LOSS, "name": "stop_loss",
+                        "details": f"P&L {pnl_pct:.1f}% <= stop {stop}%",
+                        "action": "full_exit", "safety_override": False})
 
     # ── 5: New ATH (trailing adjustment) ────────────────────────────────────
     if current_value > peak_value and peak_value > 0:
@@ -729,6 +735,12 @@ class ExitEngine:
     async def _auto_execute_triggers(self, pkg: dict, triggers: list[dict]):
         """Auto-execute mechanical triggers when AI is unavailable."""
         for trigger in triggers:
+            # Layer 3: block suppressed triggers even if they leaked past _tick filter
+            if not AI_EXITS_ENABLED and trigger["name"] in _AI_EXIT_TRIGGERS:
+                if self.dlog:
+                    self.dlog.log_trigger_suppressed(
+                        pkg["id"], trigger["name"], "ai_exits_disabled_auto_execute")
+                continue
             if trigger["name"] in ("target_hit", "stale_position"):
                 logger.info("Auto-executing %s on %s: %s",
                             trigger["name"], pkg["id"], trigger["details"])

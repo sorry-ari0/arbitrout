@@ -16,7 +16,7 @@ import threading
 from adapters.models import NormalizedEvent, MatchedEvent, ArbitrageOpportunity
 from adapters.registry import AdapterRegistry
 from event_matcher import match_events, _extract_crypto
-from arbitrage_history import save_opportunity_history # NEW: Import history saver
+from arbitrage_history import save_opportunity_history, save_market_history # NEW: Import market history saver
 
 logger = logging.getLogger("arbitrage_engine")
 
@@ -35,7 +35,8 @@ _TAKER_FEES = {
     "robinhood": 0.0,
     "coinbase_spot": 0.006,
     "kraken": 0.0026,
-    "manifold": 0.0,        # Manifold markets are fee-free for trading, funds are converted to mana
+    "manifold": 0.0,        # NEW: Manifold markets are fee-free for trading, funds are converted to mana
+    "metaculus": 0.0,       # NEW: Metaculus is community-driven, no direct trading fees
 }
 _DEFAULT_TAKER_FEE = 0.0
 _PREDICTIT_PROFIT_TAX = 0.10  # 10% of profits at contract resolution
@@ -296,10 +297,11 @@ def _build_range_synthetic_info(yes_market: NormalizedEvent,
     if win_count <= loss_count:
         return None
 
-    # Estimate loss probability using MARKET-IMPLIED probabilities.
-    # Range YES price ≈ P(price in [low, high]).
-    # Directional "above X" YES price ≈ P(price > X), NO price ≈ P(price ≤ X).
-    # Use these to estimate each zone's probability.
+    # Compute P(neither leg pays) directly from trade structure and
+    # market-implied probabilities. No fragile string matching needed.
+    #
+    # p_in_range = P(price in [L, H])  — from range market
+    # p_above_dir = P(price > T)       — from directional market
     p_in_range = range_market.yes_price if range_is_yes else range_market.no_price
     if dir_direction in ("above", "over"):
         p_above_dir = dir_market.yes_price
@@ -308,35 +310,57 @@ def _build_range_synthetic_info(yes_market: NormalizedEvent,
     else:
         p_above_dir = dir_market.yes_price
 
-    # Assign probabilities to each zone using market prices
-    zone_probs = {}
-    for key, s in scenarios.items():
-        cond = s["condition"]
-        if f"${range_low:,.0f}" in cond and f"${range_high:,.0f}" in cond:
-            # Zone is the range [low, high]
-            zone_probs[key] = p_in_range
-        elif f"${dir_target:,.0f}" in cond and ">" in cond:
-            # Zone is above directional target
-            zone_probs[key] = p_above_dir
-        elif f"${dir_target:,.0f}" in cond and "<" in cond:
-            # Zone is below directional target
-            zone_probs[key] = 1.0 - p_above_dir
+    # Determine "dir_NO_pays_when_below_T" — True when buying NO on "above T"
+    dir_no_below = (dir_direction in ("above", "over", ""))
+
+    if range_is_yes:
+        # BUY YES on range [L,H] + BUY NO on directional.
+        # Range pays: price ∈ [L, H]
+        if dir_no_below:
+            # Dir NO on "above T" pays when price ≤ T.
+            # Neither pays when: price ∉ [L,H] AND price > T
+            if dir_target >= range_high:
+                loss_prob = p_above_dir
+            elif dir_target <= range_low:
+                loss_prob = max(0.0, p_above_dir - p_in_range)
+            else:
+                frac_above = (range_high - dir_target) / (range_high - range_low)
+                loss_prob = max(0.0, p_above_dir - p_in_range * frac_above)
         else:
-            # Gap zone between range boundary and directional target
-            # Residual probability = 1 - sum of known zones
-            zone_probs[key] = None
+            # Dir NO on "below T" pays when price ≥ T.
+            # Neither pays when: price ∉ [L,H] AND price < T
+            if dir_target <= range_low:
+                loss_prob = 1.0 - p_above_dir
+            elif dir_target >= range_high:
+                loss_prob = max(0.0, (1.0 - p_above_dir) - p_in_range)
+            else:
+                frac_below = (dir_target - range_low) / (range_high - range_low)
+                loss_prob = max(0.0, (1.0 - p_above_dir) - p_in_range * frac_below)
+    else:
+        # BUY NO on range + BUY YES on directional.
+        # Range NO pays: price ∉ [L, H]
+        if dir_no_below:
+            # Dir YES on "above T" pays when price > T (note: buying YES, not NO).
+            # Neither pays when: price ∈ [L,H] AND price ≤ T
+            if dir_target >= range_high:
+                loss_prob = p_in_range
+            elif dir_target <= range_low:
+                loss_prob = 0.0
+            else:
+                frac = (dir_target - range_low) / (range_high - range_low)
+                loss_prob = p_in_range * frac
+        else:
+            # Dir YES on "below T" pays when price < T.
+            # Neither pays when: price ∈ [L,H] AND price ≥ T
+            if dir_target <= range_low:
+                loss_prob = p_in_range
+            elif dir_target >= range_high:
+                loss_prob = 0.0
+            else:
+                frac = (range_high - dir_target) / (range_high - range_low)
+                loss_prob = p_in_range * frac
 
-    # Fill in residual zones
-    known_sum = sum(v for v in zone_probs.values() if v is not None)
-    residual = max(0.0, 1.0 - known_sum)
-    residual_count = sum(1 for v in zone_probs.values() if v is None)
-    for key in zone_probs:
-        if zone_probs[key] is None:
-            zone_probs[key] = residual / max(residual_count, 1)
-
-    loss_prob = sum(zone_probs.get(k, 0) for k, s in scenarios.items() if s["return_pct"] <= 0)
-
-    if loss_prob > 0.60:
+    if loss_prob > 0.40:
         return None
 
     # Calculate the gap between range boundary and directional strike
@@ -384,6 +408,20 @@ def _build_synthetic_info(yes_market: NormalizedEvent,
     Returns None if the synthetic is invalid (same-direction doubling, no price data,
     or loss probability > 40%).
     """
+    # Reject if resolution dates differ by >3 days — mismatched expiry
+    # breaks the hedge guarantee (one leg can resolve while the other is active).
+    try:
+        from datetime import datetime as _dt
+        y_exp = yes_market.expiry[:10] if yes_market.expiry else ""
+        n_exp = no_market.expiry[:10] if no_market.expiry else ""
+        if y_exp and n_exp and y_exp != "ongoing" and n_exp != "ongoing":
+            y_d = _dt.strptime(y_exp, "%Y-%m-%d")
+            n_d = _dt.strptime(n_exp, "%Y-%m-%d")
+            if abs((y_d - n_d).days) > 3:
+                return None
+    except (ValueError, TypeError):
+        pass  # Can't parse — allow through, other gates will catch bad synthetics
+
     yes_crypto = _extract_crypto(yes_market.title)
     no_crypto = _extract_crypto(no_market.title)
 
@@ -620,6 +658,19 @@ def _build_threshold_synthetic_info(yes_market: NormalizedEvent,
       low_threshold <= value < high_threshold: BOTH win → $2 payout (bonus!)
       value < low_threshold: YES loses, NO wins → $1 payout
     """
+    # Reject mismatched resolution dates (>3 days apart)
+    try:
+        from datetime import datetime as _dt
+        y_exp = yes_market.expiry[:10] if yes_market.expiry else ""
+        n_exp = no_market.expiry[:10] if no_market.expiry else ""
+        if y_exp and n_exp and y_exp != "ongoing" and n_exp != "ongoing":
+            y_d = _dt.strptime(y_exp, "%Y-%m-%d")
+            n_d = _dt.strptime(n_exp, "%Y-%m-%d")
+            if abs((y_d - n_d).days) > 3:
+                return None
+    except (ValueError, TypeError):
+        pass
+
     yes_t = _extract_threshold(yes_market.title)
     no_t = _extract_threshold(no_market.title)
 
@@ -787,6 +838,13 @@ def find_arbitrage(matched: list[MatchedEvent],
 
         total_cost = best_yes_market.yes_price + best_no_market.no_price
 
+        # Reject synthetics where either leg has no real liquidity.
+        # A $0.0005 YES price looks like 50% spread but is untradeable.
+        _MIN_LEG_PRICE = 0.02
+        if is_synthetic and (best_yes_market.yes_price < _MIN_LEG_PRICE
+                             or best_no_market.no_price < _MIN_LEG_PRICE):
+            continue
+
         if is_synthetic:
             # Try crypto-based synthetic first, then general threshold-based
             synthetic_info = _build_synthetic_info(best_yes_market, best_no_market)
@@ -821,12 +879,15 @@ def find_arbitrage(matched: list[MatchedEvent],
             if effective_profit_pct < min_spread * 100:
                 continue
 
-            # Fee-adjusted profit for synthetics
-            net_pct, _ = _compute_fee_adjusted_profit(
-                best_yes_market.yes_price, best_no_market.no_price,
-                best_yes_market.platform, best_no_market.platform,
-            )
-            net_effective = net_pct * (1.0 - loss_prob) if net_pct > 0 else net_pct
+            # Fee-adjusted profit for synthetics.
+            # _compute_fee_adjusted_profit assumes guaranteed $1 payout (pure arb).
+            # For synthetics, expected payout = win_prob * $1 + loss_prob * $0.
+            # Compute fees directly instead.
+            _yes_fee = best_yes_market.yes_price * _TAKER_FEES.get(best_yes_market.platform, _DEFAULT_TAKER_FEE)
+            _no_fee = best_no_market.no_price * _TAKER_FEES.get(best_no_market.platform, _DEFAULT_TAKER_FEE)
+            total_cost_with_fees = total_cost + _yes_fee + _no_fee
+            expected_payout = 1.0 * (1.0 - loss_prob)  # win → $1, lose → $0
+            net_effective = (expected_payout - total_cost_with_fees) / total_cost_with_fees * 100
             if net_effective <= 0:
                 continue
 
@@ -834,6 +895,8 @@ def find_arbitrage(matched: list[MatchedEvent],
             # so don't apply the confidence filter here
             confidence = _match_confidence(effective_profit_pct)
 
+            _yes_fee_rate = _TAKER_FEES.get(best_yes_market.platform, _DEFAULT_TAKER_FEE)
+            _no_fee_rate = _TAKER_FEES.get(best_no_market.platform, _DEFAULT_TAKER_FEE)
             opportunities.append(ArbitrageOpportunity(
                 matched_event=match,
                 buy_yes_platform=best_yes_market.platform,
@@ -849,6 +912,20 @@ def find_arbitrage(matched: list[MatchedEvent],
                 synthetic_info=synthetic_info,
                 net_profit_pct=round(net_effective, 2),
                 confidence=confidence,
+                calculation_audit={
+                    "yes_price": round(best_yes_market.yes_price, 4),
+                    "no_price": round(best_no_market.no_price, 4),
+                    "yes_platform": best_yes_market.platform,
+                    "no_platform": best_no_market.platform,
+                    "total_cost": round(total_cost, 4),
+                    "gross_spread": round(spread, 4),
+                    "gross_profit_pct": round(spread * 100, 2),
+                    "yes_fee_rate": _yes_fee_rate,
+                    "no_fee_rate": _no_fee_rate,
+                    "loss_probability": round(loss_prob, 3),
+                    "effective_profit_pct": round(effective_profit_pct, 2),
+                    "net_profit_pct": round(net_effective, 2),
+                },
             ))
         else:
             # Pure arb: guaranteed profit if spread > 0
@@ -873,6 +950,8 @@ def find_arbitrage(matched: list[MatchedEvent],
             if confidence == "very_low":
                 continue
 
+            _yes_fee_rate = _TAKER_FEES.get(best_yes_market.platform, _DEFAULT_TAKER_FEE)
+            _no_fee_rate = _TAKER_FEES.get(best_no_market.platform, _DEFAULT_TAKER_FEE)
             opportunities.append(ArbitrageOpportunity(
                 matched_event=match,
                 buy_yes_platform=best_yes_market.platform,
@@ -887,6 +966,18 @@ def find_arbitrage(matched: list[MatchedEvent],
                 is_synthetic=False,
                 net_profit_pct=round(net_pct, 2),
                 confidence=confidence,
+                calculation_audit={
+                    "yes_price": round(best_yes_market.yes_price, 4),
+                    "no_price": round(best_no_market.no_price, 4),
+                    "yes_platform": best_yes_market.platform,
+                    "no_platform": best_no_market.platform,
+                    "total_cost": round(total_cost, 4),
+                    "gross_spread": round(spread, 4),
+                    "gross_profit_pct": round(profit_pct, 2),
+                    "yes_fee_rate": _yes_fee_rate,
+                    "no_fee_rate": _no_fee_rate,
+                    "net_profit_pct": round(net_pct, 2),
+                },
             ))
 
     # Deduplicate by market pair (order-independent) and match_id
@@ -946,7 +1037,47 @@ def unsave_market(match_id: str) -> list[dict]:
 
 
 # ============================================================
-# FEED: RECENT PRICE CHANGES & ALERTS (NEW)
+# WATCHLIST (NEW)
+# ============================================================
+def _watchlist_file() -> Path:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    return DATA_DIR / "watchlist.json"
+
+def load_watchlist_items() -> list[dict]:
+    f = _watchlist_file()
+    if f.exists():
+        try:
+            return json.loads(f.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+    return []
+
+def add_to_watchlist(item_data: dict) -> list[dict]:
+    """Add an individual market to the watchlist."""
+    watchlist = load_watchlist_items()
+    # Avoid duplicates by platform and event_id
+    platform = item_data.get("platform", "")
+    event_id = item_data.get("event_id", "")
+    if platform and event_id and any(w.get("platform") == platform and w.get("event_id") == event_id for w in watchlist):
+        return watchlist
+    item_data["added_at"] = time.time()
+    watchlist.append(item_data)
+    _watchlist_file().write_text(json.dumps(watchlist, indent=2))
+    return watchlist
+
+def remove_from_watchlist(platform: str, event_id: str) -> bool:
+    """Remove an individual market from the watchlist."""
+    watchlist = load_watchlist_items()
+    original_len = len(watchlist)
+    watchlist = [w for w in watchlist if not (w.get("platform") == platform and w.get("event_id") == event_id)]
+    if len(watchlist) < original_len:
+        _watchlist_file().write_text(json.dumps(watchlist, indent=2))
+        return True
+    return False
+
+
+# ============================================================
+# FEED: RECENT PRICE CHANGES & ALERTS
 # ============================================================
 _previous_prices: dict[str, tuple[float, float]] = {}  # "platform:event_id" -> (yes_price, timestamp)
 _previous_prices_lock = threading.Lock()
@@ -973,11 +1104,14 @@ def compute_feed(events: list[NormalizedEvent],
             entry = _previous_prices.get(key)
             prev = entry[0] if entry else None
             _previous_prices[key] = (ev.yes_price, now)
+        
+        # NEW: Save individual market history
+        save_market_history(ev.platform, ev.event_id, ev.yes_price, ev.no_price)
 
         if prev is not None and prev != ev.yes_price:
             change = ev.yes_price - prev
             feed.append({
-                "type": "price_change", # NEW: Add type for feed items
+                "type": "price_change",
                 "platform": ev.platform,
                 "event_id": ev.event_id,
                 "title": ev.title[:80],
@@ -1006,16 +1140,16 @@ def compute_feed(events: list[NormalizedEvent],
     # Add new alerts to the feed
     for opp in new_alerts_detected:
         feed.append({
-            "type": "opportunity_alert", # NEW: Type for alert items
-            "platform": opp.buy_yes_platform, # Use one of the platforms for display
+            "type": "opportunity_alert",
+            "platform": opp.buy_yes_platform,
             "event_id": opp.matched_event.match_id,
             "title": f"New Arb: {opp.matched_event.canonical_title} ({opp.net_profit_pct:.1f}%)",
-            "yes_price": opp.buy_yes_price, # Use relevant price for display
+            "yes_price": opp.buy_yes_price,
             "previous": None,
             "change": opp.net_profit_pct,
             "change_pct": opp.net_profit_pct,
             "timestamp": now,
-            "match_id": opp.matched_event.match_id, # For linking to detail
+            "match_id": opp.matched_event.match_id,
             "is_synthetic": opp.is_synthetic,
         })
     
@@ -1053,6 +1187,7 @@ class ArbitrageScanner:
         self._last_opportunities: list[ArbitrageOpportunity] = []
         self._last_feed: list[dict] = []
         self._last_scan_time: float = 0
+        self._scan_history: list[dict] = []  # Ring buffer of last 100 scans
         self._lock = threading.Lock()
         # Multi-outcome scan cache (TTL: 5 minutes)
         self._multi_outcome_cache: list[dict] = []
@@ -1089,7 +1224,7 @@ class ArbitrageScanner:
         arb_ms = int((time.time() - t3) * 1000)
 
         # 4. Compute feed (now includes alerts)
-        feed = compute_feed(events, opportunities) # NEW: Pass opportunities to feed
+        feed = compute_feed(events, opportunities)
         with self._lock:
             self._last_feed = feed
 
@@ -1101,7 +1236,7 @@ class ArbitrageScanner:
         # 5. Cache to disk
         self._save_cache(events)
         
-        # 6. NEW: Save opportunity history for tracking
+        # 6. Save opportunity history for tracking
         for opp in opportunities:
             save_opportunity_history(opp.matched_event.match_id, opp.profit_pct, opp.net_profit_pct)
 
@@ -1136,19 +1271,32 @@ class ArbitrageScanner:
                     is_synthetic=opp.is_synthetic,
                     volume=opp.combined_volume,
                     event_ids=[opp.buy_yes_event_id, opp.buy_no_event_id],
+                    calculation_audit=opp.calculation_audit if opp.calculation_audit else None,
                 )
 
         logger.info("Scan complete: %d events, %d matched (%d multi-platform), %d opportunities, %dms",
                      len(events), len(matched), multi_platform, len(opportunities), elapsed_ms)
 
-        return {
+        scan_result = {
             "events_count": len(events),
             "matched_count": len(matched),
             "multi_platform_matches": multi_platform,
             "opportunities_count": len(opportunities),
             "feed_changes": len(feed),
             "scan_time": self._last_scan_time,
+            "fetch_ms": fetch_ms,
+            "match_ms": match_ms,
+            "arb_ms": arb_ms,
+            "total_ms": elapsed_ms,
         }
+
+        # Append to scan history ring buffer (keep last 100)
+        with self._lock:
+            self._scan_history.append(scan_result)
+            if len(self._scan_history) > 100:
+                self._scan_history = self._scan_history[-100:]
+
+        return scan_result
 
     def get_opportunities(self) -> list[dict]:
         with self._lock:
@@ -1161,6 +1309,86 @@ class ArbitrageScanner:
     def get_feed(self) -> list[dict]:
         with self._lock:
             return self._last_feed
+
+    def get_scan_history(self, limit: int = 20) -> list[dict]:
+        """Return recent scan results with timing breakdown."""
+        with self._lock:
+            return list(reversed(self._scan_history[-limit:]))
+
+    def get_scan_stats(self) -> dict:
+        """Aggregate stats across recent scan history."""
+        with self._lock:
+            history = self._scan_history[:]
+        if not history:
+            return {"scan_count": 0}
+        total_ms = [s["total_ms"] for s in history]
+        opps = [s["opportunities_count"] for s in history]
+        return {
+            "scan_count": len(history),
+            "avg_total_ms": round(sum(total_ms) / len(total_ms)),
+            "max_total_ms": max(total_ms),
+            "min_total_ms": min(total_ms),
+            "avg_opportunities": round(sum(opps) / len(opps), 1),
+            "total_opportunities": sum(opps),
+            "last_scan_time": history[-1].get("scan_time"),
+        }
+
+    def get_trending_markets(self, limit: int = 10) -> list[dict]: # NEW: Trending markets method
+        """Identify trending markets based on recent price changes and volume spikes."""
+        trending = []
+        now = time.time()
+        
+        # Consider events with significant price changes or high recent volume
+        # This is a simplified heuristic and can be expanded.
+        all_events_map = {f"{e.platform}:{e.event_id}": e for e in self._last_events}
+
+        # Filter price changes from the feed for recent, significant movements
+        recent_price_changes = [
+            item for item in self._last_feed
+            if item["type"] == "price_change" and (now - item["timestamp"]) < 3600 # within last hour
+        ]
+        
+        # Aggregate changes by market
+        market_activity = {} # key -> {"event": event, "change_count": int, "max_change_pct": float, "last_updated": float}
+        for item in recent_price_changes:
+            key = f"{item['platform']}:{item['event_id']}"
+            if key not in market_activity:
+                market_activity[key] = {
+                    "event": all_events_map.get(key),
+                    "change_count": 0,
+                    "max_change_pct": 0.0,
+                    "last_updated": 0,
+                    "volume": 0,
+                }
+            if market_activity[key]["event"] is not None:
+                market_activity[key]["change_count"] += 1
+                market_activity[key]["max_change_pct"] = max(market_activity[key]["max_change_pct"], abs(item["change_pct"]))
+                market_activity[key]["last_updated"] = max(market_activity[key]["last_updated"], item["timestamp"])
+                market_activity[key]["volume"] = market_activity[key]["event"].volume
+
+
+        # Filter and sort trending markets
+        for key, data in market_activity.items():
+            if data["event"] and data["change_count"] >= 2 and data["volume"] > 1000: # at least 2 changes and decent volume
+                trending.append({
+                    "platform": data["event"].platform,
+                    "event_id": data["event"].event_id,
+                    "title": data["event"].title,
+                    "category": data["event"].category,
+                    "current_yes_price": data["event"].yes_price,
+                    "current_no_price": data["event"].no_price,
+                    "volume": data["volume"],
+                    "change_count": data["change_count"],
+                    "max_change_pct": data["max_change_pct"],
+                    "last_updated": data["last_updated"],
+                    "url": data["event"].url,
+                })
+        
+        # Sort by a combination of change magnitude and recency
+        trending.sort(key=lambda x: (x["max_change_pct"] * (now - x["last_updated"]) * -1), reverse=True) # Higher change, more recent = higher score
+        
+        return trending[:limit]
+
 
     async def scan_multi_outcome(self) -> list[dict]:
         """Scan for multi-outcome arbitrage opportunities on Polymarket.

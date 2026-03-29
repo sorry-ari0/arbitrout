@@ -1,7 +1,9 @@
 import logging
 import json
+import os
 import sys
 from contextvars import ContextVar
+from logging.handlers import RotatingFileHandler
 
 # Context variable to hold the request_id for the current request
 _request_id_ctx = ContextVar("request_id", default=None)
@@ -71,3 +73,25 @@ def setup_logging():
 
     # Add the configured handler to the root logger
     root_logger.addHandler(handler)
+
+    # Persistent file logs — survive restarts
+    log_dir = os.path.join(os.path.dirname(__file__), "data", "logs")
+    os.makedirs(log_dir, exist_ok=True)
+
+    # All logs (INFO+) → data/logs/arbitrout.log (10MB, 5 backups)
+    file_handler = RotatingFileHandler(
+        os.path.join(log_dir, "arbitrout.log"),
+        maxBytes=10_000_000, backupCount=5, encoding="utf-8",
+    )
+    file_handler.setFormatter(formatter)
+    file_handler.setLevel(logging.INFO)
+    root_logger.addHandler(file_handler)
+
+    # Errors only (WARNING+) → data/logs/errors.log for quick review
+    error_handler = RotatingFileHandler(
+        os.path.join(log_dir, "errors.log"),
+        maxBytes=5_000_000, backupCount=3, encoding="utf-8",
+    )
+    error_handler.setFormatter(formatter)
+    error_handler.setLevel(logging.WARNING)
+    root_logger.addHandler(error_handler)

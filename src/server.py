@@ -59,7 +59,7 @@ import threading
 
 # --- Arbitrage imports ---
 try:
-    from arbitrage_router import router as arbitrage_router, init_scanner, get_scanner, broadcast_update
+    from arbitrage_router import router as arbitrage_router, init_scanner, get_scanner, broadcast_update, broadcast_error
     from adapters.registry import AdapterRegistry
     from adapters.kalshi import KalshiAdapter
     from adapters.polymarket import PolymarketAdapter
@@ -228,6 +228,14 @@ async def _auto_scan_loop():
             break
         except Exception as exc:
             logger.warning("Auto-scan error: %s", exc)
+            try:
+                await broadcast_error({
+                    "source": "auto_scan",
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                })
+            except Exception:
+                pass
         finally:
             _scan_in_progress = False
         await asyncio.sleep(10)
@@ -411,11 +419,20 @@ async def lifespan(app: FastAPI):
                 paper_executors = {}
                 for name, exec_ in executors.items():
                     paper_executors[name] = PaperExecutor(exec_, starting_balance=get_paper_balance(), use_limit_orders=True)
-                # Always ensure polymarket paper executor exists (price lookups are public, no keys needed)
-                if "polymarket" not in paper_executors:
-                    paper_executors["polymarket"] = PaperExecutor(PolymarketExecutor(), starting_balance=get_paper_balance(), use_limit_orders=True)
+                # In paper mode, ensure ALL prediction market platforms have paper executors
+                # so cross-platform arbitrage can be simulated even without live credentials.
+                # Each PaperExecutor wraps a real executor for price lookups (public APIs).
+                _paper_fallbacks = {
+                    "polymarket": PolymarketExecutor,
+                    "kalshi": KalshiExecutor,
+                    "predictit": PredictItExecutor,
+                    "limitless": LimitlessExecutor,
+                }
+                for pname, ExecCls in _paper_fallbacks.items():
+                    if pname not in paper_executors:
+                        paper_executors[pname] = PaperExecutor(ExecCls(), starting_balance=get_paper_balance(), use_limit_orders=True)
                 executors = paper_executors
-                logger.info("Position system running in PAPER TRADING mode (balance=$%.2f)", get_paper_balance())
+                logger.info("Position system running in PAPER TRADING mode (balance=$%.2f, %d executors)", get_paper_balance(), len(executors))
 
             # Bankroll: $20 live, $2000 paper
             LIVE_BANKROLL = float(os.environ.get("BANKROLL", "20"))
@@ -711,6 +728,33 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_calibration_loop())
     app.state.calibration_engine = _calibration_engine
 
+    # Log startup summary to decision log for persistent diagnostics
+    _import_errors = []
+    if not _ARBITRAGE_AVAILABLE:
+        _import_errors.append(f"arbitrage: {_arb_err}" if '_arb_err' in dir() else "arbitrage: unknown")
+    if not _POSITIONS_AVAILABLE:
+        _import_errors.append(f"positions: {_pos_err}" if '_pos_err' in dir() else "positions: unknown")
+    if decision_log:
+        _exec_names = list(executors.keys()) if _POSITIONS_AVAILABLE and 'executors' in dir() else []
+        _adapter_count = len(arb_registry._adapters) if _ARBITRAGE_AVAILABLE and 'arb_registry' in dir() else 0
+        decision_log.log_startup_summary(
+            arbitrage_available=_ARBITRAGE_AVAILABLE,
+            positions_available=_POSITIONS_AVAILABLE,
+            adapters_registered=_adapter_count,
+            executors_configured=_exec_names,
+            mode="paper" if is_paper_mode() else "live",
+            import_errors=_import_errors if _import_errors else None,
+        )
+
+    # Store refs for /api/system/health endpoint
+    app.state._startup_time = time.time()
+    app.state._arb_available = _ARBITRAGE_AVAILABLE
+    app.state._pos_available = _POSITIONS_AVAILABLE
+    app.state._arb_registry = arb_registry if _ARBITRAGE_AVAILABLE and 'arb_registry' in dir() else None
+    app.state._auto_trader = _auto_trader_ref
+    app.state._mode = "paper" if (_POSITIONS_AVAILABLE and is_paper_mode()) else "live"
+    app.state._import_errors = _import_errors
+
     logger.info("Lobsterminal started on port 8500", extra={"event_type": "server_startup"})
     yield
     # Shutdown
@@ -905,6 +949,94 @@ async def health():
     fmp_status = "enabled" if os.environ.get("FMP_API_KEY") else "disabled (set FMP_API_KEY)"
     dexter_status = "enabled" if os.environ.get("FINANCIAL_DATASETS_API_KEY") else "free tier (AAPL, NVDA, MSFT)"
     return {"status": "ok", "time": time.time(), "fmp_api": fmp_status, "dexter_api": dexter_status}
+
+
+@app.get("/api/system/health")
+async def system_health(request: Request):
+    """Unified health endpoint — aggregates all subsystem statuses."""
+    now = time.time()
+    startup = getattr(request.app.state, '_startup_time', now)
+    uptime_sec = int(now - startup)
+    mode = getattr(request.app.state, '_mode', 'unknown')
+    arb_available = getattr(request.app.state, '_arb_available', False)
+    pos_available = getattr(request.app.state, '_pos_available', False)
+    import_errors = getattr(request.app.state, '_import_errors', [])
+
+    # Adapter statuses
+    registry = getattr(request.app.state, '_arb_registry', None)
+    adapter_statuses = registry.get_all_status() if registry else []
+
+    # Auto trader stats (includes skip_reasons)
+    trader = getattr(request.app.state, '_auto_trader', None)
+    trader_stats = trader.get_stats() if trader else {}
+
+    # Open positions
+    open_positions = trader_stats.get("open_positions", 0)
+    total_exposure = trader_stats.get("total_exposure", 0)
+
+    # Scanner stats
+    scanner = None
+    scan_stats = {}
+    if arb_available:
+        try:
+            scanner = get_scanner()
+            scan_stats = scanner.get_scan_stats()
+        except Exception:
+            pass
+
+    # Recent errors from errors.log (last 10)
+    recent_errors = []
+    error_log = Path(__file__).parent / "data" / "logs" / "errors.log"
+    if error_log.exists():
+        try:
+            with open(error_log, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+                for line in lines[-10:]:
+                    try:
+                        recent_errors.append(json.loads(line.strip()))
+                    except json.JSONDecodeError:
+                        recent_errors.append({"raw": line.strip()})
+        except Exception:
+            pass
+
+    # Overall verdict
+    adapters_online = sum(1 for s in adapter_statuses if s.get("status") == "online")
+    adapters_total = len(adapter_statuses)
+    has_errors = bool(import_errors)
+    trader_running = trader_stats.get("running", False)
+
+    if has_errors or not arb_available or not pos_available:
+        verdict = "critical"
+    elif adapters_online < adapters_total // 2 or not trader_running:
+        verdict = "degraded"
+    else:
+        verdict = "healthy"
+
+    return JSONResponse(content={
+        "verdict": verdict,
+        "uptime_seconds": uptime_sec,
+        "mode": mode,
+        "timestamp": now,
+        "subsystems": {
+            "arbitrage": arb_available,
+            "positions": pos_available,
+            "import_errors": import_errors,
+        },
+        "adapters": adapter_statuses,
+        "adapters_summary": {
+            "total": adapters_total,
+            "online": adapters_online,
+            "error": sum(1 for s in adapter_statuses if s.get("status") == "error"),
+            "stale": sum(1 for s in adapter_statuses if s.get("status") == "stale"),
+        },
+        "auto_trader": trader_stats,
+        "scan_stats": scan_stats,
+        "positions": {
+            "open": open_positions,
+            "total_exposure": total_exposure,
+        },
+        "recent_errors": recent_errors,
+    })
 
 
 @app.get("/api/ping")
