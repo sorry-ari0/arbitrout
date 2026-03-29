@@ -31,8 +31,11 @@ class BracketManager:
         Target: resting GTC sell order on the book (fills automatically at 0% fee).
         Stop: tracked price level (no resting order — see module docstring).
         """
-        # Skip hold-to-resolution packages — they should resolve at $0/$1
-        if pkg.get("_hold_to_resolution"):
+        # Skip hold-to-resolution packages UNLESS they explicitly requested brackets.
+        # portfolio_no sets both _hold_to_resolution and _use_brackets — brackets
+        # capture the 15% target at 0% maker fee, resolution handles the downside.
+        # (bracket_target is 100% WR, +$15.54 — the best performing exit trigger.)
+        if pkg.get("_hold_to_resolution") and not pkg.get("_use_brackets"):
             return {"skipped": True, "reason": "hold_to_resolution"}
 
         rules = pkg.get("exit_rules", [])
