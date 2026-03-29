@@ -23,6 +23,11 @@ let arbInsiderPollingInterval = null; // NEW interval for insider signals
 let arbWhalePollingInterval = null; // Kalshi whale signals interval
 let forexPollingInterval = null; // NEW: Forex rates polling interval
 let currentForexRates = {}; // NEW: Store current forex rates
+let watchlistItems = []; // NEW: Store watchlist items
+let arbWatchlistPollingInterval = null; // NEW: Polling interval for watchlist
+let trendingMarkets = []; // NEW: Store trending markets
+let arbTrendingPollingInterval = null; // NEW: Polling interval for trending markets
+
 
 // === PIXEL ART (CSS grid of div cells) ===
 function createPixelGrid(colorMap, scale) {
@@ -189,19 +194,23 @@ function startArbPolling() {
     triggerScan();
     loadOpportunities();
     loadSavedMarkets();
-    loadHedgePackages(); // NEW: Load hedge packages
-    loadNews(); // NEW: Load news
-    loadInsiderSignals(); // NEW: Load insider signals
-    loadWhaleSignals(); // Load Kalshi whale signals
-    loadForexRates(); // NEW: Load forex rates
+    loadHedgePackages();
+    loadNews();
+    loadInsiderSignals();
+    loadWhaleSignals();
+    loadForexRates();
+    loadWatchlist(); // NEW: Load watchlist
+    loadTrendingMarkets(); // NEW: Load trending markets
 
     arbPollingInterval = setInterval(loadOpportunities, 15000);
     arbScanInterval = setInterval(triggerScan, 60000);
-    arbHedgePollingInterval = setInterval(loadHedgePackages, 30000); // NEW: Poll hedge packages every 30s
-    arbNewsPollingInterval = setInterval(loadNews, 60000); // NEW: Poll news every 60s
-    arbInsiderPollingInterval = setInterval(loadInsiderSignals, 30000); // NEW: Poll insider signals every 30s
-    arbWhalePollingInterval = setInterval(loadWhaleSignals, 30000); // Poll Kalshi whale signals every 30s
-    forexPollingInterval = setInterval(loadForexRates, 60000); // NEW: Poll forex rates every 60s
+    arbHedgePollingInterval = setInterval(loadHedgePackages, 30000);
+    arbNewsPollingInterval = setInterval(loadNews, 60000);
+    arbInsiderPollingInterval = setInterval(loadInsiderSignals, 30000);
+    arbWhalePollingInterval = setInterval(loadWhaleSignals, 30000);
+    forexPollingInterval = setInterval(loadForexRates, 60000);
+    arbWatchlistPollingInterval = setInterval(loadWatchlist, 30000); // NEW: Poll watchlist every 30s
+    arbTrendingPollingInterval = setInterval(loadTrendingMarkets, 60000); // NEW: Poll trending markets every 60s
     connectArbWs();
 }
 
@@ -214,25 +223,33 @@ function stopArbPolling() {
         clearInterval(arbScanInterval);
         arbScanInterval = null;
     }
-    if (arbHedgePollingInterval) { // NEW: Clear hedge polling interval
+    if (arbHedgePollingInterval) {
         clearInterval(arbHedgePollingInterval);
         arbHedgePollingInterval = null;
     }
-    if (arbNewsPollingInterval) { // NEW: Clear news polling interval
+    if (arbNewsPollingInterval) {
         clearInterval(arbNewsPollingInterval);
         arbNewsPollingInterval = null;
     }
-    if (arbInsiderPollingInterval) { // NEW: Clear insider polling interval
+    if (arbInsiderPollingInterval) {
         clearInterval(arbInsiderPollingInterval);
         arbInsiderPollingInterval = null;
     }
-    if (arbWhalePollingInterval) { // Clear Kalshi whale polling interval
+    if (arbWhalePollingInterval) {
         clearInterval(arbWhalePollingInterval);
         arbWhalePollingInterval = null;
     }
-    if (forexPollingInterval) { // NEW: Clear forex polling interval
+    if (forexPollingInterval) {
         clearInterval(forexPollingInterval);
         forexPollingInterval = null;
+    }
+    if (arbWatchlistPollingInterval) { // NEW: Clear watchlist polling interval
+        clearInterval(arbWatchlistPollingInterval);
+        arbWatchlistPollingInterval = null;
+    }
+    if (arbTrendingPollingInterval) { // NEW: Clear trending polling interval
+        clearInterval(arbTrendingPollingInterval);
+        arbTrendingPollingInterval = null;
     }
     if (arbWs) {
         arbWs.close();
@@ -271,9 +288,9 @@ function connectArbWs() {
             renderOpportunities(data.data);
         } else if (data.type === 'feed') {
             addFeedItem(data.data);
-        } else if (data.type === 'news_alert') { // NEW
+        } else if (data.type === 'news_alert') {
             addFeedItem({
-                type: 'news_alert', // NEW: Type for news alerts
+                type: 'news_alert',
                 time: new Date().toLocaleTimeString(),
                 platform: 'NEWS ALERT',
                 title: data.data.headline,
@@ -307,7 +324,7 @@ function sortOpportunities(opps) {
         case 'profit-low': sorted.sort(function(a, b) { return (a.net_profit_pct || a.profit_pct || 0) - (b.net_profit_pct || b.profit_pct || 0); }); break;
         case 'platform-az': sorted.sort(function(a, b) { return (a.buy_yes_platform || '').localeCompare(b.buy_yes_platform || ''); }); break;
         case 'newest': sorted.sort(function(a, b) { return (b.last_updated || 0) - (a.last_updated || 0); }); break;
-        case 'volume-high': sorted.sort(function(a, b) { return (b.volume || 0) - (a.volume || 0); }); break;
+        case 'volume-high': sorted.sort(function(a, b) { return (b.combined_volume || 0) - (a.combined_volume || 0); }); break;
     }
     return sorted;
 }
@@ -450,7 +467,7 @@ function renderOpportunities(opps) {
 }
 
 // === EVENT DETAIL ===
-async function showEventDetail(opp) { // NEW: Make function async
+async function showEventDetail(opp) {
     selectedOpp = opp;
     lastSelectedOppId = opp.match_id || (opp.matched_event ? opp.matched_event.match_id : null);
     localStorage.setItem('arbSelectedOppId', lastSelectedOppId); // Save selected opportunity ID
@@ -513,7 +530,7 @@ async function showEventDetail(opp) { // NEW: Make function async
     var buyYesEventId = opp.buy_yes_event_id || '';
     var buyNoEventId = opp.buy_no_event_id || '';
 
-    markets.forEach(function(m) {
+    for (const m of markets) { // Use for...of for async inside loop
         var row = document.createElement('div');
         row.className = 'platform-row';
 
@@ -566,7 +583,110 @@ async function showEventDetail(opp) { // NEW: Make function async
         row.appendChild(linkEl);
 
         container.appendChild(row);
-    });
+
+        // NEW: Add watchlist button for individual markets
+        var watchlistBtn = document.createElement('button');
+        watchlistBtn.textContent = '\u2606'; // Star icon
+        watchlistBtn.title = 'Add to Watchlist';
+        watchlistBtn.style.cssText = 'background:none; border:none; color:var(--arb-muted); cursor:pointer; font-size:14px; margin-left:8px;';
+        watchlistBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            addToWatchlist({
+                platform: m.platform,
+                event_id: m.event_id,
+                title: m.title,
+                category: m.category,
+                url: m.url
+            });
+            watchlistBtn.style.color = 'var(--arb-accent)'; // Change color on click
+        });
+        row.appendChild(watchlistBtn);
+
+
+        // NEW: Load and display individual market history chart
+        try {
+            const marketHistoryResponse = await fetch(`/api/arbitrage/market_history/${encodeURIComponent(m.platform)}/${encodeURIComponent(m.event_id)}`);
+            const marketHistoryData = await marketHistoryResponse.json();
+            if (marketHistoryData && marketHistoryData.length > 1) { // Need at least 2 points to draw a line
+                const chartDiv = document.createElement('div');
+                chartDiv.style.cssText = 'width:100%; height:100px; margin-top:5px; margin-bottom:10px; border-top:1px dashed var(--arb-border); padding-top:5px;';
+                const canvas = document.createElement('canvas');
+                canvas.id = `marketChart-${m.platform}-${m.event_id}`;
+                chartDiv.appendChild(canvas);
+                container.appendChild(chartDiv);
+
+                // Prepare data for Chart.js
+                const labels = marketHistoryData.map(entry => new Date(entry.timestamp * 1000).toLocaleTimeString());
+                const yesPrices = marketHistoryData.map(entry => entry.yes_price * 100); // Convert to cents
+                const noPrices = marketHistoryData.map(entry => entry.no_price * 100); // Convert to cents
+
+                new Chart(canvas, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            {
+                                label: 'YES Price',
+                                data: yesPrices,
+                                borderColor: 'var(--arb-green)',
+                                tension: 0.1,
+                                fill: false,
+                                pointRadius: 0
+                            },
+                            {
+                                label: 'NO Price',
+                                data: noPrices,
+                                borderColor: '#ff9800',
+                                tension: 0.1,
+                                fill: false,
+                                pointRadius: 0
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: true,
+                                labels: {
+                                    color: 'var(--arb-muted)',
+                                    font: { size: 9 }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                ticks: {
+                                    color: 'var(--arb-muted)',
+                                    font: { size: 8 },
+                                    maxRotation: 45,
+                                    minRotation: 45,
+                                    callback: function(val, index) {
+                                        // Show fewer labels on x-axis
+                                        return index % 5 === 0 ? this.getLabelForValue(val) : '';
+                                    }
+                                },
+                                grid: { color: 'rgba(30,30,48,0.5)' }
+                            },
+                            y: {
+                                beginAtZero: false,
+                                ticks: {
+                                    color: 'var(--arb-muted)',
+                                    font: { size: 9 },
+                                    callback: function(value) { return value.toFixed(0) + '\u00A2'; }
+                                },
+                                grid: { color: 'rgba(30,30,48,0.5)' }
+                            }
+                        }
+                    }
+                });
+            }
+        } catch (error) {
+            console.error(`Failed to load historical data for ${m.platform}:${m.event_id}:`, error);
+        }
+    }
+
 
     // Arbitrage trade instructions
     if (opp.buy_yes_price !== undefined && opp.buy_no_price !== undefined) {
@@ -727,8 +847,8 @@ async function showEventDetail(opp) { // NEW: Make function async
     // NEW: Display Historical Profit for this opportunity
     if (lastSelectedOppId) {
         try {
-            const response = await fetch('/api/arbitrage/history/' + encodeURIComponent(lastSelectedOppId));
-            const historyData = await response.json();
+            const historyResponse = await fetch('/api/arbitrage/history/' + encodeURIComponent(lastSelectedOppId));
+            const historyData = await historyResponse.json();
             if (historyData && historyData.length > 0) {
                 var historyDiv = document.createElement('div');
                 historyDiv.style.cssText = 'padding:10px 8px;border-top:1px solid var(--arb-border);font-family:monospace;font-size:11px;margin-top:8px;';
@@ -737,14 +857,65 @@ async function showEventDetail(opp) { // NEW: Make function async
                 historyTitle.textContent = 'HISTORICAL PROFIT (%)';
                 historyDiv.appendChild(historyTitle);
 
-                historyData.forEach(entry => {
-                    var historyEntry = document.createElement('div');
-                    historyEntry.style.cssText = 'padding:2px 0;display:flex;justify-content:space-between;';
-                    var timestamp = new Date(entry.timestamp * 1000).toLocaleString();
-                    var profit = entry.net_profit_pct.toFixed(1) + '%';
-                    historyEntry.innerHTML = `<span>${timestamp}</span> <span style="color: ${entry.net_profit_pct > 0 ? 'var(--arb-green)' : 'var(--arb-red)'}; font-weight:700;">${profit}</span>`;
-                    historyDiv.appendChild(historyEntry);
+                // Create a canvas for the Chart.js graph
+                const chartCanvas = document.createElement('canvas');
+                chartCanvas.id = `oppHistoryChart-${lastSelectedOppId}`;
+                chartCanvas.style.height = '150px'; // Set a fixed height for the chart
+                historyDiv.appendChild(chartCanvas);
+
+                // Prepare data for Chart.js
+                const labels = historyData.map(entry => new Date(entry.timestamp * 1000).toLocaleTimeString());
+                const profitValues = historyData.map(entry => entry.net_profit_pct);
+
+                new Chart(chartCanvas, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Net Profit %',
+                            data: profitValues,
+                            borderColor: 'var(--arb-green)', // Use arb green for profit
+                            tension: 0.1,
+                            fill: false,
+                            pointRadius: 2,
+                            pointBackgroundColor: 'var(--arb-accent)'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: false // Hide legend as only one dataset
+                            }
+                        },
+                        scales: {
+                            x: {
+                                ticks: {
+                                    color: 'var(--arb-muted)',
+                                    font: { size: 9 },
+                                    maxRotation: 45,
+                                    minRotation: 45,
+                                    callback: function(val, index) {
+                                        // Show fewer labels on x-axis for readability
+                                        return index % 5 === 0 ? this.getLabelForValue(val) : '';
+                                    }
+                                },
+                                grid: { color: 'rgba(30,30,48,0.5)' }
+                            },
+                            y: {
+                                beginAtZero: false,
+                                ticks: {
+                                    color: 'var(--arb-muted)',
+                                    font: { size: 9 },
+                                    callback: function(value) { return value.toFixed(1) + '%'; }
+                                },
+                                grid: { color: 'rgba(30,30,48,0.5)' }
+                            }
+                        }
+                    }
                 });
+                
                 container.appendChild(historyDiv);
             }
         } catch (error) {
@@ -840,13 +1011,10 @@ function renderFeed() {
     });
 }
 
-// === STACKED PANELS (NEWS, SAVED, HEDGE, INSIDER, WHALE, FOREX) ===
-// This function renders all three sections in the bottom-right panel
+// === STACKED PANELS (NEWS, SAVED, HEDGE, INSIDER, WHALE, FOREX, WATCHLIST, TRENDING) ===
 function renderAllStackedPanels() {
-    // Target the bottom-right arb-panel, assuming arbitrout-container is a 2x2 grid
     var stackedPanelContainer = document.querySelector('.arbitrout-container > .arb-panel:nth-child(4)');
 
-    // If the element doesn't have an ID, give it one for easier access in CSS/JS
     if (stackedPanelContainer && !stackedPanelContainer.id) {
         stackedPanelContainer.id = 'arb-bottom-right-panel';
     }
@@ -856,7 +1024,6 @@ function renderAllStackedPanels() {
         return;
     }
 
-    // Clear existing content in the panel body
     var panelBody = stackedPanelContainer.querySelector('.arb-panel-body');
     if (!panelBody) {
         panelBody = document.createElement('div');
@@ -868,7 +1035,7 @@ function renderAllStackedPanels() {
         }
     }
 
-    // --- Render Forex Rates Section --- (NEW)
+    // --- Render Forex Rates Section ---
     var forexHeader = document.createElement('div');
     forexHeader.className = 'arb-section-header';
     forexHeader.textContent = 'FOREX RATES';
@@ -908,7 +1075,7 @@ function renderAllStackedPanels() {
     panelBody.appendChild(newsHeader);
     var newsList = document.createElement('div');
     newsList.id = 'news-list';
-    newsList.className = 'arb-section-content'; // Use a specific class for content areas
+    newsList.className = 'arb-section-content';
     renderNewsContent(newsList, newsItems);
     panelBody.appendChild(newsList);
 
@@ -922,6 +1089,28 @@ function renderAllStackedPanels() {
     savedList.className = 'arb-section-content';
     renderSavedContent(savedList, savedMarkets);
     panelBody.appendChild(savedList);
+
+    // --- Render Watchlist Section --- (NEW)
+    var watchlistHeader = document.createElement('div');
+    watchlistHeader.className = 'arb-section-header';
+    watchlistHeader.textContent = 'WATCHLIST';
+    panelBody.appendChild(watchlistHeader);
+    var watchlistList = document.createElement('div');
+    watchlistList.id = 'watchlist-list';
+    watchlistList.className = 'arb-section-content';
+    renderWatchlistContent(watchlistList, watchlistItems);
+    panelBody.appendChild(watchlistList);
+
+    // --- Render Trending Markets Section --- (NEW)
+    var trendingHeader = document.createElement('div');
+    trendingHeader.className = 'arb-section-header';
+    trendingHeader.textContent = 'TRENDING MARKETS';
+    panelBody.appendChild(trendingHeader);
+    var trendingList = document.createElement('div');
+    trendingList.id = 'trending-markets-list';
+    trendingList.className = 'arb-section-content';
+    renderTrendingMarketsContent(trendingList, trendingMarkets);
+    panelBody.appendChild(trendingList);
 
     // --- Render Hedge Packages Section ---
     var hedgeHeader = document.createElement('div');
@@ -941,8 +1130,8 @@ function loadSavedMarkets() {
     fetch('/api/arbitrage/saved')
         .then(function(r) { return r.json(); })
         .then(function(data) {
-            savedMarkets = data; // Store data globally
-            renderAllStackedPanels(); // Render all sections in the stacked container
+            savedMarkets = data;
+            renderAllStackedPanels();
         })
         .catch(function() {});
 }
@@ -1004,7 +1193,7 @@ function loadHedgePackages() {
         .then(function(r) { return r.json(); })
         .then(function(data) {
             hedgePackages = data;
-            renderAllStackedPanels(); // Render all sections in the stacked container
+            renderAllStackedPanels();
         })
         .catch(function(err) { console.error('Hedge packages fetch error:', err); });
 }
@@ -1025,7 +1214,7 @@ function renderHedgePackagesContent(container, packages) {
 
     packages.forEach(function(pkg) {
         var card = document.createElement('div');
-        card.className = 'hedge-package-card arb-card'; // Add arb-card for general styling
+        card.className = 'hedge-package-card arb-card';
 
         var header = document.createElement('div');
         header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding-bottom:4px;border-bottom:1px solid var(--arb-border);margin-bottom:8px;';
@@ -1039,16 +1228,16 @@ function renderHedgePackagesContent(container, packages) {
         profitIndicator.style.cssText = 'font-size:11px;font-weight:700;padding:2px 6px;border-radius:3px;';
         if (pkg.overall_profit_type === 'guaranteed') {
             profitIndicator.textContent = 'GUARANTEED PROFIT';
-            profitIndicator.style.backgroundColor = 'rgba(0, 255, 0, 0.1)'; // var(--arb-green-bg)
-            profitIndicator.style.color = '#0f0'; // var(--arb-green)
+            profitIndicator.style.backgroundColor = 'rgba(0, 255, 0, 0.1)';
+            profitIndicator.style.color = '#0f0';
         } else if (pkg.overall_profit_type === 'conditional') {
             profitIndicator.textContent = 'CONDITIONAL PROFIT';
-            profitIndicator.style.backgroundColor = 'rgba(255, 255, 0, 0.1)'; // var(--arb-yellow-bg)
-            profitIndicator.style.color = '#ff0'; // var(--arb-yellow)
+            profitIndicator.style.backgroundColor = 'rgba(255, 255, 0, 0.1)';
+            profitIndicator.style.color = '#ff0';
         } else {
             profitIndicator.textContent = 'P&L SCENARIOS';
-            profitIndicator.style.backgroundColor = 'rgba(100, 100, 100, 0.1)'; // var(--arb-muted-bg)
-            profitIndicator.style.color = '#888'; // var(--arb-muted)
+            profitIndicator.style.backgroundColor = 'rgba(100, 100, 100, 0.1)';
+            profitIndicator.style.color = '#888';
         }
         header.appendChild(profitIndicator);
         card.appendChild(header);
@@ -1106,8 +1295,8 @@ function loadNews() {
     fetch('/api/arbitrage/news')
         .then(function(r) { return r.json(); })
         .then(function(data) {
-            newsItems = data || []; // Ensure newsItems is an array
-            renderAllStackedPanels(); // Render all sections in the stacked container
+            newsItems = data || [];
+            renderAllStackedPanels();
         })
         .catch(function(err) { console.error('News fetch error:', err); });
 }
@@ -1125,7 +1314,7 @@ function renderNewsContent(container, newsData) {
         return;
     }
 
-    newsData.slice(0, 20).forEach(function(item) { // Limit to 20 recent news items
+    newsData.slice(0, 20).forEach(function(item) {
         var newsEntry = document.createElement('div');
         newsEntry.className = 'news-entry';
         if (item.is_breaking) {
@@ -1136,7 +1325,7 @@ function renderNewsContent(container, newsData) {
         header.className = 'news-header';
         var timeSpan = document.createElement('span');
         timeSpan.className = 'news-time';
-        timeSpan.textContent = new Date(item.timestamp).toLocaleTimeString() + ' ';
+        timeSpan.textContent = new Date(item.timestamp * 1000).toLocaleTimeString() + ' '; // NEW: Use *1000 for JS timestamp
         header.appendChild(timeSpan);
         var headlineLink = document.createElement('a');
         headlineLink.className = 'news-headline';
@@ -1145,6 +1334,15 @@ function renderNewsContent(container, newsData) {
         headlineLink.target = '_blank';
         headlineLink.rel = 'noopener';
         header.appendChild(headlineLink);
+
+        // NEW: Display sentiment
+        if (item.sentiment) {
+            var sentimentSpan = document.createElement('span');
+            sentimentSpan.className = 'news-sentiment ' + item.sentiment.toLowerCase();
+            sentimentSpan.textContent = item.sentiment.toUpperCase();
+            header.appendChild(sentimentSpan);
+        }
+        
         newsEntry.appendChild(header);
 
         if (item.matched_markets && item.matched_markets.length > 0) {
@@ -1234,7 +1432,7 @@ function renderInsiderSignalsContent(container, data) {
         movementsHeader.textContent = 'RECENT MOVEMENTS';
         container.appendChild(movementsHeader);
 
-        data.recent_movements.slice(0, 10).forEach(function(movement) { // Limit to 10
+        data.recent_movements.slice(0, 10).forEach(function(movement) {
             var movementEl = document.createElement('div');
             movementEl.className = 'insider-movement-entry';
             
@@ -1271,7 +1469,7 @@ function renderInsiderSignalsContent(container, data) {
         signalsHeader.textContent = 'ACTIVE SIGNALS';
         container.appendChild(signalsHeader);
 
-        data.active_signals.slice(0, 5).forEach(function(signal) { // Limit to 5
+        data.active_signals.slice(0, 5).forEach(function(signal) {
             var signalEl = document.createElement('div');
             signalEl.className = 'insider-signal-entry';
             
@@ -1310,7 +1508,7 @@ function renderInsiderSignalsContent(container, data) {
         convHeader.textContent = 'CONVERGENCE ALERTS';
         container.appendChild(convHeader);
 
-        data.convergence_alerts.slice(0, 3).forEach(function(alert) { // Limit to 3
+        data.convergence_alerts.slice(0, 3).forEach(function(alert) {
             var alertEl = document.createElement('div');
             alertEl.className = 'insider-convergence-alert';
             
@@ -1540,6 +1738,135 @@ function renderForexRatesContent(container, ratesData) {
     container.appendChild(updateTime);
 }
 
+// === WATCHLIST (NEW SECTION) ===
+function loadWatchlist() {
+    fetch('/api/arbitrage/watchlist')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            watchlistItems = data;
+            renderAllStackedPanels();
+        })
+        .catch(function(err) { console.error('Watchlist fetch error:', err); });
+}
+
+function renderWatchlistContent(container, items) {
+    while (container.firstChild) {
+        container.removeChild(container.firstChild);
+    }
+
+    if (!items || items.length === 0) {
+        var empty = document.createElement('div');
+        empty.className = 'arb-empty';
+        empty.textContent = 'No markets in watchlist';
+        container.appendChild(empty);
+        return;
+    }
+
+    items.forEach(function(item) {
+        var row = document.createElement('div');
+        row.className = 'watchlist-row';
+
+        var titleEl = document.createElement('div');
+        titleEl.className = 'watchlist-title';
+        titleEl.textContent = item.title;
+        row.appendChild(titleEl);
+
+        var platformEl = document.createElement('span');
+        platformEl.className = 'watchlist-platform';
+        platformEl.textContent = item.platform.toUpperCase();
+        row.appendChild(platformEl);
+
+        var removeBtn = document.createElement('button');
+        removeBtn.className = 'watchlist-remove';
+        removeBtn.textContent = '\u00D7';
+        removeBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            removeFromWatchlist(item.platform, item.event_id);
+        });
+        row.appendChild(removeBtn);
+
+        row.addEventListener('click', function() {
+            window.open(item.url, '_blank');
+        });
+
+        container.appendChild(row);
+    });
+}
+
+function addToWatchlist(item) {
+    fetch('/api/arbitrage/watchlist', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(item)
+    }).then(function() { loadWatchlist(); });
+}
+
+function removeFromWatchlist(platform, eventId) {
+    fetch(`/api/arbitrage/watchlist/${encodeURIComponent(platform)}/${encodeURIComponent(eventId)}`, {
+        method: 'DELETE'
+    }).then(function() { loadWatchlist(); });
+}
+
+// === TRENDING MARKETS (NEW SECTION) ===
+function loadTrendingMarkets() {
+    fetch('/api/arbitrage/trending')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            trendingMarkets = data;
+            renderAllStackedPanels();
+        })
+        .catch(function(err) { console.error('Trending markets fetch error:', err); });
+}
+
+function renderTrendingMarketsContent(container, items) {
+    while (container.firstChild) {
+        container.removeChild(container.firstChild);
+    }
+
+    if (!items || items.length === 0) {
+        var empty = document.createElement('div');
+        empty.className = 'arb-empty';
+        empty.textContent = 'No markets trending right now.';
+        container.appendChild(empty);
+        return;
+    }
+
+    items.forEach(function(item) {
+        var row = document.createElement('div');
+        row.className = 'trending-row';
+        row.addEventListener('click', function() {
+            window.open(item.url, '_blank'); // Open market URL on click
+        });
+
+        var titleEl = document.createElement('div');
+        titleEl.className = 'trending-title';
+        titleEl.textContent = item.title;
+        row.appendChild(titleEl);
+
+        var detailsEl = document.createElement('div');
+        detailsEl.className = 'trending-details';
+
+        var platformSpan = document.createElement('span');
+        platformSpan.className = 'trending-platform';
+        platformSpan.textContent = item.platform.toUpperCase();
+        detailsEl.appendChild(platformSpan);
+
+        var changeSpan = document.createElement('span');
+        changeSpan.className = 'trending-change';
+        changeSpan.textContent = item.max_change_pct.toFixed(1) + '% price change';
+        detailsEl.appendChild(changeSpan);
+
+        var volumeSpan = document.createElement('span');
+        volumeSpan.className = 'trending-volume';
+        volumeSpan.textContent = '$' + (item.volume / 1000).toFixed(0) + 'K vol';
+        detailsEl.appendChild(volumeSpan);
+
+        row.appendChild(detailsEl);
+        container.appendChild(row);
+    });
+}
+
+
 // === POSITIONS DASHBOARD ===
 var positionsData = { packages: [], dashboard: {}, alerts: [], config: {} };
 var posWs = null;
@@ -1637,7 +1964,7 @@ function renderPortfolioBar(stats) {
                 statusBadge.className = 'pos-badge ' + (exec.is_paper_trading ? 'paper' : 'live');
                 statusBadge.textContent = exec.is_paper_trading ? 'PAPER' : 'LIVE';
                 statusBadge.style.cssText = 'font-size: 8px; padding: 1px 4px; border-radius: 3px; background: rgba(0, 200, 255, 0.1); color: var(--arb-accent);';
-                if (!exec.is_paper_trading) { // For live, make it slightly different
+                if (!exec.is_paper_trading) {
                     statusBadge.style.background = 'rgba(0, 255, 0, 0.1)';
                     statusBadge.style.color = 'var(--arb-green)';
                 }
@@ -1841,4 +2168,8 @@ document.addEventListener('DOMContentLoaded', function() {
     if (document.getElementById('pos-packages-list')) {
         initPositionsDashboard();
     }
+    // NEW: Load Chart.js library
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/chart.js';
+    document.head.appendChild(script);
 });

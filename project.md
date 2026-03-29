@@ -1,7 +1,7 @@
 # Project: Arbitrout (Prediction Market Arbitrage + Auto Trading)
 Status: ACTIVE
 Phase: BUILD
-Last Updated: 2026-03-26
+Last Updated: 2026-03-28
 Repo: https://github.com/sorry-ari0/arbitrout.git
 Branch: main
 
@@ -663,13 +663,13 @@ The exit engine runs a 60-second scan loop evaluating all open packages.
 - Batched prompt uses `[PKG:id]` markers so AI can address each package separately
 - Provider chain: Groq → Gemini → OpenRouter (Anthropic first in live mode)
 - AI returns per-package: APPROVE (execute), MODIFY (adjust rule params within bounds), REJECT (skip with reason)
-- **AI_EXITS_ENABLED = False** — AI exit signals (time_decay, negative_drift, trailing_stop) are disabled based on trade journal analysis (35 trades, 88.6% loss rate, 0% win rate on AI-approved exits). Mechanical exits (auto:target_hit, auto:stop_loss, auto:trailing_stop) still fire via `_auto_execute_triggers`.
+- **AI_EXITS_ENABLED = False** — AI exit signals (time_decay, negative_drift, trailing_stop, stop_loss) are disabled based on trade journal analysis. `_AI_EXIT_TRIGGERS` is a `frozenset` blocked at THREE layers: `_tick` filter (L635), `_auto_execute_triggers` (L731), `_apply_verdicts` (L817). Stop_loss added after -$33.22 loss on ETH synthetic (2026-03-25).
 - AI prompt includes paper trading performance data (17 auto exits, 0 wins, -$143) to bias toward REJECT
 - AI prompt is nuanced per trigger type:
   - `trailing_stop`: REJECT unless drawdown >25% from peak AND position open >24 hours
   - `time_decay`: REJECT almost always. APPROVE only if P&L < -20% AND <12 hours left
   - `negative_drift`: REJECT unless loss >15% sustained over many ticks
-- If AI fails or unavailable → auto-execute mechanical triggers (target_hit, stop_loss, trailing_stop)
+- If AI fails or unavailable → auto-execute mechanical triggers (target_hit, stale_position, partial_profit only). Suppressed triggers (stop_loss, trailing_stop, time_decay, negative_drift) are logged and skipped.
 - Noisy triggers (vol_spike, new_ath, spread_compression) suppressed without AI — not actionable
 - Escalation triggers (correlation_break, time_decay, negative_drift, platform_error) create alerts
 - All decisions logged to `decision_log.jsonl` for later review
@@ -721,7 +721,8 @@ The exit engine runs a 60-second scan loop evaluating all open packages.
 21. **Market loss limit:** Block re-entry after 2 losses on the same market (prevents churning)
 22. **Decision logging:** all buys, skips (with reason), and failures logged to `decision_log.jsonl`
 23. **Kyle's lambda signal:** After insider and cross-platform boosts, queries `KyleLambdaEstimator.get_lambda_signal(market_id, direction)`. Detects informed trading spikes (short 15min λ vs long 2hr λ baseline). If spike detected: flow agrees → 1.15–1.5x boost, flow opposes → 0.4–0.8x discount, mixed → 0.85x. Neutral (1.0x) if insufficient data or no spike. Uses Polymarket market_id (resolves to buy_no_market_id when Polymarket is the NO side).
-24. **AI exits disabled:** `AI_EXITS_ENABLED = False` in exit_engine.py. Trade journal analysis (35 trades, 88.6% loss rate) showed AI-approved exits had 0% win rate. Mechanical auto-execute exits still work (target_hit, stop_loss, trailing_stop).
+24. **AI exits disabled:** `AI_EXITS_ENABLED = False` in exit_engine.py. `_AI_EXIT_TRIGGERS = frozenset({"time_decay", "negative_drift", "trailing_stop", "stop_loss"})` — blocked at 3 layers. Stop_loss and trailing_stop also guarded by `_hold_to_resolution` in evaluate_heuristics(). Only auto-execute triggers: target_hit, stale_position, partial_profit.
+25. **Synthetic derivative fixes (2026-03-28):** Equal 50/50 leg sizing (was proportional-to-price causing 88%/12% imbalance). Per-leg $0.02 minimum price filter rejects phantom opportunities. Scoring uses structural win probability from synthetic_info (not individual leg price). Conservative EV: min(win returns) instead of uniform zone average. Fee calc uses expected payout (win_prob * $1) not guaranteed $1. Resolution date validation (>3 day mismatch rejected). Synthetics bypass insider-only gate (structural edge).
 
 ### How the Insider Tracker Works
 
@@ -1068,8 +1069,8 @@ python -m uvicorn server:app --host 127.0.0.1 --port 8500 --log-level info
 - Root cause of losses: AI advisor was blanket-approving time_decay/negative_drift exits → all 7 time_decay exits lost money. Fixed with nuanced AI prompt.
 - AI advisor active via Groq (Llama 3.3 70B), batched reviews (~1 call per tick instead of 8)
 - Insider tracker: 100 traders monitored, 139 markets with signals
-- Auto trader: event-driven, MIN_SPREAD_PCT=8% (0% maker fees), $100 max trade size, 3/day cap, 48h cooldown, 24h hold period, variable Kelly sizing, favorite-longshot bias (2.5x/0.2x), probability model (1.3x), Kyle's lambda adverse selection signal (0.4–1.5x), AI exits disabled
-- Exit engine: 60s interval, 21 heuristic triggers, batched AI reviews (single LLM call for all packages per tick)
+- Auto trader: event-driven, MIN_SPREAD_PCT=8% (0% maker fees), $100 max trade size, 3/day cap, 48h cooldown, 24h hold period, variable Kelly sizing, favorite-longshot bias (2.5x/0.2x for directional, win_prob-based for synthetics), probability model (1.3x), Kyle's lambda adverse selection signal (0.4–1.5x), AI exits disabled, skip reason tracking
+- Exit engine: 60s interval, 22 heuristic triggers, batched AI reviews, `_AI_EXIT_TRIGGERS` frozenset blocked at 3 layers, `_hold_to_resolution` guards on stop_loss/trailing_stop/negative_drift
 - News scanner: 150s interval, 14 RSS feeds, two-pass AI pipeline (headline scan → deep analysis), breaking trades execute immediately
 - Decision logging: all buys, skips, trigger fires, AI verdicts, news signals logged to `decision_log.jsonl`
 - Arbitrage scanner: ~1170 events from 8 adapters
@@ -1077,7 +1078,13 @@ python -m uvicorn server:app --host 127.0.0.1 --port 8500 --log-level info
 - **Universal eval logger:** JSONL logging of all opportunities (entered + skipped), hourly backfill loop, missed opportunity analysis, calibration tracking
 - Spec: `docs/specs/2026-03-19-political-synthetic-analysis-design.md`
 - Plan: `docs/plans/2026-03-19-political-synthetic-analysis.md`
-- **Recent changes (2026-03-26) — Live Trading Safety Audit & Fixes:**
+- **Recent changes (2026-03-28) — Debugging System + Synthetic Derivative Fixes:**
+  - **Debugging & logging system (5 modules):** Persistent RotatingFileHandler logs (`data/logs/arbitrout.log` + `data/logs/errors.log`). Adapter error tracking (ring buffer, consecutive error counter). Scan history ring buffer (100 entries) with timing breakdown (fetch_ms, match_ms, arb_ms, total_ms). Skip reason breakdown (32 categories tracked in auto_trader). Unified health endpoint (`GET /api/system/health`) with verdict (healthy/degraded/critical). WebSocket error broadcasting (`system_error` messages). Calculation audit trail on all ArbitrageOpportunity (fee breakdown, gross vs net profit). Execution timing on all executor methods. Startup summary in decision log.
+  - **API endpoints added:** `GET /api/arbitrage/scan-history`, `GET /api/arbitrage/scan-stats`, `GET /api/system/health`
+  - **Stop-loss/trailing-stop safeguards:** `_AI_EXIT_TRIGGERS` converted to `frozenset` (immutable at runtime). `stop_loss` added to blocked set (was missing, caused -$33.22 ETH loss). Three-layer blocking: `_tick` filter, `_auto_execute_triggers`, `_apply_verdicts`. `_hold_to_resolution` guard added to stop_loss heuristic (matching trailing_stop and negative_drift).
+  - **Synthetic derivative fixes (8 bugs):** Equal 50/50 leg sizing (was proportional, 88%/12%). Per-leg $0.02 minimum price filter (kills phantom $0.0005 opportunities). Synthetics bypass insider-only capacity gate. Fee calculation uses `expected_payout = win_prob * $1` not guaranteed $1. Scoring uses structural win probability (not individual leg price). Conservative EV uses min(win returns) not uniform average. Resolution date validation (>3 day mismatch rejected).
+  - **Decision log extensions:** `log_startup_summary()`, `log_adapter_error()`, `log_opportunity_detected()` with calculation_audit, `log_arb_scan_summary()`
+- **Previous changes (2026-03-26) — Live Trading Safety Audit & Fixes:**
   - **Full audit:** 26 critical issues + 28 warnings identified and addressed across 9 files.
   - **Entry fill monitor:** New `buy_and_confirm()` + `_poll_until_filled()` in PolymarketExecutor. Polls CLOB for 120s after GTC buy, cancels on timeout. Prevents phantom positions. Position manager routes live executors through `buy_and_confirm` with `max_price = entry_price * 1.05` slippage guard.
   - **Token ID fix:** `_resolve_token_id_http()` uses `outcome` field for YES/NO ordering (not array index). 24h TTL cache expiry added.
@@ -1335,3 +1342,52 @@ FMP Screener API → SP500 fundamentals cache → Full universe cache (9,920 tic
 | DELETE | `/api/research/watchlist` | Remove from watchlist |
 | GET | `/api/research/news` | RSS news aggregation |
 | WS | `/ws/prices` | Real-time price WebSocket |
+
+---
+
+## Live Trading Credential Status (as of 2026-03-27)
+
+### Configured (ready for live)
+| Platform | Env Var | Status |
+|----------|---------|--------|
+| Polymarket | `POLYMARKET_PRIVATE_KEY` + `POLYMARKET_FUNDER_ADDRESS` | **Configured** — private key and funder address set |
+| Limitless | (none required) | **Always ready** — `is_configured()` returns True, public API |
+| AI Advisor (Groq) | `GROQ_API_KEY` | Configured |
+| AI Advisor (Gemini) | `GEMINI_API_KEY` | Configured |
+| AI Advisor (OpenRouter) | `OPENROUTER_API_KEY` | Configured |
+| AI Advisor (Anthropic) | `ANTHROPIC_API_KEY` | Configured |
+
+### Missing (blocks live execution on that platform)
+| Platform | Required Env Vars | How to Get |
+|----------|-------------------|------------|
+| Kalshi | `KALSHI_API_KEY` + `KALSHI_RSA_PRIVATE_KEY_PATH` (or `KALSHI_RSA_PRIVATE_KEY` inline) | Kalshi Settings → API Keys → generate RSA keypair. Note: RSA-PSS signing required (Bearer token is demo-only) |
+| PredictIt | `PREDICTIT_SESSION` | Browser login → copy session cookie. **PredictIt is winding down — may not be worth setting up** |
+| Coinbase | `COINBASE_ADV_API_KEY` + `COINBASE_ADV_API_SECRET` | Coinbase Advanced Trade → API → create key with trade permissions |
+| Opinion Labs | `OPINION_LABS_API_KEY` | https://opinion.trade — request API access |
+
+### Impact on Arbitrage
+Without Kalshi credentials, **all Kalshi cross-platform arb opportunities are blocked in live mode** (the auto trader's `_arb_to_opportunity()` checks `tradeable` set which only includes platforms with configured executors). In paper mode, all 4 core prediction platforms (Polymarket, Kalshi, PredictIt, Limitless) now have fallback PaperExecutors regardless of credentials.
+
+### Pre-flight Checklist (PAPER_TRADING=false)
+1. Set `BANKROLL=<amount>` (default: $20)
+2. Verify Polymarket wallet has USDC funded and token approvals set
+3. Configure Kalshi RSA keys (for cross-platform arb)
+4. Test with `PAPER_TRADING=true` first — verify arb trades are being placed
+5. Set `PAPER_TRADING=false` and restart
+
+## Bug Fixes Applied (2026-03-27)
+
+### Import/Runtime Crashes (arbitrage system was completely down)
+1. `adapters/registry.py` — imported nonexistent `adapters.coinbase_spot` → fixed to `adapters.coinbase`
+2. `adapters/registry.py` — imported nonexistent `KrakenAdapter` → removed
+3. `adapters/registry.py` — called `adapter.fetch()` → fixed to `adapter.fetch_events()`
+4. `arbitrage_router.py` — imported standalone `get_trending_markets` function (it's a method on ArbitrageScanner) → removed from import
+5. `event_matcher.py` — `float('')` crash on empty price strings from new adapters → added guard
+6. `arbitrage_history.py` — `KeyError` on new history entries (2 locations) → `setdefault()`
+
+### Calculation Bugs
+7. `auto_trader.py:_arb_to_opportunity()` — `net_profit_pct` (fee-adjusted) never included in opp dict → arbs scored/filtered on gross profit instead of net. Fixed: now passes `net_profit_pct` from arb engine.
+8. `auto_trader.py` arb scoring — used `profit_pct` (gross) → changed to `net_profit_pct` for accurate fee-adjusted scoring.
+
+### Paper Mode Executor Gap
+9. `server.py` — paper mode only created PaperExecutors for platforms with real credentials → cross-platform arbs impossible without keys. Fixed: paper mode now creates fallback PaperExecutors for all 4 core prediction platforms (Polymarket, Kalshi, PredictIt, Limitless) regardless of credential status.

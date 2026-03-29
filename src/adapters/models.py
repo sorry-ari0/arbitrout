@@ -81,6 +81,7 @@ class ArbitrageOpportunity:
     synthetic_info: dict = field(default_factory=dict)  # price targets, scenarios, etc.
     net_profit_pct: float = 0.0       # Guaranteed profit % after all platform fees
     confidence: str = "medium"         # "high", "medium", "low", "very_low"
+    calculation_audit: dict = field(default_factory=dict)  # Fee breakdown for debugging
 
     @property
     def yes_allocation_pct(self) -> float:
@@ -114,4 +115,6 @@ class ArbitrageOpportunity:
         }
         if self.synthetic_info:
             d["synthetic_info"] = self.synthetic_info
+        if self.calculation_audit:
+            d["calculation_audit"] = self.calculation_audit
         return d
