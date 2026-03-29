@@ -333,7 +333,7 @@ class PositionManager:
                     return leg, None, None
                 return leg, None, f"No executor for platform: {platform}"
 
-            use_limit = pkg.get("_use_limit_orders", False)
+            use_limit = pkg.get("_use_limit_orders", True)  # Default maker (0% fee)
             max_price = round(leg["entry_price"] * 1.05, 4) if leg.get("entry_price", 0) > 0 else 0
 
             if hasattr(executor, 'buy_and_confirm'):
@@ -417,7 +417,7 @@ class PositionManager:
                 return {"success": False, "error": f"No executor for platform: {platform}"}
 
             # Route to fill-confirmed buy for live executors, regular buy for paper
-            use_limit = pkg.get("_use_limit_orders", False)
+            use_limit = pkg.get("_use_limit_orders", True)  # Default maker (0% fee)
             max_price = round(leg["entry_price"] * 1.05, 4) if leg.get("entry_price", 0) > 0 else 0
 
             if hasattr(executor, 'buy_and_confirm'):
@@ -481,12 +481,10 @@ class PositionManager:
         if not executor:
             return {"success": False, "error": f"No executor for {leg['platform']}"}
 
-        # Pass last known price for paper executor fallback + category for fee model
-        category = pkg.get("_category", "")
+        # All sells use GTC limit (maker, 0% fee) — executor.sell() on Polymarket is already GTC
         if hasattr(executor, 'real'):
             result = await executor.sell(leg["asset_id"], leg["quantity"],
-                                         last_known_price=leg.get("current_price", 0),
-                                         category=category)
+                                         last_known_price=leg.get("current_price", 0))
         else:
             result = await executor.sell(leg["asset_id"], leg["quantity"])
         if result.success:
@@ -495,7 +493,7 @@ class PositionManager:
             leg["exit_quantity"] = result.filled_quantity
             leg["sell_fees"] = result.fees
             leg["exit_trigger"] = trigger
-            leg["exit_order_type"] = "fok_direct"
+            leg["exit_order_type"] = "maker_direct"
             # exit_value = gross proceeds from the sell (before fees deducted)
             leg["exit_value"] = round(result.filled_quantity * result.filled_price, 4)
             # current_value tracks net (after fees) for P&L display
@@ -504,7 +502,7 @@ class PositionManager:
                 "action": "sell", "leg_id": leg_id, "platform": leg["platform"],
                 "tx_id": result.tx_id, "price": result.filled_price,
                 "fees": result.fees, "trigger": trigger,
-                "exit_order_type": "fok_direct", "timestamp": time.time(),
+                "exit_order_type": "maker_direct", "timestamp": time.time(),
             })
             if all(l["status"] in ("closed", "advisory") for l in pkg["legs"]):
                 pkg["status"] = STATUS_CLOSED
@@ -626,9 +624,10 @@ class PositionManager:
                 limit_fill_price = status.get("price", pending["limit_price"])
 
                 if remaining > 0.001:
-                    result = await executor.sell(pending["asset_id"], remaining)
+                    # Use sell_limit (maker, 0% fee) for remainder — never taker
+                    result = await executor.sell_limit(pending["asset_id"], remaining, limit_fill_price)
                     if result.success:
-                        # Combine fees from limit fill + FOK fill
+                        # Combine fees from both limit fills (both maker)
                         total_fees = limit_fill_fee + result.fees
                         total_qty = pending["quantity"]
                         # Weighted average price across both fills
@@ -638,7 +637,7 @@ class PositionManager:
                         else:
                             avg_price = result.filled_price
                         self._finalize_exit(pkg, leg, pending["trigger"], avg_price,
-                                            total_qty, total_fees, "limit_partial_fok")
+                                            total_qty, total_fees, "limit_partial_maker")
                     else:
                         # FOK failed — record partial limit fill if any, keep leg open for retry
                         if filled_qty > 0:
@@ -664,7 +663,7 @@ class PositionManager:
                 if not pkg["_pending_limit_orders"]:
                     del pkg["_pending_limit_orders"]
                 self.save()
-                return {"success": True, "exit_order_type": "limit_partial_fok"}
+                return {"success": True, "exit_order_type": "limit_partial_maker"}
 
             elif time.time() - pending["placed_at"] > pending.get("timeout", 60):
                 await executor.cancel_order(order_id)

@@ -186,7 +186,7 @@ async def delete_package(pkg_id: str):
     # Force-close all legs
     for leg in pkg["legs"]:
         if leg["status"] == "open":
-            await pm.exit_leg(pkg_id, leg["leg_id"], trigger="force_close")
+            await pm.exit_leg(pkg_id, leg["leg_id"], trigger="force_close", use_limit=True)
     pm.close_package(pkg_id)
     await _broadcast({"event": "package_closed", "package_id": pkg_id})
     return {"success": True}
@@ -203,7 +203,7 @@ async def full_exit(pkg_id: str):
     results = []
     for leg in pkg["legs"]:
         if leg["status"] == "open":
-            r = await pm.exit_leg(pkg_id, leg["leg_id"], trigger="manual_full_exit")
+            r = await pm.exit_leg(pkg_id, leg["leg_id"], trigger="manual_full_exit", use_limit=True)
             results.append(r)
     await _broadcast({"event": "package_closed", "package_id": pkg_id})
     return {"results": results}
@@ -211,7 +211,7 @@ async def full_exit(pkg_id: str):
 @router.post("/packages/{pkg_id}/exit-leg/{leg_id}")
 async def exit_leg(pkg_id: str, leg_id: str):
     pm = _require_pm()
-    result = await pm.exit_leg(pkg_id, leg_id, trigger="manual_leg_exit")
+    result = await pm.exit_leg(pkg_id, leg_id, trigger="manual_leg_exit", use_limit=True)
     await _broadcast({"event": "position_update", "package_id": pkg_id, "leg_id": leg_id})
     return result
 
@@ -327,7 +327,7 @@ async def approve_alert(alert_id: str):
     if pkg:
         for leg in pkg["legs"]:
             if leg["status"] == "open":
-                await pm.exit_leg(pkg["id"], leg["leg_id"], trigger=f"alert_approved:{alert['trigger_name']}")
+                await pm.exit_leg(pkg["id"], leg["leg_id"], trigger=f"alert_approved:{alert['trigger_name']}", use_limit=True)
     pm.save()
     return {"success": True}
 

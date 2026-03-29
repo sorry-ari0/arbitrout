@@ -841,18 +841,16 @@ class ExitEngine:
                     # "review" triggers approved by AI → execute as full exit
                     for leg in pkg["legs"]:
                         if leg["status"] == "open":
-                            is_stop = trigger["name"] == "stop_loss"
                             await self.pm.exit_leg(pkg["id"], leg["leg_id"],
                                 trigger=f"ai_approved:{trigger['name']}",
-                                use_limit=not is_stop)
+                                use_limit=True)  # Always maker (GTC limit, 0% fee)
                 elif trig_action == "partial_exit":
                     # Exit first open leg as partial
                     for leg in pkg["legs"]:
                         if leg["status"] == "open":
-                            is_stop = trigger["name"] == "stop_loss"
                             await self.pm.exit_leg(pkg["id"], leg["leg_id"],
                                 trigger=f"ai_partial:{trigger['name']}",
-                                use_limit=not is_stop)
+                                use_limit=True)  # Always maker (GTC limit, 0% fee)
                             break
                 elif trig_action == "tighten_trail":
                     # new_ath: tighten trailing stop by 2% on approval

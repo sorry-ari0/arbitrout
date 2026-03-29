@@ -129,6 +129,8 @@ class PaperExecutor:
 
     async def sell(self, asset_id: str, quantity: float, last_known_price: float = 0,
                    category: str = "") -> ExecutionResult:
+        """Sell using maker (GTC limit) fees — real Polymarket executor's sell()
+        already uses GTC orders, so paper must match. 0% on Polymarket."""
         _t0 = time.time()
         pos = self.positions.get(asset_id)
         if not pos or pos["quantity"] < quantity * 0.999:
@@ -141,10 +143,8 @@ class PaperExecutor:
             price = pos["avg_entry_price"]
             logger.warning("Using entry price fallback %.4f for sell of %s (no real price available)", price, asset_id)
         proceeds = quantity * price
-        if category:
-            fee = round(proceeds * get_taker_fee_rate(category, price), 4)
-        else:
-            fee = round(proceeds * self.sell_fee_rate, 4)
+        # All sells use maker fee (GTC limit orders) — real executor uses GTC, paper must match
+        fee = round(proceeds * self.sell_fee_rate, 4)
         net_proceeds = proceeds - fee
         self.balance += net_proceeds
         self.total_fees_paid += fee
