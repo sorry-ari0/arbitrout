@@ -189,9 +189,10 @@ The #1 cause of losses is PREMATURE EXITS. Your default should be REJECT.
 GUIDELINES:
 - DEFAULT ACTION IS REJECT. Prediction markets resolve to $0 or $1 — patience wins, panic selling loses. Only approve exits when there is overwhelming evidence the position is wrong.
 - target_hit: APPROVE. These are mechanical — the threshold was set for a reason.
-- trailing_stop: REJECT unless drawdown exceeds 25% from peak AND the position has been open more than 24 hours. Small drawdowns are normal in prediction markets — a YES at $0.35 routinely swings 20%.
-- time_decay: REJECT in almost all cases. Prediction markets move most in the final hours before resolution — exiting early forfeits the entire thesis. APPROVE only if P&L is deeply negative (< -20%) AND the position has less than 12 hours left.
-- negative_drift: REJECT unless loss exceeds 15% sustained over many ticks. A -5% or -8% dip is normal volatility, not a reason to exit. Markets mean-revert.
+- trailing_stop: ALWAYS REJECT. 0/8 wins in journal. Prediction markets resolve at $0/$1 — drawdowns are noise, not signal.
+- time_decay: ALWAYS REJECT. Exiting early forfeits the thesis. Markets move most in final hours.
+- negative_drift: ALWAYS REJECT. Temporary dips are normal volatility, not reasons to exit.
+- stop_loss: ALWAYS REJECT. Prediction markets are binary — a drawdown is not a reason to exit. Stop-losses destroyed -$33.22 on a single trade.
 - stale_position: REJECT if P&L is between -10% and +10% — the position may still be developing. APPROVE only if truly stagnant (>10 days, <2% absolute move).
 - longshot_decay: APPROVE only if the position has lost >30% of its entry value.
 - new_ath, vol_spike, spread_compression: REJECT — these are informational, not actionable.
@@ -421,9 +422,10 @@ CRITICAL — PERFORMANCE DATA: Every automated exit lost money (17 exits, 0 wins
 GUIDELINES:
 - DEFAULT IS REJECT. Prediction markets resolve to $0 or $1 — patience wins, panic selling loses.
 - target_hit: APPROVE. Mechanical triggers.
-- trailing_stop: REJECT unless drawdown >25% from peak AND position open >24 hours.
-- time_decay: REJECT almost always. APPROVE only if P&L < -20% AND <12 hours left.
-- negative_drift: REJECT unless loss >15% sustained over many ticks.
+- trailing_stop: ALWAYS REJECT. 0/8 wins. Drawdowns are noise on binary markets.
+- time_decay: ALWAYS REJECT. Markets move most near settlement — exiting early forfeits the thesis.
+- negative_drift: ALWAYS REJECT. Temporary dips are normal volatility.
+- stop_loss: ALWAYS REJECT. Binary resolution means drawdowns are not terminal.
 - stale_position: REJECT if P&L between -10% and +10%. APPROVE only if >10 days and <2% move.
 - longshot_decay: APPROVE only if position lost >30% of entry value.
 - new_ath, vol_spike, spread_compression: REJECT — informational only.
