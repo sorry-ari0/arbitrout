@@ -315,6 +315,12 @@ async def approve_alert(alert_id: str):
     alert = next((a for a in pm.alerts if a["id"] == alert_id), None)
     if not alert:
         raise HTTPException(404, "Alert not found")
+    # Block approval of suppressed triggers — these are in _AI_EXIT_TRIGGERS
+    # because journal data proved they destroy EV on prediction markets.
+    from positions.exit_engine import AI_EXITS_ENABLED, _AI_EXIT_TRIGGERS
+    trigger_name = alert.get("trigger_name", "")
+    if not AI_EXITS_ENABLED and trigger_name in _AI_EXIT_TRIGGERS:
+        raise HTTPException(403, f"Trigger '{trigger_name}' is suppressed (AI_EXITS_ENABLED=False)")
     alert["status"] = "approved"
     # Execute the proposed action
     pkg = pm.get_package(alert["package_id"])
