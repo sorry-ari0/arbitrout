@@ -1472,6 +1472,17 @@ class ArbitrageScanner:
                     if len(valid_markets) < 3:
                         continue
 
+                    # ── Exhaustiveness check ──────────────────────────────────
+                    # Multi-outcome arb ONLY works when outcomes are exhaustive
+                    # (exactly one resolves to $1.00). If total_yes << 1.0, the
+                    # event likely has unlisted outcomes (e.g., "None of the above")
+                    # and the "spread" is phantom — it belongs to missing outcomes.
+                    # Reject if > 30% of probability is unaccounted for.
+                    if total_yes < 0.70:
+                        logger.debug("Multi-outcome skip (non-exhaustive): %s | sum=%.4f | %d outcomes",
+                                     event_title[:50], total_yes, len(valid_markets))
+                        continue
+
                     # Arb exists when sum < $1.00 (minus fee buffer)
                     # Maker orders = 0% fee, so profit = 1.0 - total_yes
                     # But we need a buffer for execution risk
