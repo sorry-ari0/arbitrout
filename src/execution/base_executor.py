@@ -10,6 +10,7 @@ class ExecutionResult:
     filled_quantity: float
     fees: float
     error: str | None
+    execution_ms: int = 0  # Time taken for the execution call
     def to_dict(self) -> dict: return asdict(self)
 
 @dataclass

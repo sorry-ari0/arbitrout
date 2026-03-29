@@ -135,8 +135,13 @@ def _extract_crypto(title: str) -> dict:
     for pat in price_patterns:
         m = re.search(pat, title, re.IGNORECASE)
         if m:
-            price_str = m.group(1).replace(",", "")
-            price = float(price_str)
+            price_str = m.group(1).replace(",", "").strip()
+            if not price_str:
+                continue
+            try:
+                price = float(price_str)
+            except ValueError:
+                continue
             if re.search(r'k\b', title[m.start():m.end()], re.IGNORECASE):
                 price *= 1000
             result["price"] = price

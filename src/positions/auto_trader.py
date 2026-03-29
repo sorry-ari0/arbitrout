@@ -144,6 +144,7 @@ class AutoTrader:
         self._running = False
         self._trades_opened = 0
         self._trades_skipped = 0
+        self._skip_reasons: dict[str, int] = {}  # reason → count
         self._last_trade_time = 0.0
         self._daily_trade_count = 0
         self._daily_trade_date = ""
@@ -478,7 +479,7 @@ class AutoTrader:
                 for arb in arb_opps:
                     opp = self._arb_to_opportunity(arb)
                     if opp:
-                        opp["_score"] = opp.get("profit_pct", 0) * 3.0  # Arb premium
+                        opp["_score"] = opp.get("net_profit_pct", opp.get("profit_pct", 0)) * 3.0  # Arb premium (use net after fees)
                         opportunities.append(opp)
 
                 # 2. Single-platform directional bets from ALL platform events
@@ -580,7 +581,7 @@ class AutoTrader:
             buy_yes_price = opp.get("buy_yes_price", 0)
             buy_no_price = opp.get("buy_no_price", 0)
             if buy_yes_price < 0.01 and buy_no_price < 0.01:
-                self._trades_skipped += 1
+                self._record_skip("zero_price")
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "zero_price",
                                                    volume=opp_volume, strategy=opp_strategy)
@@ -600,7 +601,7 @@ class AutoTrader:
             yes_mid = opp.get("buy_yes_market_id", "").lower()
             no_mid = opp.get("buy_no_market_id", "").lower()
             if not has_signal and ((yes_mid and yes_mid in open_market_ids) or (no_mid and no_mid in open_market_ids)):
-                self._trades_skipped += 1
+                self._record_skip("already_open")
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "already_open",
                                                    volume=opp_volume, strategy=opp_strategy)
@@ -646,7 +647,7 @@ class AutoTrader:
             # Research: dynamic fees up to 3.15%, 73% of arb captured by sub-100ms bots
             # Bypass: guaranteed-profit arbs have only upside at any duration.
             if hours_to_expiry < MIN_HOURS_TO_EXPIRY and not guaranteed_profit:
-                self._trades_skipped += 1
+                self._record_skip("short_duration")
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "short_duration",
                                                    hours=round(hours_to_expiry, 1),
@@ -656,7 +657,7 @@ class AutoTrader:
             # Skip markets expiring within 2 days
             # Bypass: guaranteed-profit arbs profit at resolution, short expiry is fine.
             if days_to_expiry <= 2 and not guaranteed_profit:
-                self._trades_skipped += 1
+                self._record_skip("too_near_expiry")
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "too_near_expiry", days=days_to_expiry,
                                                    volume=opp_volume, strategy=opp_strategy)
@@ -672,7 +673,7 @@ class AutoTrader:
             # Market category penalties (journal-driven)
             if is_sports_exact_score:
                 # Exact-score bets: -$24 from 3 trades, 0% win rate. Skip entirely.
-                self._trades_skipped += 1
+                self._record_skip("exact_score_market")
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "exact_score_market",
                                                    volume=opp_volume, strategy=opp_strategy)
@@ -685,7 +686,7 @@ class AutoTrader:
                 score *= 0.3
             # Hard skip — 0% WR across 3 trades, -$46
             if is_commodities:
-                self._trades_skipped += 1
+                self._record_skip("commodities_market")
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "commodities_market",
                                                    volume=opp_volume, strategy=opp_strategy)
@@ -696,21 +697,39 @@ class AutoTrader:
             # Kalshi: contracts <$0.10 lose >60% of buyer's money
             # Academic evidence: markets systematically overprice longshots,
             # underprice favorites. This is a documented, persistent edge.
-            favored = max(buy_yes_price, buy_no_price) if buy_no_price > 0 else buy_yes_price
-            if favored >= 0.80:
-                favorite_mult = 3.0  # Strong favorite — strongest documented edge
-            elif favored >= 0.70:
-                favorite_mult = 2.2  # Moderate favorite — solid edge
-            elif favored >= 0.60:
-                favorite_mult = 1.4  # Mild favorite — still has bias edge
-            elif favored <= 0.15:
-                favorite_mult = 0.1  # Extreme longshot — near-zero expected value
-            elif favored <= 0.20:
-                favorite_mult = 0.2  # Severe longshot penalty
-            elif favored <= 0.30:
-                favorite_mult = 0.5  # Longshot penalty
+            #
+            # For synthetics: use structural win probability, not individual leg prices.
+            # A synthetic with 75% win_prob and $0.20 leg price is NOT a longshot —
+            # the $0.20 is a component price, not a directional bet.
+            _is_synth_opp = opp.get("is_synthetic", False)
+            if _is_synth_opp:
+                win_prob = 1.0 - opp.get("synthetic_info", {}).get("loss_probability", 0.5)
+                if win_prob >= 0.80:
+                    favorite_mult = 3.0
+                elif win_prob >= 0.70:
+                    favorite_mult = 2.2
+                elif win_prob >= 0.60:
+                    favorite_mult = 1.4
+                elif win_prob <= 0.30:
+                    favorite_mult = 0.5
+                else:
+                    favorite_mult = 1.0
             else:
-                favorite_mult = 1.0  # Neutral zone (0.30 < favored < 0.60)
+                favored = max(buy_yes_price, buy_no_price) if buy_no_price > 0 else buy_yes_price
+                if favored >= 0.80:
+                    favorite_mult = 3.0  # Strong favorite — strongest documented edge
+                elif favored >= 0.70:
+                    favorite_mult = 2.2  # Moderate favorite — solid edge
+                elif favored >= 0.60:
+                    favorite_mult = 1.4  # Mild favorite — still has bias edge
+                elif favored <= 0.15:
+                    favorite_mult = 0.1  # Extreme longshot — near-zero expected value
+                elif favored <= 0.20:
+                    favorite_mult = 0.2  # Severe longshot penalty
+                elif favored <= 0.30:
+                    favorite_mult = 0.5  # Longshot penalty
+                else:
+                    favorite_mult = 1.0  # Neutral zone (0.30 < favored < 0.60)
             score *= favorite_mult
 
             # Insider signal boost: conviction traders get massive boost, market makers ignored
@@ -826,10 +845,12 @@ class AutoTrader:
                 "side": "YES" if buy_yes_price <= buy_no_price else "NO",
             }
 
-            # In extra-slots mode: only allow insider-signaled OR news-driven trades
+            # In extra-slots mode: only allow insider-signaled, news-driven,
+            # or synthetic trades (synthetics have structural edge, not directional)
             is_news = bool(opp.get("_news_driven"))
-            if (insider_only_mode or news_only_mode) and insider_mult <= 1.0 and cross_platform_mult <= 1.0 and not is_news:
-                self._trades_skipped += 1
+            _is_synth = opp.get("is_synthetic", False)
+            if (insider_only_mode or news_only_mode) and insider_mult <= 1.0 and cross_platform_mult <= 1.0 and not is_news and not _is_synth:
+                self._record_skip("insider_news_only_mode")
                 insider_mode_skipped_filter_count += 1
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "insider_news_only_mode",
@@ -841,7 +862,7 @@ class AutoTrader:
 
             # Skip low-score opportunities
             if score < MIN_SPREAD_PCT:
-                self._trades_skipped += 1
+                self._record_skip("low_score")
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "low_score", score=round(score, 1),
                                                    spread_pct=spread_pct, days_to_expiry=days_to_expiry,
@@ -853,7 +874,7 @@ class AutoTrader:
 
             # Daily limit: skip non-guaranteed-profit trades when at cap
             if daily_limit_hit and not guaranteed_profit:
-                self._trades_skipped += 1
+                self._record_skip("daily_limit")
                 continue
 
             # News/insider signal-driven trades get a higher concentration limit (75%)
@@ -863,7 +884,7 @@ class AutoTrader:
             if not guaranteed_profit and not self._check_concentration(
                     opp_title, self._min_trade_size,
                     total_exposure, category_exposure, max_concentration=_max_conc):
-                self._trades_skipped += 1
+                self._record_skip("concentration_limit")
                 cat = self._detect_category(opp_title)
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "concentration_limit",
@@ -894,7 +915,7 @@ class AutoTrader:
                         no_market_id = m.get("market_id", m.get("id", ""))
 
             if not yes_market_id and not no_market_id:
-                self._trades_skipped += 1
+                self._record_skip("no_market_id")
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "no_market_id",
                                                    volume=opp_volume, strategy=opp_strategy)
@@ -906,7 +927,7 @@ class AutoTrader:
             if buy_no_price >= 0.95:
                 no_market_id = ""  # don't create NO leg
             if not yes_market_id and not no_market_id:
-                self._trades_skipped += 1
+                self._record_skip("price_ceiling_both_legs")
                 continue
 
             # Create the package — DIRECTIONAL BET on one side only
@@ -943,7 +964,7 @@ class AutoTrader:
                         recently_closed_titles.add(ptitle)
 
             if yes_market_id in recently_closed_ids or no_market_id in recently_closed_ids:
-                self._trades_skipped += 1
+                self._record_skip("cooldown_after_exit")
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "cooldown_after_exit",
                                                    volume=opp_volume, strategy=opp_strategy)
@@ -952,7 +973,7 @@ class AutoTrader:
             # Title-based duplicate check: don't re-enter the same event by title
             norm_title = trade_title.lower().strip()[:50]
             if norm_title in recently_closed_titles:
-                self._trades_skipped += 1
+                self._record_skip("cooldown_title_match")
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "cooldown_title_match",
                                                    volume=opp_volume, strategy=opp_strategy)
@@ -960,7 +981,7 @@ class AutoTrader:
 
             # Block markets with too many historical losses
             if market_loss_counts.get(norm_title, 0) >= MAX_LOSSES_PER_MARKET:
-                self._trades_skipped += 1
+                self._record_skip("max_losses_reached")
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, f"max_losses_reached ({market_loss_counts[norm_title]} losses)",
                                                    volume=opp_volume, strategy=opp_strategy)
@@ -975,7 +996,7 @@ class AutoTrader:
                 if current_entry > 0 and exit_price > 0:
                     price_change = abs(current_entry - exit_price) / exit_price
                     if price_change < 0.10:  # Less than 10% price change
-                        self._trades_skipped += 1
+                        self._record_skip("insufficient_price_change")
                         if self.dlog:
                             self.dlog.log_opportunity_skip(
                                 opp_title,
@@ -992,7 +1013,7 @@ class AutoTrader:
                     if ptitle:
                         open_titles.add(ptitle)
                 if norm_title in open_titles:
-                    self._trades_skipped += 1
+                    self._record_skip("duplicate_open_position")
                     if self.dlog:
                         self.dlog.log_opportunity_skip(opp_title, "duplicate_open_position",
                                                        volume=opp_volume, strategy=opp_strategy)
@@ -1042,13 +1063,13 @@ class AutoTrader:
                 pkg["_hold_to_resolution"] = True
 
                 if not pkg["legs"]:
-                    self._trades_skipped += 1
+                    self._record_skip("multi_outcome_no_legs")
                     continue
 
                 # Track actual cost (may exceed trade_size due to min_trade_size floors)
                 actual_cost = sum(l["cost"] for l in pkg["legs"])
                 if actual_cost > arb_budget:
-                    self._trades_skipped += 1
+                    self._record_skip("multi_outcome_over_budget")
                     continue
 
                 pkg["_use_limit_orders"] = True
@@ -1129,13 +1150,13 @@ class AutoTrader:
                 pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 15}))
 
                 if not pkg["legs"]:
-                    self._trades_skipped += 1
+                    self._record_skip("portfolio_no_no_legs")
                     continue
 
                 # Track actual cost (may exceed trade_size due to min_trade_size floors)
                 actual_cost = sum(l["cost"] for l in pkg["legs"])
                 if actual_cost > arb_budget:
-                    self._trades_skipped += 1
+                    self._record_skip("portfolio_no_over_budget")
                     continue
 
                 pkg["_use_limit_orders"] = True
@@ -1281,7 +1302,7 @@ class AutoTrader:
                 # Political packages skip normal strategy/side determination.
                 # Fall through to the execution block below (try/await pm.execute_package).
                 if not pkg["legs"]:
-                    self._trades_skipped += 1
+                    self._record_skip("political_no_legs")
                     continue
 
                 pkg["_use_limit_orders"] = True
@@ -1358,7 +1379,7 @@ class AutoTrader:
                 pkg["_use_brackets"] = True
 
                 if not pkg["legs"]:
-                    self._trades_skipped += 1
+                    self._record_skip("crypto_synthetic_no_legs")
                     continue
 
                 pkg["_use_limit_orders"] = True
@@ -1410,13 +1431,38 @@ class AutoTrader:
                 # create the edge, not platform differences.
                 # Gate: require high EV confidence before entering synthetics.
                 # Journal: synthetic_derivative with low-confidence legs lost -$33.22.
-                # The arb engine already rejects loss_prob > 0.40, but that's too loose —
+                # The arb engine already rejects loss_prob > 0.60, but that's too loose —
                 # prediction markets have noisy pricing, so require tighter thresholds.
                 synth_info = opp.get("synthetic_info", {})
                 synth_loss_prob = synth_info.get("loss_probability", 0.5)
-                synth_ev = opp.get("profit_pct", 0)  # fee-adjusted effective EV %
-                if synth_loss_prob > 0.25:
-                    self._trades_skipped += 1
+
+                # Compute true probability-weighted EV from scenario data.
+                # The arb engine's profit_pct uses spread*(1-loss_prob) which is
+                # "probability-adjusted spread % of payout" — not the true expected
+                # return on capital. Use scenarios for accurate EV.
+                scenarios = synth_info.get("scenarios", {})
+                total_cost = synth_info.get("total_cost", 0)
+                if scenarios and total_cost > 0:
+                    # Conservative EV: use MINIMUM win return, not uniform average.
+                    # Zone probabilities aren't known per-zone — the arb engine only
+                    # computes aggregate loss_probability. Uniform weighting inflates
+                    # EV because narrow "bonus zones" (e.g., $48 range at 785%)
+                    # get the same weight as wide zones ($1000+ range at 342%).
+                    # Using min(win returns) is conservative: assumes you'll land in
+                    # the worst winning zone, which is also usually the widest.
+                    win_returns = [s["return_pct"] for s in scenarios.values() if s["return_pct"] > 0]
+                    loss_returns = [s["return_pct"] for s in scenarios.values() if s["return_pct"] <= 0]
+                    if win_returns and loss_returns:
+                        min_win = min(win_returns)
+                        avg_loss = sum(loss_returns) / len(loss_returns)
+                        synth_ev = (1.0 - synth_loss_prob) * min_win + synth_loss_prob * avg_loss
+                    else:
+                        synth_ev = opp.get("profit_pct", 0)
+                else:
+                    synth_ev = opp.get("profit_pct", 0)
+
+                if synth_loss_prob >= 0.20:
+                    self._record_skip("synthetic_high_loss_prob")
                     if self.dlog:
                         self.dlog.log_opportunity_skip(opp_title, "synthetic_high_loss_prob",
                                                        loss_prob=round(synth_loss_prob, 3),
@@ -1424,7 +1470,7 @@ class AutoTrader:
                                                        volume=opp_volume, strategy=opp_strategy)
                     continue
                 if synth_ev < 15.0:
-                    self._trades_skipped += 1
+                    self._record_skip("synthetic_low_ev")
                     if self.dlog:
                         self.dlog.log_opportunity_skip(opp_title, "synthetic_low_ev",
                                                        ev_pct=round(synth_ev, 2),
@@ -1468,7 +1514,7 @@ class AutoTrader:
 
                 # Skip if either side has no real price (zero-price markets have no liquidity)
                 if buy_yes_price < 0.01 or buy_no_price < 0.01:
-                    self._trades_skipped += 1
+                    self._record_skip("zero_price_multi_leg")
                     if self.dlog:
                         self.dlog.log_opportunity_skip(opp_title, "zero_price_multi_leg",
                                                        yes_price=round(buy_yes_price, 4),
@@ -1478,7 +1524,7 @@ class AutoTrader:
 
                 # Need market IDs for both legs
                 if not yes_market_id or not no_market_id:
-                    self._trades_skipped += 1
+                    self._record_skip("missing_market_id_multi_leg")
                     if self.dlog:
                         self.dlog.log_opportunity_skip(opp_title, "missing_market_id_multi_leg",
                                                        yes_id=yes_market_id[:12] if yes_market_id else "",
@@ -1486,17 +1532,14 @@ class AutoTrader:
                                                        volume=opp_volume, strategy=opp_strategy)
                     continue
 
-                # For synthetics, size by total cost efficiency
-                # Lower total cost = higher potential return per dollar
+                # For synthetics, allocate equal capital to each leg.
+                # Proportional sizing (old) put 88% into the expensive leg and 12%
+                # into the cheap hedge — when the expensive leg lost, the hedge was
+                # too small to matter.  Equal sizing ensures both legs are meaningful.
+                # The payoff is structural (one leg wins at resolution), not directional.
                 if is_synthetic:
                     synth = opp.get("synthetic_info", {})
-                    total_cost = synth.get("total_cost", buy_yes_price + buy_no_price)
-                    # Allocate proportionally to each leg's price
-                    if total_cost > 0:
-                        yes_alloc = round(trade_size * (buy_yes_price / total_cost), 2)
-                        no_alloc = round(trade_size * (buy_no_price / total_cost), 2)
-                    else:
-                        yes_alloc = no_alloc = round(trade_size / 2, 2)
+                    yes_alloc = no_alloc = round(trade_size / 2, 2)
                     yes_label = f"YES @ {buy_yes_platform} (strike: ${synth.get('yes_target', '?'):,.0f})"
                     no_label = f"NO @ {buy_no_platform} (strike: ${synth.get('no_target', '?'):,.0f})"
                 else:
@@ -1551,21 +1594,21 @@ class AutoTrader:
                     side, side_price, side_id = "YES", buy_yes_price, yes_market_id
                     leg_type = "prediction_yes"
                 else:
-                    self._trades_skipped += 1
+                    self._record_skip("no_valid_side")
                     continue
 
                 # Skip extreme OTM (lottery tickets) — entry < 0.15 loses 85%+ of the time
                 # Allow high-probability entries (> 0.85) — they resolve at $1.00
                 # Only skip truly extreme entries (> 0.96) where fees exceed max profit
                 if side_price < 0.15:
-                    self._trades_skipped += 1
+                    self._record_skip("extreme_otm")
                     if self.dlog:
                         self.dlog.log_opportunity_skip(opp_title, "extreme_otm",
                                                        side=side, price=round(side_price, 4),
                                                        volume=opp_volume, strategy=opp_strategy)
                     continue
                 if side_price > 0.96:
-                    self._trades_skipped += 1
+                    self._record_skip("extreme_itm")
                     if self.dlog:
                         self.dlog.log_opportunity_skip(opp_title, "extreme_itm",
                                                        side=side, price=round(side_price, 4),
@@ -1623,7 +1666,7 @@ class AutoTrader:
                 trade_size = sized_trade  # Update for budget tracking
 
             if not pkg["legs"]:
-                self._trades_skipped += 1
+                self._record_skip("no_legs_after_sizing")
                 continue
 
             # Exit rules — strategy-dependent
@@ -1737,12 +1780,12 @@ class AutoTrader:
                             score_metadata=score_metadata,
                         )
                 else:
-                    self._trades_skipped += 1
+                    self._record_skip("execution_failed")
                     logger.warning("Auto trader: execution failed for %s: %s", pkg_name, result.get("error"))
                     if self.dlog:
                         self.dlog.log_trade_failed(pkg_name, result.get("error", "unknown"))
             except Exception as e:
-                self._trades_skipped += 1
+                self._record_skip("execution_exception")
                 logger.error("Auto trader: exception creating package: %s", e)
                 if self.dlog:
                     self.dlog.log_trade_failed(pkg_name, str(e))
@@ -1845,6 +1888,8 @@ class AutoTrader:
             "buy_yes_market_id": buy_yes_market_id,
             "buy_no_market_id": buy_no_market_id,
             "profit_pct": profit_pct,
+            "net_profit_pct": arb.get("net_profit_pct", profit_pct),
+            "opportunity_type": "cross_platform_arb" if is_cross_platform else "synthetic_derivative",
             "expiry": matched.get("expiry", ""),
             "volume": arb.get("combined_volume", 0),
             "matched_event": matched,
@@ -2147,6 +2192,11 @@ class AutoTrader:
                      len(opportunities), opportunities[0]["_score"] if opportunities else 0)
         return opportunities[:10]  # Top 10 across all categories
 
+    def _record_skip(self, reason: str):
+        """Increment skip counter and track reason breakdown."""
+        self._trades_skipped += 1
+        self._skip_reasons[reason] = self._skip_reasons.get(reason, 0) + 1
+
     def get_stats(self) -> dict:
         open_pkgs = self.pm.list_packages("open")
         return {
@@ -2159,4 +2209,5 @@ class AutoTrader:
             "scan_interval_sec": self.interval,
             "trades_today": self._daily_trade_count,
             "max_trades_per_day": MAX_NEW_TRADES_PER_DAY,
+            "skip_reasons": dict(sorted(self._skip_reasons.items(), key=lambda x: x[1], reverse=True)),
         }

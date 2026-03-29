@@ -148,8 +148,8 @@
 #arb-bottom-right-panel .arb-panel-body {
     display: flex;
     flex-direction: column;
-    gap: 16px; /* Space between the stacked sections (News, Saved, Hedge) */
-    padding: 0; /* Remove padding from parent body, individual sections add their own */
+    gap: 16px;
+    padding: 0;
 }
 
 .arb-section-header {
@@ -161,19 +161,19 @@
     letter-spacing: 2px;
     color: var(--arb-accent);
     text-transform: uppercase;
-    background: var(--arb-card); /* Ensure header has a solid background */
-    position: sticky; /* Make headers sticky within their scrollable parent */
+    background: var(--arb-card);
+    position: sticky;
     top: 0;
     z-index: 10;
 }
 
 #arb-bottom-right-panel .arb-panel-body > .arb-section-header:first-child {
-    margin-top: 0; /* No top margin for the very first header in the panel body */
+    margin-top: 0;
 }
 
 .arb-section-content {
-    flex-shrink: 0; /* Prevents content sections from shrinking too much */
-    padding: 0 8px; /* Internal padding for content within each section */
+    flex-shrink: 0;
+    padding: 0 8px;
 }
 
 /* === OPPORTUNITY ROWS === */
@@ -281,7 +281,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 6px 0; /* Adjusted padding as parent .arb-section-content handles horizontal padding */
+    padding: 6px 0;
     border-bottom: 1px solid var(--arb-border);
     cursor: pointer;
 }
@@ -311,7 +311,7 @@
 
 /* === NEWS SCANNER === */
 .news-entry {
-    padding: 8px 0; /* Adjusted padding as parent .arb-section-content handles horizontal padding */
+    padding: 8px 0;
     border-bottom: 1px solid var(--arb-border);
     font-family: 'Courier New', monospace;
     font-size: 11px;
@@ -319,9 +319,9 @@
 }
 
 .news-entry.news-breaking {
-    background: rgba(255, 140, 0, 0.08); /* Highlight breaking news */
+    background: rgba(255, 140, 0, 0.08);
     border-left: 3px solid #ffa726;
-    padding-left: 5px; /* Adjust padding due to border */
+    padding-left: 5px;
 }
 
 .news-header {
@@ -346,6 +346,30 @@
 
 .news-headline:hover {
     color: var(--arb-accent);
+}
+
+/* NEW: News Sentiment Styling */
+.news-sentiment {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 4px;
+    border-radius: 3px;
+    white-space: nowrap;
+}
+
+.news-sentiment.positive {
+    background: rgba(0, 230, 118, 0.15);
+    color: var(--arb-green);
+}
+
+.news-sentiment.negative {
+    background: rgba(255, 23, 68, 0.15);
+    color: var(--arb-red);
+}
+
+.news-sentiment.neutral {
+    background: rgba(128, 128, 128, 0.1);
+    color: var(--arb-muted);
 }
 
 .news-markets, .news-trades {
@@ -492,14 +516,14 @@
 }
 
 .insider-convergence-alert {
-    background: rgba(255, 167, 38, 0.1); /* Highlight for alerts */
+    background: rgba(255, 167, 38, 0.1);
     border-left: 3px solid #ffa726;
     padding-left: 5px;
 }
 
 .insider-alert-text {
     color: #ffa726;
-    flex: 1; /* Allow text to take available space */
+    flex: 1;
 }
 
 /* === KALSHI WHALE SIGNALS === */
@@ -646,6 +670,89 @@
     color: var(--arb-red);
 }
 
+/* === WATCHLIST (NEW) === */
+.watchlist-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--arb-border);
+    cursor: pointer;
+}
+
+.watchlist-row:hover {
+    background: rgba(0, 229, 204, 0.05);
+}
+
+.watchlist-title {
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    color: var(--arb-text);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.watchlist-platform {
+    font-size: 10px;
+    color: var(--arb-muted);
+    margin-left: 8px;
+    white-space: nowrap;
+}
+
+.watchlist-remove {
+    background: none;
+    border: none;
+    color: var(--arb-red);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0 4px;
+}
+
+/* === TRENDING MARKETS (NEW) === */
+.trending-row {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--arb-border);
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    color: var(--arb-text);
+    cursor: pointer;
+}
+
+.trending-row:hover {
+    background: rgba(0, 229, 204, 0.05);
+}
+
+.trending-title {
+    font-weight: 700;
+    color: var(--arb-text);
+    margin-bottom: 4px;
+}
+
+.trending-details {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 10px;
+    color: var(--arb-muted);
+}
+
+.trending-platform {
+    font-weight: 700;
+    color: var(--arb-accent);
+}
+
+.trending-change {
+    color: #ffa726;
+    font-weight: 700;
+}
+
+.trending-volume {
+    color: var(--arb-muted);
+}
+
+
 /* === STATUS BAR === */
 .arb-status {
     display: flex;
@@ -680,7 +787,7 @@
     color: var(--arb-muted);
     font-family: 'Courier New', monospace;
     font-size: 12px;
-    padding: 8px; /* Add padding to empty states */
+    padding: 8px;
 }
 
 /* === SCROLLBAR === */
