@@ -195,9 +195,10 @@ class DecisionLogger:
                                   spread_pct: float, platforms: list[str],
                                   yes_price: float, no_price: float,
                                   is_synthetic: bool, volume: int,
-                                  event_ids: list[str]):
+                                  event_ids: list[str],
+                                  calculation_audit: dict | None = None):
         """Log every opportunity found by arb scanner (for hindsight analysis)."""
-        self._write({
+        entry = {
             "type": "opportunity_detected",
             "title": title[:120],
             "strategy_type": strategy_type,
@@ -208,7 +209,10 @@ class DecisionLogger:
             "is_synthetic": is_synthetic,
             "volume": volume,
             "event_ids": event_ids,
-        })
+        }
+        if calculation_audit:
+            entry["calculation_audit"] = calculation_audit
+        self._write(entry)
 
     # ── News Scanner decisions ─────────────────────────────────────────
 
@@ -243,4 +247,27 @@ class DecisionLogger:
             "strategies_valid": strategies_valid,
             "cache_hit": cache_hit,
             "elapsed_ms": elapsed_ms,
+        })
+
+    # ── System diagnostics ──────────────────────────────────────────
+
+    def log_startup_summary(self, arbitrage_available: bool, positions_available: bool,
+                            adapters_registered: int, executors_configured: list[str],
+                            mode: str, import_errors: list[str] | None = None):
+        self._write({
+            "type": "startup_summary",
+            "arbitrage_available": arbitrage_available,
+            "positions_available": positions_available,
+            "adapters_registered": adapters_registered,
+            "executors_configured": executors_configured,
+            "mode": mode,
+            "import_errors": import_errors or [],
+        })
+
+    def log_adapter_error(self, platform: str, error: str, consecutive_count: int):
+        self._write({
+            "type": "adapter_error",
+            "platform": platform,
+            "error": error[:200],
+            "consecutive_errors": consecutive_count,
         })

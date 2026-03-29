@@ -11,3 +11,4 @@ file_snapshots.json
 .aider*
 node_modules/
 .worktrees/
+*.pem
