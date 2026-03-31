@@ -155,6 +155,8 @@ class AutoTrader:
         self._news_opportunities: list[dict] = []
         self._political_analyzer = None
         self._weather_scanner = None
+        self._theta_scanner = None
+        self._cross_asset_matcher = None
         self.kyle_estimator = None
         self._loss_streak = 0         # Current consecutive losses
         self._regime_penalty = 1.0    # 1.0 = normal, 0.5 = bad regime
@@ -182,6 +184,14 @@ class AutoTrader:
     def set_weather_scanner(self, scanner):
         """Set the weather scanner reference for opportunity consumption."""
         self._weather_scanner = scanner
+
+    def set_theta_scanner(self, scanner):
+        """Set the theta scanner reference for near-expiry consensus outliers."""
+        self._theta_scanner = scanner
+
+    def set_cross_asset_matcher(self, matcher):
+        """Set the cross-asset matcher for reference-backed directional entries."""
+        self._cross_asset_matcher = matcher
 
     def set_kyle_estimator(self, estimator):
         """Set the Kyle's lambda estimator for adverse selection scoring."""
@@ -552,6 +562,34 @@ class AutoTrader:
             if political_opps:
                 logger.info("Auto trader: merged %d political opportunities", len(political_opps))
 
+        if self._theta_scanner:
+            try:
+                theta_opps = await self._theta_scanner.get_theta_opportunities()
+                theta_added = 0
+                for theta_opp in theta_opps:
+                    opp = self._theta_to_opportunity(theta_opp)
+                    if opp:
+                        opportunities.append(opp)
+                        theta_added += 1
+                if theta_added:
+                    logger.info("Auto trader: merged %d theta opportunities", theta_added)
+            except Exception as e:
+                logger.warning("Auto trader: theta scan failed: %s", e)
+
+        if self._cross_asset_matcher:
+            try:
+                cross_asset_opps = await self._cross_asset_matcher.get_opportunities()
+                cross_asset_added = 0
+                for cross_asset_opp in cross_asset_opps:
+                    opp = self._cross_asset_to_opportunity(cross_asset_opp)
+                    if opp:
+                        opportunities.append(opp)
+                        cross_asset_added += 1
+                if cross_asset_added:
+                    logger.info("Auto trader: merged %d cross-asset opportunities", cross_asset_added)
+            except Exception as e:
+                logger.warning("Auto trader: cross-asset scan failed: %s", e)
+
         if not opportunities:
             logger.info("Auto trader: no opportunities found this cycle")
             return
@@ -570,12 +608,19 @@ class AutoTrader:
         opportunities.sort(key=lambda o: o.get("_score", 0), reverse=True)
         for opp in opportunities:
             opp_title = (opp.get("title") or opp.get("canonical_title") or "?")[:100]
-            opp_volume = opp.get("volume", 0)  # Market volume — logged on all skips for analysis
+            opp_volume = opp.get("volume", 0) or 0  # Market volume — logged on all skips for analysis
             opp_strategy = opp.get("opportunity_type", "")
             if trades_this_cycle >= remaining_slots:
                 break
             if directional_budget < self._min_trade_size and arb_budget < self._min_trade_size:
                 break
+
+            if opp_volume <= 0:
+                self._record_skip("zero_volume")
+                if self.dlog:
+                    self.dlog.log_opportunity_skip(opp_title, "zero_volume",
+                                                   volume=opp_volume, strategy=opp_strategy)
+                continue
 
             # Filter: skip zero-price markets (no liquidity, phantom opportunities)
             buy_yes_price = opp.get("buy_yes_price", 0)
@@ -685,7 +730,7 @@ class AutoTrader:
                 # Other sports: -$92 total, 20% win rate. Discount heavily.
                 score *= 0.3
             # Hard skip — 0% WR across 3 trades, -$46
-            if is_commodities:
+            if is_commodities and not opp.get("_reference_backed"):
                 self._record_skip("commodities_market")
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "commodities_market",
@@ -1574,7 +1619,14 @@ class AutoTrader:
                 # Skip extreme OTM bets (entry price < 0.15) — these are lottery tickets
                 # that lose 85%+ of the time
 
-                if buy_yes_price >= 0.60 and yes_market_id:
+                preferred_side = opp.get("preferred_side")
+                if preferred_side == "YES" and yes_market_id:
+                    side, side_price, side_id = "YES", buy_yes_price, yes_market_id
+                    leg_type = "prediction_yes"
+                elif preferred_side == "NO" and no_market_id:
+                    side, side_price, side_id = "NO", buy_no_price, no_market_id
+                    leg_type = "prediction_no"
+                elif buy_yes_price >= 0.60 and yes_market_id:
                     # Market favors YES → bet YES (riding the consensus)
                     side, side_price, side_id = "YES", buy_yes_price, yes_market_id
                     leg_type = "prediction_yes"
@@ -1899,6 +1951,88 @@ class AutoTrader:
             opp["is_synthetic"] = True
             opp["synthetic_info"] = arb.get("synthetic_info", {})
         return opp
+
+    def _theta_to_opportunity(self, theta_opp: dict) -> dict | None:
+        """Convert theta consensus outlier into a directional opportunity."""
+        platform = theta_opp.get("platform", "")
+        event_id = theta_opp.get("event_id", "")
+        if not platform or not event_id:
+            return None
+        if self.pm and getattr(self.pm, "executors", None) and platform not in self.pm.executors:
+            return None
+
+        expected_edge_pct = float(theta_opp.get("expected_edge_pct", 0) or 0)
+        if expected_edge_pct <= 0:
+            return None
+
+        volume = int(theta_opp.get("volume", 0) or 0)
+        yes_price = float(theta_opp.get("market_yes_price", 0) or 0)
+        no_price = float(theta_opp.get("market_no_price", 0) or 0)
+        if yes_price < 0.01 or no_price < 0.01:
+            return None
+
+        return {
+            "title": theta_opp.get("canonical_title", ""),
+            "canonical_title": theta_opp.get("canonical_title", ""),
+            "buy_yes_platform": platform,
+            "buy_yes_price": yes_price,
+            "buy_no_platform": platform,
+            "buy_no_price": no_price,
+            "buy_yes_market_id": event_id,
+            "buy_no_market_id": event_id,
+            "profit_pct": expected_edge_pct,
+            "net_profit_pct": expected_edge_pct,
+            "opportunity_type": "theta_consensus",
+            "expiry": theta_opp.get("expiry", ""),
+            "days_to_expiry": theta_opp.get("days_to_expiry", 999),
+            "volume": volume,
+            "preferred_side": theta_opp.get("buy_side", ""),
+            "_score": float(theta_opp.get("theta_capture_pct_per_day", 0) or 0) * 6.0 + expected_edge_pct,
+            "_reference_backed": True,
+        }
+
+    def _cross_asset_to_opportunity(self, cross_asset_opp: dict) -> dict | None:
+        """Convert cross-asset reference mispricing into a prediction-only entry."""
+        platform = cross_asset_opp.get("prediction_platform", "")
+        event_id = cross_asset_opp.get("prediction_event_id", "")
+        if not platform or not event_id:
+            return None
+        if self.pm and getattr(self.pm, "executors", None) and platform not in self.pm.executors:
+            return None
+
+        prediction_yes = float(cross_asset_opp.get("prediction_yes_price", 0) or 0)
+        prediction_no = round(1.0 - prediction_yes, 4)
+        if prediction_yes < 0.01 or prediction_no < 0.01:
+            return None
+
+        model_gap_pct = float(cross_asset_opp.get("model_gap_pct", 0) or 0)
+        volume = int(
+            cross_asset_opp.get("prediction_volume")
+            or cross_asset_opp.get("combined_volume")
+            or 0
+        )
+        if model_gap_pct <= 0:
+            return None
+
+        return {
+            "title": cross_asset_opp.get("prediction_title", ""),
+            "canonical_title": cross_asset_opp.get("prediction_title", ""),
+            "buy_yes_platform": platform,
+            "buy_yes_price": prediction_yes,
+            "buy_no_platform": platform,
+            "buy_no_price": prediction_no,
+            "buy_yes_market_id": event_id,
+            "buy_no_market_id": event_id,
+            "profit_pct": model_gap_pct,
+            "net_profit_pct": model_gap_pct,
+            "opportunity_type": "cross_asset_reference",
+            "expiry": cross_asset_opp.get("expiry", ""),
+            "volume": volume,
+            "preferred_side": cross_asset_opp.get("prediction_side", ""),
+            "_score": float(cross_asset_opp.get("guaranteed_profit_pct", 0) or 0) * 2.0 + model_gap_pct,
+            "_reference_backed": True,
+            "_reference_asset_class": cross_asset_opp.get("asset_class", ""),
+        }
 
     def _events_to_opportunities(self, matched_events: list[dict]) -> list[dict]:
         """Convert matched events from ALL platforms into directional bet opportunities.
