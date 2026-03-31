@@ -474,11 +474,21 @@ async def get_insider_accuracy():
 @router.get("/calibration")
 async def get_calibration(request: Request):
     """Return latest calibration report."""
-    ce = getattr(request.app.state, "calibration_engine", None)
-    if not ce:
+    threshold_engine = getattr(request.app.state, "calibration_engine", None)
+    consensus_engine = getattr(request.app.state, "consensus_calibration_engine", None)
+    if not threshold_engine and not consensus_engine:
         return {"error": "Calibration engine not initialized"}
     try:
-        return ce.generate_report()
+        payload = {}
+        if threshold_engine:
+            payload["threshold_calibration"] = threshold_engine.generate_report()
+        if consensus_engine:
+            payload["consensus_calibration"] = consensus_engine.generate_report()
+        if threshold_engine and not consensus_engine:
+            return payload["threshold_calibration"]
+        if consensus_engine and not threshold_engine:
+            return payload["consensus_calibration"]
+        return payload
     except Exception as e:
         return {"error": str(e)}
 

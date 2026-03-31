@@ -42,9 +42,53 @@ class TestProbabilityModel:
         model = ProbabilityModel()
         model.update_from_matched_events([{
             "canonical_title": "Agreement",
+            "category": "crypto",
+            "expiry": "2026-12-31",
             "markets": [
                 {"platform": "polymarket", "yes_price": 0.60, "volume": 100000},
                 {"platform": "kalshi", "yes_price": 0.62, "volume": 100000},
             ]
         }])
         assert not model.has_deviation("Agreement", threshold=0.10)
+
+    def test_calibration_signal_shrinks_toward_consensus(self):
+        model = ProbabilityModel()
+        model.update_from_matched_events([{
+            "canonical_title": "BTC > 100k",
+            "category": "crypto",
+            "expiry": "2026-12-31",
+            "markets": [
+                {"platform": "polymarket", "yes_price": 0.40, "volume": 200000},
+                {"platform": "kalshi", "yes_price": 0.60, "volume": 200000},
+                {"platform": "limitless", "yes_price": 0.62, "volume": 50000},
+            ]
+        }])
+        signal = model.get_calibration_signal(
+            title="BTC > 100k",
+            platform="polymarket",
+            raw_yes=0.40,
+            category="crypto",
+            days_to_expiry=5,
+            volume=200000,
+        )
+        assert signal is not None
+        assert signal["calibrated_yes"] > 0.40
+        assert signal["preferred_side"] in {"YES", "NO"}
+        assert signal["calibrated_edge_pct"] > 0
+
+    def test_generate_report_returns_bucket_summaries(self):
+        model = ProbabilityModel()
+        model.update_from_matched_events([{
+            "canonical_title": "ETH > 4k",
+            "category": "crypto",
+            "expiry": "2026-04-02",
+            "markets": [
+                {"platform": "polymarket", "yes_price": 0.30, "volume": 100000},
+                {"platform": "kalshi", "yes_price": 0.48, "volume": 120000},
+            ]
+        }])
+        report = model.generate_report()
+        assert report["tracked_events"] == 1
+        assert report["tracked_buckets"] >= 2
+        assert report["top_unstable_buckets"]
+        assert report["largest_live_disagreements"][0]["title"] == "ETH > 4k"

@@ -277,6 +277,45 @@ class TestLiquidityGates:
 
         pm.execute_package.assert_not_awaited()
 
+    @pytest.mark.asyncio
+    async def test_low_calibrated_edge_directional_trade_is_skipped(self):
+        from positions.auto_trader import AutoTrader
+
+        pm = _make_mock_pm()
+        pm.executors = {"polymarket": MagicMock()}
+        pm.execute_package = AsyncMock(return_value={"success": True})
+
+        model = MagicMock()
+        model.get_consensus.return_value = {"max_deviation": 0.05}
+        model.get_calibration_signal.return_value = {
+            "preferred_side": "NO",
+            "calibrated_yes": 0.48,
+            "calibrated_edge_pct": 1.2,
+            "confidence": 0.2,
+        }
+
+        trader = AutoTrader(pm, scanner=None, probability_model=model)
+        trader._scan_polymarket = AsyncMock(return_value=[{
+            "title": "Will BTC exceed $100,000?",
+            "canonical_title": "Will BTC exceed $100,000?",
+            "buy_yes_platform": "polymarket",
+            "buy_yes_price": 0.49,
+            "buy_no_platform": "polymarket",
+            "buy_no_price": 0.51,
+            "buy_yes_market_id": "btc-100k",
+            "buy_no_market_id": "btc-100k",
+            "profit_pct": 18.0,
+            "net_profit_pct": 18.0,
+            "opportunity_type": "pure_prediction",
+            "expiry": (datetime.now() + timedelta(days=5)).isoformat(),
+            "volume": 5000,
+            "_score": 40.0,
+        }])
+
+        await trader._scan_and_trade()
+
+        pm.execute_package.assert_not_awaited()
+
 
 class TestMarketCategoryFilter:
     """Journal-driven: sports -$91.99 (10 trades), commodities -$45.76 (3 trades)."""
