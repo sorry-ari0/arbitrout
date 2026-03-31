@@ -44,6 +44,8 @@ def test_cross_asset_matcher_finds_crypto_hedge():
     assert best["reference_side"] == "NO"
     assert best["asset_class"] == "crypto"
     assert best["guaranteed_profit_pct"] == 25.0
+    assert best["prediction_volume"] == 1000
+    assert best["combined_volume"] == 2000
 
 
 def test_cross_asset_matcher_ignores_large_expiry_gap():
