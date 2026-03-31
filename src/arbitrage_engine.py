@@ -17,6 +17,7 @@ from adapters.models import NormalizedEvent, MatchedEvent, ArbitrageOpportunity
 from adapters.registry import AdapterRegistry
 from event_matcher import match_events, _extract_crypto
 from arbitrage_history import save_opportunity_history, save_market_history # NEW: Import market history saver
+from execution.paper_executor import get_taker_fee_rate as get_polymarket_taker_fee_rate
 
 logger = logging.getLogger("arbitrage_engine")
 
@@ -43,8 +44,18 @@ _PREDICTIT_PROFIT_TAX = 0.10  # 10% of profits at contract resolution
 _PREDICTIT_WITHDRAWAL_FEE = 0.05  # 5% of withdrawal amount
 
 
-def _compute_fee_adjusted_profit(yes_price: float, no_price: float,
-                                  yes_platform: str, no_platform: str) -> tuple[float, float]:
+def _event_taker_fee_rate(event: NormalizedEvent, side: str) -> float:
+    """Return the modeled taker fee rate for a given market leg."""
+    if event.platform == "polymarket":
+        price = event.yes_price if side == "yes" else event.no_price
+        return get_polymarket_taker_fee_rate(event.category, price)
+    return _TAKER_FEES.get(event.platform, _DEFAULT_TAKER_FEE)
+
+
+def _compute_fee_adjusted_profit(
+    yes_market: NormalizedEvent,
+    no_market: NormalizedEvent,
+) -> tuple[float, float]:
     """Compute guaranteed profit after all platform fees.
 
     Returns (net_profit_pct, total_cost_with_fees).
@@ -55,8 +66,15 @@ def _compute_fee_adjusted_profit(yes_price: float, no_price: float,
     For PredictIt: 10% tax on profits + 5% withdrawal fee.
     For others: taker_fee_rate * price at entry.
     """
-    yes_fee = yes_price * _TAKER_FEES.get(yes_platform, _DEFAULT_TAKER_FEE)
-    no_fee = no_price * _TAKER_FEES.get(no_platform, _DEFAULT_TAKER_FEE)
+    yes_price = yes_market.yes_price
+    no_price = no_market.no_price
+    yes_platform = yes_market.platform
+    no_platform = no_market.platform
+
+    yes_fee_rate = _event_taker_fee_rate(yes_market, "yes")
+    no_fee_rate = _event_taker_fee_rate(no_market, "no")
+    yes_fee = yes_price * yes_fee_rate
+    no_fee = no_price * no_fee_rate
     total_cost = yes_price + no_price + yes_fee + no_fee
 
     # Resolution payouts — PredictIt takes 10% of profits + 5% of withdrawal
@@ -883,8 +901,10 @@ def find_arbitrage(matched: list[MatchedEvent],
             # _compute_fee_adjusted_profit assumes guaranteed $1 payout (pure arb).
             # For synthetics, expected payout = win_prob * $1 + loss_prob * $0.
             # Compute fees directly instead.
-            _yes_fee = best_yes_market.yes_price * _TAKER_FEES.get(best_yes_market.platform, _DEFAULT_TAKER_FEE)
-            _no_fee = best_no_market.no_price * _TAKER_FEES.get(best_no_market.platform, _DEFAULT_TAKER_FEE)
+            _yes_fee_rate = _event_taker_fee_rate(best_yes_market, "yes")
+            _no_fee_rate = _event_taker_fee_rate(best_no_market, "no")
+            _yes_fee = best_yes_market.yes_price * _yes_fee_rate
+            _no_fee = best_no_market.no_price * _no_fee_rate
             total_cost_with_fees = total_cost + _yes_fee + _no_fee
             expected_payout = 1.0 * (1.0 - loss_prob)  # win → $1, lose → $0
             net_effective = (expected_payout - total_cost_with_fees) / total_cost_with_fees * 100
@@ -895,8 +915,6 @@ def find_arbitrage(matched: list[MatchedEvent],
             # so don't apply the confidence filter here
             confidence = _match_confidence(effective_profit_pct)
 
-            _yes_fee_rate = _TAKER_FEES.get(best_yes_market.platform, _DEFAULT_TAKER_FEE)
-            _no_fee_rate = _TAKER_FEES.get(best_no_market.platform, _DEFAULT_TAKER_FEE)
             opportunities.append(ArbitrageOpportunity(
                 matched_event=match,
                 buy_yes_platform=best_yes_market.platform,
@@ -937,8 +955,8 @@ def find_arbitrage(matched: list[MatchedEvent],
 
             # Fee-adjusted profit (guaranteed after all platform fees)
             net_pct, _ = _compute_fee_adjusted_profit(
-                best_yes_market.yes_price, best_no_market.no_price,
-                best_yes_market.platform, best_no_market.platform,
+                best_yes_market,
+                best_no_market,
             )
             # Skip if guaranteed loss after fees
             if net_pct <= 0:
@@ -950,8 +968,8 @@ def find_arbitrage(matched: list[MatchedEvent],
             if confidence == "very_low":
                 continue
 
-            _yes_fee_rate = _TAKER_FEES.get(best_yes_market.platform, _DEFAULT_TAKER_FEE)
-            _no_fee_rate = _TAKER_FEES.get(best_no_market.platform, _DEFAULT_TAKER_FEE)
+            _yes_fee_rate = _event_taker_fee_rate(best_yes_market, "yes")
+            _no_fee_rate = _event_taker_fee_rate(best_no_market, "no")
             opportunities.append(ArbitrageOpportunity(
                 matched_event=match,
                 buy_yes_platform=best_yes_market.platform,
@@ -1090,10 +1108,11 @@ _HIGH_PROFIT_THRESHOLD = 25.0 # % net profit for an alert
 _ALERT_TTL_SECONDS = 3600 # Clear alerts after 1 hour
 
 def compute_feed(events: list[NormalizedEvent],
-                 current_opportunities: list[ArbitrageOpportunity], # NEW: Pass current opps for alerts
+                 current_opportunities: list[ArbitrageOpportunity] | None = None,
                  max_items: int = 50) -> list[dict]:
     """Compute recent price changes and new high-profit alerts for the live feed pane."""
     global _previous_prices, _high_profit_alerts
+    current_opportunities = current_opportunities or []
     feed: list[dict] = []
     now = time.time()
 

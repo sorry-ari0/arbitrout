@@ -291,6 +291,14 @@ class TestFeeAdjustedProfit:
         # 2.3% gross - PI profit tax on 95c NO = loss
         assert len(opps) == 0
 
+    def test_small_crypto_spread_filtered_by_polymarket_fee_curve(self):
+        """Crypto arbs should use the same taker fee curve as paper execution."""
+        ev_a = _make_event("polymarket", "p1", "BTC > 100k", yes=0.50, no=0.50)
+        ev_b = _make_event("kalshi", "k1", "BTC > 100k", yes=0.55, no=0.49)
+        matched = _make_matched([ev_a, ev_b])
+        opps = find_arbitrage([matched])
+        assert len(opps) == 0
+
 
 class TestConfidenceScoring:
     """Tests for match confidence scoring."""
