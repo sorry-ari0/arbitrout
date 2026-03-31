@@ -330,6 +330,50 @@ class TradeJournal:
             "curve": curve,
         }
 
+    def get_diagnostics(self, mode: str | None = None) -> dict:
+        """Return a compact diagnostics report for evidence-based reviews."""
+        filtered = self.entries if not mode else [e for e in self.entries if e.get("mode") == mode]
+        if not filtered:
+            return {
+                "total_trades": 0,
+                "message": "No trades recorded yet",
+            }
+
+        sorted_entries = sorted(filtered, key=lambda e: e.get("closed_at", 0))
+        first_closed_at = sorted_entries[0].get("closed_at")
+        last_closed_at = sorted_entries[-1].get("closed_at")
+        coverage_days = 0.0
+        if first_closed_at and last_closed_at:
+            coverage_days = round((last_closed_at - first_closed_at) / 86400, 2)
+
+        perf = self.get_performance(mode=mode)
+        hold = self.get_performance_by_hold_duration(mode=mode)
+        equity = self.get_equity_curve(mode=mode)
+        robustness = self.validate_robustness(mode=mode, n_simulations=50)
+
+        return {
+            "mode": mode or "all",
+            "total_trades": len(filtered),
+            "first_closed_at": first_closed_at,
+            "last_closed_at": last_closed_at,
+            "coverage_days": coverage_days,
+            "total_pnl": perf.get("total_pnl", 0),
+            "roi_pct": perf.get("roi_pct", 0),
+            "fee_drag_pct": perf.get("fee_drag_pct", 0),
+            "win_rate": perf.get("win_rate", 0),
+            "avg_hold_hours": perf.get("avg_hold_hours", 0),
+            "max_loss_streak": perf.get("max_loss_streak", 0),
+            "by_trigger": perf.get("by_trigger", {}),
+            "by_strategy": perf.get("by_strategy", {}),
+            "by_hold_duration": hold,
+            "equity_summary": {
+                "cumulative_pnl_usd": equity.get("cumulative_pnl_usd", 0),
+                "cumulative_fees_usd": equity.get("cumulative_fees_usd", 0),
+                "max_drawdown_usd": equity.get("max_drawdown_usd", 0),
+            },
+            "robustness": robustness,
+        }
+
     def validate_robustness(self, mode: str | None = None, n_simulations: int = 100,
                             jitter_pct: float = 0.20, skip_pct: float = 0.10) -> dict:
         """Monte Carlo robustness validation of current strategy parameters.
