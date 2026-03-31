@@ -16,6 +16,19 @@ STATUS_PARTIAL = "partial_exit"
 STRATEGY_TYPES = ("spot_plus_hedge", "cross_platform_arb", "synthetic_derivative", "pure_prediction", "news_driven", "political_synthetic", "btc_sniper", "multi_outcome_arb", "market_making", "portfolio_no", "weather_forecast", "crypto_synthetic")
 
 
+def _is_execution_result_like(result) -> bool:
+    """Check that an executor returned the fields the manager relies on."""
+    if result is None:
+        return False
+    return (
+        isinstance(getattr(result, "success", None), bool)
+        and hasattr(result, "tx_id")
+        and hasattr(result, "filled_price")
+        and hasattr(result, "filled_quantity")
+        and hasattr(result, "fees")
+    )
+
+
 def create_package(name: str, strategy_type: str) -> dict:
     """Create a new derivative package dict with all required fields."""
     if strategy_type not in STRATEGY_TYPES:
@@ -336,23 +349,9 @@ class PositionManager:
             use_limit = pkg.get("_use_limit_orders", True)  # Default maker (0% fee)
             max_price = round(leg["entry_price"] * 1.05, 4) if leg.get("entry_price", 0) > 0 else 0
 
-            if hasattr(executor, 'buy_and_confirm'):
-                result = await executor.buy_and_confirm(
-                    asset_id=leg["asset_id"],
-                    amount_usd=leg["cost"],
-                    max_price=max_price,
-                )
-            elif use_limit and hasattr(executor, 'buy_limit'):
-                result = await executor.buy_limit(
-                    asset_id=leg["asset_id"],
-                    amount_usd=leg["cost"],
-                    price=leg["entry_price"],
-                )
-            else:
-                buy_kwargs = {"asset_id": leg["asset_id"], "amount_usd": leg["cost"]}
-                if hasattr(executor, 'real'):
-                    buy_kwargs["fallback_price"] = leg["entry_price"]
-                result = await executor.buy(**buy_kwargs)
+            result = await self._submit_entry_order(executor, leg, use_limit, max_price)
+            if result is None:
+                return leg, None, f"No supported entry method for platform: {platform}"
             return leg, result, None
 
         # Execute all legs concurrently
@@ -420,24 +419,10 @@ class PositionManager:
             use_limit = pkg.get("_use_limit_orders", True)  # Default maker (0% fee)
             max_price = round(leg["entry_price"] * 1.05, 4) if leg.get("entry_price", 0) > 0 else 0
 
-            if hasattr(executor, 'buy_and_confirm'):
-                # Live executor: buy + poll until filled (no phantom positions)
-                result = await executor.buy_and_confirm(
-                    asset_id=leg["asset_id"],
-                    amount_usd=leg["cost"],
-                    max_price=max_price,
-                )
-            elif use_limit and hasattr(executor, 'buy_limit'):
-                result = await executor.buy_limit(
-                    asset_id=leg["asset_id"],
-                    amount_usd=leg["cost"],
-                    price=leg["entry_price"],
-                )
-            else:
-                buy_kwargs = {"asset_id": leg["asset_id"], "amount_usd": leg["cost"]}
-                if hasattr(executor, 'real'):
-                    buy_kwargs["fallback_price"] = leg["entry_price"]
-                result = await executor.buy(**buy_kwargs)
+            result = await self._submit_entry_order(executor, leg, use_limit, max_price)
+            if result is None:
+                await self._rollback(pkg, executed)
+                return {"success": False, "error": f"No supported entry method for platform: {platform}"}
             if result.success:
                 leg["tx_id"] = result.tx_id
                 leg["entry_price"] = result.filled_price if result.filled_price > 0 else leg["entry_price"]
@@ -457,6 +442,42 @@ class PositionManager:
                 return {"success": False, "error": f"Leg {leg['leg_id']} failed: {result.error}"}
 
         return None  # Success — caller finalizes
+
+    async def _submit_entry_order(self, executor, leg: dict, use_limit: bool, max_price: float):
+        """Submit an entry order using the best available executor method."""
+        asset_id = leg["asset_id"]
+        amount_usd = leg["cost"]
+
+        buy_and_confirm = getattr(executor, "buy_and_confirm", None)
+        if callable(buy_and_confirm):
+            result = await buy_and_confirm(
+                asset_id=asset_id,
+                amount_usd=amount_usd,
+                max_price=max_price,
+            )
+            if _is_execution_result_like(result):
+                return result
+
+        buy_limit = getattr(executor, "buy_limit", None)
+        if use_limit and callable(buy_limit):
+            result = await buy_limit(
+                asset_id=asset_id,
+                amount_usd=amount_usd,
+                price=leg["entry_price"],
+            )
+            if _is_execution_result_like(result):
+                return result
+
+        buy = getattr(executor, "buy", None)
+        if callable(buy):
+            buy_kwargs = {"asset_id": asset_id, "amount_usd": amount_usd}
+            if hasattr(executor, 'real'):
+                buy_kwargs["fallback_price"] = leg["entry_price"]
+            result = await buy(**buy_kwargs)
+            if _is_execution_result_like(result):
+                return result
+
+        return None
 
     async def exit_leg(self, pkg_id: str, leg_id: str, trigger: str = "manual",
                        use_limit: bool = False, timeout: int = 60) -> dict:
