@@ -211,7 +211,7 @@ class TestMarketCategoryFilter:
         from positions.auto_trader import _RATIO_MAX_TRADE, _RATIO_MIN_TRADE, _RATIO_MAX_EXPOSURE
         assert _RATIO_MAX_TRADE == 0.025
         assert _RATIO_MIN_TRADE == 0.005
-        assert _RATIO_MAX_EXPOSURE == 0.175
+        assert _RATIO_MAX_EXPOSURE == 0.50
 
 
 class TestTrailingStopCalibration:

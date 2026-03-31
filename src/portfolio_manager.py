@@ -24,9 +24,13 @@ from pathlib import Path
 from typing import Optional
 
 import yfinance as yf
-from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+
+try:
+    from apscheduler.schedulers.background import BackgroundScheduler
+except ImportError:  # Optional in stripped-down test/dev environments
+    BackgroundScheduler = None
 
 logger = logging.getLogger(__name__)
 
@@ -910,6 +914,10 @@ def start_scheduler() -> Optional[BackgroundScheduler]:
     """
     global _scheduler_started
     if _scheduler_started:
+        return None
+
+    if BackgroundScheduler is None:
+        logger.warning("APScheduler not installed; portfolio background jobs disabled")
         return None
 
     scheduler = BackgroundScheduler(daemon=True)

@@ -195,21 +195,21 @@ function startArbPolling() {
     loadOpportunities();
     loadSavedMarkets();
     loadHedgePackages();
-    loadNews();
+    arbLoadNews();
     loadInsiderSignals();
     loadWhaleSignals();
     loadForexRates();
-    loadWatchlist(); // NEW: Load watchlist
+    arbLoadWatchlist(); // NEW: Load watchlist
     loadTrendingMarkets(); // NEW: Load trending markets
 
     arbPollingInterval = setInterval(loadOpportunities, 15000);
     arbScanInterval = setInterval(triggerScan, 60000);
     arbHedgePollingInterval = setInterval(loadHedgePackages, 30000);
-    arbNewsPollingInterval = setInterval(loadNews, 60000);
+    arbNewsPollingInterval = setInterval(arbLoadNews, 60000);
     arbInsiderPollingInterval = setInterval(loadInsiderSignals, 30000);
     arbWhalePollingInterval = setInterval(loadWhaleSignals, 30000);
     forexPollingInterval = setInterval(loadForexRates, 60000);
-    arbWatchlistPollingInterval = setInterval(loadWatchlist, 30000); // NEW: Poll watchlist every 30s
+    arbWatchlistPollingInterval = setInterval(arbLoadWatchlist, 30000); // NEW: Poll watchlist every 30s
     arbTrendingPollingInterval = setInterval(loadTrendingMarkets, 60000); // NEW: Poll trending markets every 60s
     connectArbWs();
 }
@@ -296,7 +296,7 @@ function connectArbWs() {
                 title: data.data.headline,
                 direction: 'alert'
             });
-            loadNews(); // Reload news to show new headlines
+            arbLoadNews(); // Reload news to show new headlines
         }
     };
 
@@ -1291,7 +1291,7 @@ function renderHedgePackagesContent(container, packages) {
 }
 
 // === NEWS SCANNER (NEW SECTION) ===
-function loadNews() {
+function arbLoadNews() {
     fetch('/api/arbitrage/news')
         .then(function(r) { return r.json(); })
         .then(function(data) {
@@ -1739,7 +1739,7 @@ function renderForexRatesContent(container, ratesData) {
 }
 
 // === WATCHLIST (NEW SECTION) ===
-function loadWatchlist() {
+function arbLoadWatchlist() {
     fetch('/api/arbitrage/watchlist')
         .then(function(r) { return r.json(); })
         .then(function(data) {
@@ -1798,13 +1798,13 @@ function addToWatchlist(item) {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(item)
-    }).then(function() { loadWatchlist(); });
+    }).then(function() { arbLoadWatchlist(); });
 }
 
 function removeFromWatchlist(platform, eventId) {
     fetch(`/api/arbitrage/watchlist/${encodeURIComponent(platform)}/${encodeURIComponent(eventId)}`, {
         method: 'DELETE'
-    }).then(function() { loadWatchlist(); });
+    }).then(function() { arbLoadWatchlist(); });
 }
 
 // === TRENDING MARKETS (NEW SECTION) ===
