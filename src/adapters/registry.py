@@ -9,8 +9,12 @@ from adapters.predictit import PredictItAdapter
 from adapters.limitless import LimitlessAdapter
 from adapters.coinbase import CoinbaseAdapter
 from adapters.manifold import ManifoldAdapter
-from adapters.metaculus import MetaculusAdapter
 from adapters.models import NormalizedEvent
+
+try:
+    from adapters.metaculus import MetaculusAdapter
+except ImportError:  # Optional adapter not present in this checkout
+    MetaculusAdapter = None
 
 logger = logging.getLogger("adapter_registry")
 
@@ -31,7 +35,8 @@ class AdapterRegistry:
         self.register_adapter(LimitlessAdapter())
         self.register_adapter(CoinbaseAdapter())
         self.register_adapter(ManifoldAdapter())
-        self.register_adapter(MetaculusAdapter())
+        if MetaculusAdapter is not None:
+            self.register_adapter(MetaculusAdapter())
 
 
     def register_adapter(self, adapter: BaseAdapter):
@@ -115,4 +120,3 @@ class AdapterRegistry:
             current_status["errors_24h"] = sum(1 for e in hist if e["timestamp"] > cutoff_24h)
             status_list.append(current_status)
         return status_list
-
