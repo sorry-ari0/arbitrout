@@ -59,7 +59,15 @@ import threading
 
 # --- Arbitrage imports ---
 try:
-    from arbitrage_router import router as arbitrage_router, init_scanner, get_scanner, broadcast_update, broadcast_error
+    from arbitrage_router import (
+        router as arbitrage_router,
+        init_scanner,
+        get_scanner,
+        get_theta_scanner,
+        get_cross_asset_matcher,
+        broadcast_update,
+        broadcast_error,
+    )
     from adapters.registry import AdapterRegistry
     from adapters.kalshi import KalshiAdapter
     from adapters.polymarket import PolymarketAdapter
@@ -522,6 +530,12 @@ async def lifespan(app: FastAPI):
                                        probability_model=_probability_model,
                                        initial_bankroll=_initial_bankroll,
                                        paper_mode=is_paper_mode())
+            if _ARBITRAGE_AVAILABLE:
+                try:
+                    _auto_trader.set_theta_scanner(get_theta_scanner())
+                    _auto_trader.set_cross_asset_matcher(get_cross_asset_matcher())
+                except Exception as e:
+                    logger.warning("Reference scanners unavailable for auto trader: %s", e)
             _auto_trader.start()
             _auto_trader_ref = _auto_trader
             logger.info("Auto trader started — reacts to arb scanner within seconds, 5min safety-net fallback")

@@ -1,6 +1,5 @@
 # tests/test_commodities_block.py
-"""Tests for commodities hard block in auto trader scoring."""
-import re
+"""Tests for commodities gating in auto trader scoring."""
 
 
 class TestCommoditiesBlock:
@@ -17,20 +16,10 @@ class TestCommoditiesBlock:
         is_commodities = any(kw in title.lower() for kw in COMMODITIES_KEYWORDS)
         assert not is_commodities
 
-    def test_commodities_code_uses_continue_not_multiply(self):
-        """The auto_trader source should `continue` on commodities, not `score *= 0.4`.
-
-        This is a source-code assertion that verifies the behavioral change:
-        after the fix, the code block for is_commodities should contain 'continue'
-        and NOT contain 'score *= 0.4'.
-        """
+    def test_commodities_code_blocks_only_non_reference_trades(self):
+        """Commodity trades should be blocked unless explicitly reference-backed."""
         import inspect
         from positions.auto_trader import AutoTrader
         source = inspect.getsource(AutoTrader._scan_and_trade)
         assert "commodities_market" in source, "Should log skip reason 'commodities_market'"
-        lines = source.split("\n")
-        for i, line in enumerate(lines):
-            if "is_commodities" in line and "score *=" in line:
-                raise AssertionError(
-                    f"Line {i}: commodities should be hard-skipped, not penalized: {line.strip()}"
-                )
+        assert "not opp.get(\"_reference_backed\")" in source
