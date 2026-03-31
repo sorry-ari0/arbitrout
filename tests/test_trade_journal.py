@@ -197,3 +197,22 @@ class TestJournal:
             entry2 = journal.record_close(pkg, exit_trigger="bracket_tp")
             assert entry2 is None
             assert len(journal.entries) == 1
+
+    def test_diagnostics_includes_coverage_and_robustness(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = TradeJournal(Path(tmp))
+
+            for i in range(10):
+                current_value = 120.0 if i % 2 == 0 else 80.0
+                pkg = _make_closed_package(f"Trade {i}", "pure_prediction", 100.0, current_value)
+                journal.record_close(pkg, exit_trigger="manual")
+
+            diagnostics = journal.get_diagnostics()
+
+            assert diagnostics["total_trades"] == 10
+            assert "first_closed_at" in diagnostics
+            assert "last_closed_at" in diagnostics
+            assert "coverage_days" in diagnostics
+            assert "equity_summary" in diagnostics
+            assert "robustness" in diagnostics
+            assert diagnostics["robustness"]["total_trades"] == 10
