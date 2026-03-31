@@ -1,137 +1,248 @@
-"""Commodities adapter — STUB, needs full rewrite (task 38).
-
-KNOWN ISSUES (from audit):
-- Uses wrong NormalizedEvent (Pydantic BaseModel instead of dataclass from adapters.models)
-- Wrong import path (adapters.registry instead of adapters.base)
-- Uses random.uniform() for price noise instead of real implied probabilities
-- Wrong field names (event_name vs title, market_end_time vs expiry)
-
-DO NOT register this adapter in server.py until rewritten.
-See: tasks.md task 38
-"""
-
-import yfinance as yf
-from datetime import datetime
-import random
+"""Synthetic commodity probability adapter built from live futures prices."""
+import asyncio
+from datetime import date, datetime
 import logging
-from pydantic import BaseModel
+import math
+import statistics
 
-logger = logging.getLogger(__name__)
-
-# STUB: This will be replaced with proper imports when rewritten
-# from adapters.base import BaseAdapter
-# from adapters.models import NormalizedEvent
 try:
-    from adapters.base import BaseAdapter
-except ImportError:
-    class BaseAdapter:
-        """Fallback stub — commodities adapter is non-functional until rewritten."""
-        platform_id: str = ""
-        platform_name: str = ""
-        async def fetch_events(self):
-            raise NotImplementedError("Commodities adapter needs rewrite — see task 38")
+    import yfinance as yf
+except ImportError:  # pragma: no cover - optional dependency in some test envs
+    yf = None
 
-class NormalizedEvent(BaseModel):
-    """STUB: Wrong model — will be replaced with adapters.models.NormalizedEvent."""
-    event_id: str
-    event_name: str
-    platform: str
-    url: str
-    yes_price: float
-    no_price: float
-    market_end_time: int
+from .base import BaseAdapter
+from .models import NormalizedEvent
+
+logger = logging.getLogger("adapters.commodities")
 
 
-# Commodity tickers and example price targets for hypothetical prediction events
-COMMODITY_TARGETS = {
-    "GC=F": {"name": "Gold", "targets": [(2300, 2500, datetime(2026, 12, 31)), (2000, 2200, datetime(2024, 12, 31))]},
-    "SI=F": {"name": "Silver", "targets": [(28, 32, datetime(2026, 12, 31)), (24, 26, datetime(2024, 12, 31))]},
-    "CL=F": {"name": "Crude Oil (WTI)", "targets": [(80, 90, datetime(2025, 12, 31)), (70, 75, datetime(2024, 12, 31))]},
-    "NG=F": {"name": "Natural Gas", "targets": [(3, 4, datetime(2025, 12, 31)), (2.5, 3.0, datetime(2024, 12, 31))]},
-    "HG=F": {"name": "Copper", "targets": [(4.5, 5.0, datetime(2025, 12, 31)), (4.0, 4.3, datetime(2024, 12, 31))]},
-    "ZC=F": {"name": "Corn", "targets": [(500, 550, datetime(2025, 12, 31)), (450, 480, datetime(2024, 12, 31))]},
-    "ZW=F": {"name": "Wheat", "targets": [(700, 750, datetime(2025, 12, 31)), (650, 680, datetime(2024, 12, 31))]},
-    "ZS=F": {"name": "Soybeans", "targets": [(1300, 1350, datetime(2025, 12, 31)), (1250, 1280, datetime(2024, 12, 31))]},
+COMMODITY_CONTRACTS = {
+    "GC=F": {
+        "name": "Gold",
+        "slug": "gold",
+        "thresholds": [2300, 2500, 2800],
+        "default_volatility": 0.16,
+    },
+    "SI=F": {
+        "name": "Silver",
+        "slug": "silver",
+        "thresholds": [28, 32, 36],
+        "default_volatility": 0.26,
+    },
+    "CL=F": {
+        "name": "Crude Oil",
+        "slug": "crude-oil",
+        "thresholds": [70, 85, 100],
+        "default_volatility": 0.35,
+    },
+    "NG=F": {
+        "name": "Natural Gas",
+        "slug": "natural-gas",
+        "thresholds": [2.5, 3.5, 5.0],
+        "default_volatility": 0.55,
+    },
+    "HG=F": {
+        "name": "Copper",
+        "slug": "copper",
+        "thresholds": [4.0, 4.75, 5.5],
+        "default_volatility": 0.24,
+    },
+    "ZC=F": {
+        "name": "Corn",
+        "slug": "corn",
+        "thresholds": [450, 525, 600],
+        "default_volatility": 0.22,
+    },
+    "ZW=F": {
+        "name": "Wheat",
+        "slug": "wheat",
+        "thresholds": [550, 650, 775],
+        "default_volatility": 0.28,
+    },
+    "ZS=F": {
+        "name": "Soybeans",
+        "slug": "soybeans",
+        "thresholds": [1000, 1150, 1300],
+        "default_volatility": 0.21,
+    },
 }
 
 
+def _norm_cdf(x: float) -> float:
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+def _probability_exceeds(
+    current_price: float,
+    threshold: float,
+    annual_volatility: float,
+    expiry: date,
+) -> float:
+    """Estimate P(price > threshold at expiry) using a log-normal model."""
+    if current_price <= 0 or threshold <= 0:
+        return 0.5
+
+    days_remaining = max((expiry - date.today()).days, 1)
+    years_remaining = days_remaining / 365.0
+    sigma = max(annual_volatility, 0.05) * math.sqrt(years_remaining)
+    if sigma <= 0:
+        return 1.0 if current_price >= threshold else 0.0
+
+    d2 = (
+        math.log(current_price / threshold)
+        - 0.5 * (annual_volatility ** 2) * years_remaining
+    ) / sigma
+    return max(0.001, min(0.999, _norm_cdf(d2)))
+
+
+def _annualized_volatility(closes: list[float], fallback: float) -> float:
+    """Estimate annualized realized volatility from daily closes."""
+    if len(closes) < 20:
+        return fallback
+
+    returns: list[float] = []
+    prev = None
+    for close in closes:
+        if close is None or close <= 0:
+            prev = None
+            continue
+        if prev is not None:
+            returns.append(math.log(close / prev))
+        prev = close
+
+    if len(returns) < 10:
+        return fallback
+
+    try:
+        volatility = statistics.stdev(returns) * math.sqrt(252.0)
+    except statistics.StatisticsError:
+        return fallback
+
+    return max(0.05, min(volatility, 2.0))
+
+
+def _rolling_expiries(today: date | None = None) -> list[date]:
+    """Return the next two half-year expiries after today."""
+    today = today or date.today()
+    candidates = [
+        date(today.year, 6, 30),
+        date(today.year, 12, 31),
+        date(today.year + 1, 6, 30),
+    ]
+    return [expiry for expiry in candidates if expiry > today][:2]
+
+
+def _format_threshold(value: float) -> str:
+    if value >= 100:
+        return f"${value:,.0f}"
+    if value >= 10:
+        return f"${value:,.2f}".rstrip("0").rstrip(".")
+    return f"${value:.2f}".rstrip("0").rstrip(".")
+
+
 class CommoditiesAdapter(BaseAdapter):
-    platform_id: str = "commodities"
-    platform_name: str = "Commodities"
+    """Build synthetic binary commodity events from live futures prices."""
 
-    async def fetch_events(self) -> list[NormalizedEvent]:
+    PLATFORM_NAME = "commodities"
+    RATE_LIMIT_SECONDS = 15.0
+    CACHE_TTL_SECONDS = 300.0
+
+    async def _fetch(self) -> list[NormalizedEvent]:
+        if yf is None:
+            logger.warning("yfinance not installed; commodities adapter disabled")
+            return []
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._fetch_sync)
+
+    def _fetch_sync(self) -> list[NormalizedEvent]:
         events: list[NormalizedEvent] = []
-        for ticker_symbol, data in COMMODITY_TARGETS.items():
-            try:
-                ticker = yf.Ticker(ticker_symbol)
-                # Fetching latest price
-                hist = ticker.history(period="1d", interval="1m")
-                if not hist.empty:
-                    current_price = hist["Close"].iloc[-1]
-                else:
-                    info = ticker.fast_info
-                    current_price = info.last_price or info.previous_close or 0.0
+        expiries = _rolling_expiries()
+        if not expiries:
+            return events
 
-                if current_price == 0.0:
-                    logger.warning(f"Could not fetch current price for {data['name']} ({ticker_symbol}), skipping.")
-                    continue
+        for ticker_symbol, contract in COMMODITY_CONTRACTS.items():
+            symbol_events = self._build_events_for_symbol(
+                ticker_symbol=ticker_symbol,
+                contract=contract,
+                expiries=expiries,
+            )
+            events.extend(symbol_events)
 
-                for target_low, target_high, end_date in data["targets"]:
-                    # Create two types of events: "Price > TargetHigh" and "Price < TargetLow"
-                    # Simple heuristic for yes_price/no_price:
-                    # The further the current price is from the target, the lower the probability for the "beyond target" event.
-                    # This is a highly simplified model for demonstration.
-
-                    # Event 1: "Price > TargetHigh by end_date"
-                    event_name_high = f"{data['name']} Price > ${target_high} by {end_date.strftime('%b %Y')}"
-                    
-                    if current_price >= target_high:
-                        yes_p_high = 0.9 + random.uniform(-0.05, 0.05) # High probability
-                    else:
-                        # Scale based on difference, lower if far below
-                        distance_ratio = (current_price - target_high) / target_high
-                        yes_p_high = max(0.01, min(0.99, 0.5 + distance_ratio * 2))
-                        yes_p_high = round(yes_p_high * 0.5 + 0.05 + random.uniform(-0.02, 0.02), 2) # Make it generally low
-
-                    yes_p_high = max(0.01, min(0.99, yes_p_high))
-                    no_p_high = 1.0 - yes_p_high
-                    events.append(
-                        NormalizedEvent(
-                            event_id=f"commodities_{ticker_symbol}_high_{target_high}_{end_date.year}{end_date.month}",
-                            event_name=event_name_high,
-                            platform=self.platform_name,
-                            url=f"https://finance.yahoo.com/quote/{ticker_symbol}",
-                            yes_price=yes_p_high,
-                            no_price=no_p_high,
-                            market_end_time=int(end_date.timestamp()),
-                        )
-                    )
-
-                    # Event 2: "Price < TargetLow by end_date"
-                    event_name_low = f"{data['name']} Price < ${target_low} by {end_date.strftime('%b %Y')}"
-                    if current_price <= target_low:
-                        yes_p_low = 0.9 + random.uniform(-0.05, 0.05) # High probability
-                    else:
-                        # Scale based on difference, lower if far above
-                        distance_ratio = (target_low - current_price) / target_low
-                        yes_p_low = max(0.01, min(0.99, 0.5 + distance_ratio * 2))
-                        yes_p_low = round(yes_p_low * 0.5 + 0.05 + random.uniform(-0.02, 0.02), 2) # Make it generally low
-
-                    yes_p_low = max(0.01, min(0.99, yes_p_low))
-                    no_p_low = 1.0 - yes_p_low
-                    events.append(
-                        NormalizedEvent(
-                            event_id=f"commodities_{ticker_symbol}_low_{target_low}_{end_date.year}{end_date.month}",
-                            event_name=event_name_low,
-                            platform=self.platform_name,
-                            url=f"https://finance.yahoo.com/quote/{ticker_symbol}",
-                            yes_price=yes_p_low,
-                            no_price=no_p_low,
-                            market_end_time=int(end_date.timestamp()),
-                        )
-                    )
-
-            except Exception as e:
-                logger.error(f"Error fetching data for {data['name']} ({ticker_symbol}): {e}")
+        logger.info("Commodities: generated %d synthetic events", len(events))
         return events
 
+    def _build_events_for_symbol(
+        self,
+        ticker_symbol: str,
+        contract: dict,
+        expiries: list[date],
+    ) -> list[NormalizedEvent]:
+        try:
+            ticker = yf.Ticker(ticker_symbol)
+            history = ticker.history(period="6mo", interval="1d", auto_adjust=False)
+        except Exception as exc:
+            logger.warning("Commodity fetch failed for %s: %s", ticker_symbol, exc)
+            return []
+
+        if history is None or history.empty or "Close" not in history:
+            logger.warning("Commodity history missing for %s", ticker_symbol)
+            return []
+
+        closes = [float(value) for value in history["Close"].dropna().tolist()]
+        if not closes:
+            return []
+
+        current_price = closes[-1]
+        annual_volatility = _annualized_volatility(
+            closes=closes,
+            fallback=float(contract["default_volatility"]),
+        )
+        volume_series = history["Volume"].dropna() if "Volume" in history else None
+        volume = int(float(volume_series.tail(20).mean())) if volume_series is not None and not volume_series.empty else 0
+
+        events: list[NormalizedEvent] = []
+        for expiry in expiries:
+            for threshold in contract["thresholds"]:
+                probability = _probability_exceeds(
+                    current_price=current_price,
+                    threshold=float(threshold),
+                    annual_volatility=annual_volatility,
+                    expiry=expiry,
+                )
+                threshold_label = _format_threshold(float(threshold))
+                expiry_label = expiry.isoformat()
+                base_event_id = (
+                    f"{contract['slug']}-{str(threshold).replace('.', '_')}-{expiry_label}"
+                )
+                url = f"https://finance.yahoo.com/quote/{ticker_symbol}"
+
+                events.append(
+                    NormalizedEvent(
+                        platform=self.PLATFORM_NAME,
+                        event_id=f"{base_event_id}-above",
+                        title=f"Will {contract['name']} exceed {threshold_label} by {expiry_label}?",
+                        category="economics",
+                        yes_price=round(probability, 4),
+                        no_price=round(1.0 - probability, 4),
+                        volume=volume,
+                        expiry=expiry_label,
+                        url=url,
+                        spot_price=round(current_price, 4),
+                    )
+                )
+                events.append(
+                    NormalizedEvent(
+                        platform=self.PLATFORM_NAME,
+                        event_id=f"{base_event_id}-below",
+                        title=f"Will {contract['name']} fall below {threshold_label} by {expiry_label}?",
+                        category="economics",
+                        yes_price=round(1.0 - probability, 4),
+                        no_price=round(probability, 4),
+                        volume=volume,
+                        expiry=expiry_label,
+                        url=url,
+                        spot_price=round(current_price, 4),
+                    )
+                )
+
+        return events

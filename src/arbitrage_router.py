@@ -10,9 +10,11 @@ import io
 
 from adapters.registry import AdapterRegistry
 from arbitrage_engine import ArbitrageScanner, load_saved, save_market, unsave_market, load_watchlist_items, add_to_watchlist, remove_from_watchlist
+from cross_asset_matcher import CrossAssetMatcher
 from event_matcher import add_manual_link, remove_manual_link
 from execution.crypto_hedger import CryptoHedger
 from arbitrage_history import get_opportunity_history, get_market_history # NEW: Import market history getter
+from theta_scanner import ThetaScanner
 from utils.forex_rates import fetch_forex_rates
 
 logger = logging.getLogger("arbitrage_router")
@@ -26,14 +28,18 @@ forex_router = APIRouter(prefix="/api/forex", tags=["forex"])
 _scanner: ArbitrageScanner | None = None
 _registry: AdapterRegistry | None = None
 _hedger: CryptoHedger | None = None
+_theta_scanner: ThetaScanner | None = None
+_cross_asset_matcher: CrossAssetMatcher | None = None
 
 
 def init_scanner(registry: AdapterRegistry, decision_logger=None):
     """Called by server.py to initialize the scanner."""
-    global _scanner, _registry, _hedger
+    global _scanner, _registry, _hedger, _theta_scanner, _cross_asset_matcher
     _registry = registry
     _scanner = ArbitrageScanner(registry, decision_logger=decision_logger)
     _hedger = CryptoHedger(registry)
+    _theta_scanner = ThetaScanner(registry)
+    _cross_asset_matcher = CrossAssetMatcher(registry)
 
 
 def get_scanner() -> ArbitrageScanner:
@@ -46,6 +52,18 @@ def get_hedger() -> CryptoHedger:
     if _hedger is None:
         raise RuntimeError("CryptoHedger not initialized")
     return _hedger
+
+
+def get_theta_scanner() -> ThetaScanner:
+    if _theta_scanner is None:
+        raise RuntimeError("Theta scanner not initialized")
+    return _theta_scanner
+
+
+def get_cross_asset_matcher() -> CrossAssetMatcher:
+    if _cross_asset_matcher is None:
+        raise RuntimeError("Cross-asset matcher not initialized")
+    return _cross_asset_matcher
 
 
 # ============================================================
@@ -149,6 +167,20 @@ async def get_hedge_packages():
     hedger = get_hedger()
     packages = await hedger.find_hedge_packages()
     return JSONResponse(content=packages)
+
+
+@router.get("/theta")
+async def get_theta_opportunities():
+    """Near-expiry contracts that diverge from cross-platform consensus."""
+    scanner = get_theta_scanner()
+    return JSONResponse(content=await scanner.get_theta_opportunities())
+
+
+@router.get("/cross-asset")
+async def get_cross_asset_opportunities():
+    """Prediction markets mispriced versus crypto and commodity synthetic hedges."""
+    matcher = get_cross_asset_matcher()
+    return JSONResponse(content=await matcher.get_opportunities())
 
 
 @router.get("/history/{match_id}")
@@ -400,4 +432,3 @@ async def broadcast_error(error_data: dict):
             dead.append(ws)
     for ws in dead:
         _ws_clients.discard(ws)
-
