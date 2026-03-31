@@ -4,6 +4,59 @@
 
 ---
 
+## Snapshot: 2026-03-31 (optimization pass, no new closed trades)
+
+### Evidence Review Window
+- Trade journal still has no new closed paper trades after 2026-03-19, so this pass is based on scanner and decision-log evidence rather than new realized PnL.
+- Latest reviewed decision-log window remains 2026-03-24 10:27Z-11:49Z.
+
+### What This Pass Found
+
+1. **Zero-volume opportunities were still reaching the decision layer.**
+   - `opportunity_detected` entries continued to show `cross_platform_arb` setups with `volume: 0`.
+   - Example markets in the log included Greenland and trade-agreement contracts.
+   - This meant the system was still spending ranking/attention budget on non-executable ideas even after scanner-side actionable-pair work.
+
+2. **Reference-model scanners existed but were not connected to autonomous trading.**
+   - `theta_scanner.py` and `cross_asset_matcher.py` were available through API routes, but `auto_trader.py` was not consuming them.
+   - Result: the app had newer analysis modules that improved visibility, but they were not affecting actual trade selection.
+
+3. **Commodity suppression was too broad for the current architecture.**
+   - The auto trader still hard-skipped all commodity titles with `commodities_market`.
+   - That made sense before the reference-model additions, but after the commodity adapter/cross-asset work it prevented any reference-backed commodity idea from ever reaching execution.
+
+### Changes Applied On 2026-03-31
+
+- `src/positions/auto_trader.py`
+  - Added a hard `zero_volume` skip before execution.
+  - Added theta-scanner ingestion.
+  - Added cross-asset reference-opportunity ingestion.
+  - Added `preferred_side` support so scanner consensus can drive YES/NO selection directly.
+  - Narrowed the commodity block so only raw/unreferenced commodity opportunities are skipped.
+
+- `src/cross_asset_matcher.py`
+  - Added `prediction_volume`, `reference_volume`, and `combined_volume` to emitted opportunities so downstream filters can enforce liquidity.
+
+- `src/server.py`
+  - Wired the theta scanner and cross-asset matcher into `AutoTrader` during startup.
+
+### Verification
+- Targeted regression suite: `83 passed in 1.52s`
+- Compile check: `python -m py_compile src/positions/auto_trader.py src/cross_asset_matcher.py src/server.py`
+
+### Expected Impact
+
+1. **Less decision-log noise.** Zero-liquidity opportunities should now stop at the auto-trader gate instead of competing with executable candidates.
+2. **Reference analysis now influences trading.** Theta and cross-asset scanners are no longer UI-only analysis features.
+3. **Commodity handling is more precise.** The system still rejects raw commodity directional trades, but it can now consider reference-backed commodity setups.
+
+### Remaining Validation Gap
+- No new closed trades have occurred yet, so this is still an implementation improvement, not a realized-PnL improvement.
+- The next journal pass should explicitly check whether:
+  - `zero_volume` becomes a visible skip reason,
+  - `commodities_market` skip frequency falls for reference-backed setups,
+  - and `trade_opened` starts to include `theta_consensus` or `cross_asset_reference`-driven entries.
+
 ## Snapshot: 2026-03-21 (39 trades)
 
 ### Overall Stats

@@ -1,7 +1,7 @@
 """Tests for auto trader improvements: churn reduction, filters, scoring."""
 import pytest
 from datetime import date, datetime, timedelta
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 
 def _make_mock_pm():
@@ -171,6 +171,111 @@ class TestTradeablePlatformFilter:
             trader._arb_to_opportunity(arb)
         # The tradeable filter should NOT have triggered
         assert "Skipping arb on non-tradeable platform" not in caplog.text
+
+
+class TestReferenceScanners:
+    def test_theta_opportunity_converts_to_directional_trade(self):
+        from positions.auto_trader import AutoTrader
+        pm = _make_mock_pm()
+        pm.executors = {"polymarket": MagicMock()}
+        trader = AutoTrader(pm)
+
+        opp = trader._theta_to_opportunity({
+            "canonical_title": "Will BTC exceed $100,000 by Friday?",
+            "platform": "polymarket",
+            "event_id": "poly-btc-100k",
+            "expiry": "2026-12-31",
+            "days_to_expiry": 2,
+            "market_yes_price": 0.30,
+            "market_no_price": 0.70,
+            "buy_side": "YES",
+            "expected_edge_pct": 18.0,
+            "theta_capture_pct_per_day": 9.0,
+            "volume": 2500,
+        })
+
+        assert opp is not None
+        assert opp["opportunity_type"] == "theta_consensus"
+        assert opp["preferred_side"] == "YES"
+        assert opp["_reference_backed"] is True
+        assert opp["volume"] == 2500
+
+    def test_cross_asset_opportunity_converts_to_prediction_only_trade(self):
+        from positions.auto_trader import AutoTrader
+        pm = _make_mock_pm()
+        pm.executors = {"kalshi": MagicMock()}
+        trader = AutoTrader(pm)
+
+        opp = trader._cross_asset_to_opportunity({
+            "prediction_platform": "kalshi",
+            "prediction_event_id": "kalshi-oil-90",
+            "prediction_title": "Will Crude Oil settle above $90 in March?",
+            "prediction_yes_price": 0.38,
+            "prediction_side": "YES",
+            "model_gap_pct": 14.0,
+            "guaranteed_profit_pct": 22.0,
+            "prediction_volume": 4100,
+            "asset_class": "commodity",
+            "expiry": "2026-12-31",
+        })
+
+        assert opp is not None
+        assert opp["opportunity_type"] == "cross_asset_reference"
+        assert opp["preferred_side"] == "YES"
+        assert opp["_reference_backed"] is True
+        assert opp["volume"] == 4100
+
+    def test_cross_asset_requires_tradeable_prediction_platform(self):
+        from positions.auto_trader import AutoTrader
+        pm = _make_mock_pm()
+        pm.executors = {"polymarket": MagicMock()}
+        trader = AutoTrader(pm)
+
+        opp = trader._cross_asset_to_opportunity({
+            "prediction_platform": "kalshi",
+            "prediction_event_id": "kalshi-oil-90",
+            "prediction_title": "Will Crude Oil settle above $90 in March?",
+            "prediction_yes_price": 0.38,
+            "prediction_side": "YES",
+            "model_gap_pct": 14.0,
+            "guaranteed_profit_pct": 22.0,
+            "prediction_volume": 4100,
+            "asset_class": "commodity",
+            "expiry": "2026-12-31",
+        })
+
+        assert opp is None
+
+
+class TestLiquidityGates:
+    @pytest.mark.asyncio
+    async def test_zero_volume_opportunity_is_skipped_before_execution(self):
+        from positions.auto_trader import AutoTrader
+
+        pm = _make_mock_pm()
+        pm.executors = {"polymarket": MagicMock()}
+        pm.execute_package = AsyncMock(return_value={"success": True})
+
+        trader = AutoTrader(pm, scanner=None)
+        trader._scan_polymarket = AsyncMock(return_value=[{
+            "title": "Will BTC exceed $100,000?",
+            "canonical_title": "Will BTC exceed $100,000?",
+            "buy_yes_platform": "polymarket",
+            "buy_yes_price": 0.35,
+            "buy_no_platform": "polymarket",
+            "buy_no_price": 0.65,
+            "buy_yes_market_id": "btc-100k",
+            "buy_no_market_id": "btc-100k",
+            "profit_pct": 18.0,
+            "net_profit_pct": 18.0,
+            "opportunity_type": "pure_prediction",
+            "expiry": (datetime.now() + timedelta(days=5)).isoformat(),
+            "volume": 0,
+            "_score": 40.0,
+        }])
+        await trader._scan_and_trade()
+
+        pm.execute_package.assert_not_awaited()
 
 
 class TestMarketCategoryFilter:
