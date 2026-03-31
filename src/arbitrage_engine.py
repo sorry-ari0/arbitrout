@@ -42,6 +42,17 @@ _TAKER_FEES = {
 _DEFAULT_TAKER_FEE = 0.0
 _PREDICTIT_PROFIT_TAX = 0.10  # 10% of profits at contract resolution
 _PREDICTIT_WITHDRAWAL_FEE = 0.05  # 5% of withdrawal amount
+_MIN_ACTIONABLE_LEG_PRICE = 0.01
+
+
+def _leg_price(event: NormalizedEvent, side: str) -> float:
+    """Return the selected leg price for an event."""
+    return event.yes_price if side == "yes" else event.no_price
+
+
+def _leg_is_actionable(event: NormalizedEvent, side: str) -> bool:
+    """Require a non-zero quoted leg and some observed market activity."""
+    return _leg_price(event, side) >= _MIN_ACTIONABLE_LEG_PRICE and event.volume > 0
 
 
 def _event_taker_fee_rate(event: NormalizedEvent, side: str) -> float:
@@ -94,6 +105,41 @@ def _compute_fee_adjusted_profit(
     net_pct = worst_profit * 100
 
     return net_pct, total_cost
+
+
+def _best_pure_arb_pair(markets: list[NormalizedEvent]) -> tuple[NormalizedEvent, NormalizedEvent, float, float] | None:
+    """Pick the best executable YES/NO pair across distinct platforms.
+
+    The naive cheapest-quote pair is often a phantom because one selected leg has
+    a zero quote or zero observed volume. Search all cross-platform pairs and keep
+    the one with the best net profit after fees.
+    """
+    best_pair: tuple[NormalizedEvent, NormalizedEvent, float, float] | None = None
+
+    for yes_market in markets:
+        if not _leg_is_actionable(yes_market, "yes"):
+            continue
+        for no_market in markets:
+            if yes_market.platform == no_market.platform:
+                continue
+            if not _leg_is_actionable(no_market, "no"):
+                continue
+
+            net_pct, _ = _compute_fee_adjusted_profit(yes_market, no_market)
+            gross_pct = (1.0 - (yes_market.yes_price + no_market.no_price)) * 100.0
+            candidate = (yes_market, no_market, gross_pct, net_pct)
+
+            if best_pair is None:
+                best_pair = candidate
+                continue
+
+            _, _, best_gross_pct, best_net_pct = best_pair
+            if net_pct > best_net_pct + 1e-9:
+                best_pair = candidate
+            elif abs(net_pct - best_net_pct) <= 1e-9 and gross_pct > best_gross_pct:
+                best_pair = candidate
+
+    return best_pair
 
 
 def _match_confidence(profit_pct: float) -> str:
@@ -834,61 +880,37 @@ def find_arbitrage(matched: list[MatchedEvent],
             continue
 
         is_synthetic = not _markets_have_same_target(markets)
-        combined_vol = sum(m.volume for m in markets)
-
-        if combined_vol < min_volume:
-            continue
-
-        # Find cheapest YES and cheapest NO across different platforms
-        best_yes_market = min(markets, key=lambda m: m.yes_price)
-        best_no_market = min(markets, key=lambda m: m.no_price)
-
-        # Skip if both are on the same platform (no cross-platform play)
-        if best_yes_market.platform == best_no_market.platform:
-            other_yes = [m for m in markets if m.platform != best_no_market.platform]
-            other_no = [m for m in markets if m.platform != best_yes_market.platform]
-            if other_yes:
-                best_yes_market = min(other_yes, key=lambda m: m.yes_price)
-            elif other_no:
-                best_no_market = min(other_no, key=lambda m: m.no_price)
-            else:
-                continue
-
-        total_cost = best_yes_market.yes_price + best_no_market.no_price
-
-        # Reject synthetics where either leg has no real liquidity.
-        # A $0.0005 YES price looks like 50% spread but is untradeable.
-        _MIN_LEG_PRICE = 0.02
-        if is_synthetic and (best_yes_market.yes_price < _MIN_LEG_PRICE
-                             or best_no_market.no_price < _MIN_LEG_PRICE):
-            continue
 
         if is_synthetic:
-            # Try crypto-based synthetic first, then general threshold-based
-            synthetic_info = _build_synthetic_info(best_yes_market, best_no_market)
-            if synthetic_info is None:
-                synthetic_info = _build_threshold_synthetic_info(best_yes_market, best_no_market)
-            if synthetic_info is None:
-                # Try all cross-platform pairs to find a valid combination
-                found = False
-                for ym in markets:
-                    for nm in markets:
-                        if ym.platform == nm.platform:
-                            continue
-                        si = _build_synthetic_info(ym, nm)
-                        if si is None:
-                            si = _build_threshold_synthetic_info(ym, nm)
-                        if si is not None:
-                            best_yes_market = ym
-                            best_no_market = nm
-                            synthetic_info = si
-                            total_cost = ym.yes_price + nm.no_price
-                            found = True
-                            break
-                    if found:
-                        break
-                if not found:
+            best_candidate = None
+            for ym in markets:
+                if not _leg_is_actionable(ym, "yes"):
                     continue
+                for nm in markets:
+                    if ym.platform == nm.platform:
+                        continue
+                    if not _leg_is_actionable(nm, "no"):
+                        continue
+                    si = _build_synthetic_info(ym, nm)
+                    if si is None:
+                        si = _build_threshold_synthetic_info(ym, nm)
+                    if si is None:
+                        continue
+                    total_cost = ym.yes_price + nm.no_price
+                    spread = 1.0 - total_cost
+                    loss_prob = si.get("loss_probability", 0.33)
+                    effective_profit_pct = spread * 100.0 * (1.0 - loss_prob)
+                    pair_volume = ym.volume + nm.volume
+                    candidate = (effective_profit_pct, pair_volume, ym, nm, si)
+                    if best_candidate is None or candidate[:2] > best_candidate[:2]:
+                        best_candidate = candidate
+            if best_candidate is None:
+                continue
+
+            _, combined_vol, best_yes_market, best_no_market, synthetic_info = best_candidate
+            if combined_vol < min_volume:
+                continue
+            total_cost = best_yes_market.yes_price + best_no_market.no_price
 
             spread = 1.0 - total_cost
             # Discount by win probability
@@ -935,6 +957,8 @@ def find_arbitrage(matched: list[MatchedEvent],
                     "no_price": round(best_no_market.no_price, 4),
                     "yes_platform": best_yes_market.platform,
                     "no_platform": best_no_market.platform,
+                    "yes_volume": best_yes_market.volume,
+                    "no_volume": best_no_market.volume,
                     "total_cost": round(total_cost, 4),
                     "gross_spread": round(spread, 4),
                     "gross_profit_pct": round(spread * 100, 2),
@@ -946,18 +970,22 @@ def find_arbitrage(matched: list[MatchedEvent],
                 },
             ))
         else:
+            best_pair = _best_pure_arb_pair(markets)
+            if best_pair is None:
+                continue
+
+            best_yes_market, best_no_market, profit_pct, net_pct = best_pair
+            combined_vol = best_yes_market.volume + best_no_market.volume
+            if combined_vol < min_volume:
+                continue
+
             # Pure arb: guaranteed profit if spread > 0
+            total_cost = best_yes_market.yes_price + best_no_market.no_price
             spread = 1.0 - total_cost
-            profit_pct = spread * 100.0
 
             if spread < min_spread:
                 continue
 
-            # Fee-adjusted profit (guaranteed after all platform fees)
-            net_pct, _ = _compute_fee_adjusted_profit(
-                best_yes_market,
-                best_no_market,
-            )
             # Skip if guaranteed loss after fees
             if net_pct <= 0:
                 continue
@@ -989,6 +1017,8 @@ def find_arbitrage(matched: list[MatchedEvent],
                     "no_price": round(best_no_market.no_price, 4),
                     "yes_platform": best_yes_market.platform,
                     "no_platform": best_no_market.platform,
+                    "yes_volume": best_yes_market.volume,
+                    "no_volume": best_no_market.volume,
                     "total_cost": round(total_cost, 4),
                     "gross_spread": round(spread, 4),
                     "gross_profit_pct": round(profit_pct, 2),

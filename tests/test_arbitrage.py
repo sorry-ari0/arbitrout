@@ -168,6 +168,29 @@ class TestFindArbitrage:
         assert opp.buy_yes_platform == "polymarket"
         assert opp.buy_no_platform == "kalshi"
 
+    def test_pure_arb_ignores_dead_best_quote_and_uses_tradeable_pair(self):
+        """Scanner should not anchor on a 0c quote with no volume when a live pair exists."""
+        dead_yes = _make_event("predictit", "pi1", "BTC > 100k", yes=0.0, no=1.0, volume=0)
+        live_yes = _make_event("polymarket", "p1", "BTC > 100k", yes=0.35, no=0.70, volume=500)
+        live_no = _make_event("kalshi", "k1", "BTC > 100k", yes=0.55, no=0.55, volume=700)
+        matched = _make_matched([dead_yes, live_yes, live_no])
+
+        opps = find_arbitrage([matched])
+        assert len(opps) == 1
+        opp = opps[0]
+        assert opp.buy_yes_platform == "polymarket"
+        assert opp.buy_no_platform == "kalshi"
+        assert opp.combined_volume == 1200
+
+    def test_pure_arb_requires_actionable_liquidity_on_selected_legs(self):
+        """No opportunity should be emitted when the only apparent spread uses dead legs."""
+        dead_yes = _make_event("predictit", "pi1", "BTC > 100k", yes=0.0, no=1.0, volume=0)
+        dead_no = _make_event("kalshi", "k1", "BTC > 100k", yes=0.70, no=0.40, volume=0)
+        matched = _make_matched([dead_yes, dead_no])
+
+        opps = find_arbitrage([matched])
+        assert len(opps) == 0
+
 
 class TestComputeFeed:
     """Tests for compute_feed()."""
