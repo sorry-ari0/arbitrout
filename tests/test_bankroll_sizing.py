@@ -101,7 +101,7 @@ class TestBankrollDerivedLimits:
     def test_max_total_exposure_scales(self):
         trader = self._make_trader(initial_bankroll=20.0, cumulative_pnl=0.0)
         bankroll = trader._get_current_bankroll()
-        assert bankroll * 0.175 == pytest.approx(3.50)
+        assert bankroll * 0.50 == pytest.approx(10.0)
 
     def test_kelly_portfolio_cap_scales(self):
         trader = self._make_trader(initial_bankroll=20.0, cumulative_pnl=0.0)
@@ -117,7 +117,7 @@ class TestBankrollDerivedLimits:
         bankroll = trader._get_current_bankroll()
         assert bankroll == 50.0
         assert bankroll * 0.025 == pytest.approx(1.25)
-        assert bankroll * 0.175 == pytest.approx(8.75)
+        assert bankroll * 0.50 == pytest.approx(25.0)
 
     def test_kelly_size_uses_bankroll_derived_limits(self):
         from positions.auto_trader import AutoTrader
