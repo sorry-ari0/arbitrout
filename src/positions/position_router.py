@@ -419,6 +419,13 @@ async def get_journal_performance(mode: Optional[str] = None, strategy: Optional
     return _trade_journal.get_performance(mode=mode, strategy=strategy)
 
 
+@router.get("/journal/diagnostics")
+async def get_journal_diagnostics(mode: Optional[str] = None):
+    if not _trade_journal:
+        return {"total_trades": 0, "message": "Trade journal not initialized"}
+    return _trade_journal.get_diagnostics(mode=mode)
+
+
 # ── Auto Trader ──────────────────────────────────────────────────────────────
 
 @router.get("/auto-trader")

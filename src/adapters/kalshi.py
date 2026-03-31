@@ -40,6 +40,25 @@ def _map_category(raw: str) -> str:
     return "culture"
 
 
+def _price_field_to_probability(m: dict, dollar_key: str, cents_key: str) -> float:
+    """Normalize Kalshi's dollar or cent price fields into 0.0-1.0 probability."""
+    value = m.get(dollar_key)
+    if value is not None:
+        try:
+            return max(0.0, min(1.0, float(value)))
+        except (TypeError, ValueError):
+            pass
+
+    value = m.get(cents_key)
+    if value is not None:
+        try:
+            return max(0.0, min(1.0, float(value) / 100.0))
+        except (TypeError, ValueError):
+            pass
+
+    return 0.0
+
+
 # ============================================================
 # KALSHI ADAPTER
 # ============================================================
@@ -250,13 +269,13 @@ class KalshiAdapter(BaseAdapter):
     # ============================================================
     def _normalize_market(self, m: dict) -> NormalizedEvent:
         """Convert Kalshi market JSON to NormalizedEvent (authenticated API)."""
-        yes_price = (m.get("yes_ask", 0) or 0) / 100.0
-        no_price = (m.get("no_ask", 0) or 0) / 100.0
+        yes_price = _price_field_to_probability(m, "yes_ask_dollars", "yes_ask")
+        no_price = _price_field_to_probability(m, "no_ask_dollars", "no_ask")
 
-        if yes_price == 0 and m.get("yes_bid"):
-            yes_price = m["yes_bid"] / 100.0
-        if no_price == 0 and m.get("no_bid"):
-            no_price = m["no_bid"] / 100.0
+        if yes_price == 0:
+            yes_price = _price_field_to_probability(m, "yes_bid_dollars", "yes_bid")
+        if no_price == 0:
+            no_price = _price_field_to_probability(m, "no_bid_dollars", "no_bid")
         if no_price == 0 and yes_price > 0:
             no_price = 1.0 - yes_price
 
