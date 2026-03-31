@@ -845,10 +845,42 @@ class AutoTrader:
 
             # Cross-platform disagreement boost: if platforms disagree >10%,
             # there may be an informational edge worth capturing
+            calibration_signal = None
             if self.probability_model:
                 consensus = self.probability_model.get_consensus(opp_title)
                 if consensus and consensus.get("max_deviation", 0) > 0.10:
                     score *= 1.3
+                cal_yes_platform = opp.get("buy_yes_platform", "")
+                cal_no_platform = opp.get("buy_no_platform", "")
+                calibration_platform = cal_yes_platform if cal_yes_platform == cal_no_platform else ""
+                if calibration_platform:
+                    calibration_signal = self.probability_model.get_calibration_signal(
+                        title=opp_title,
+                        platform=calibration_platform,
+                        raw_yes=buy_yes_price,
+                        category=self._detect_category(opp_title),
+                        days_to_expiry=days_to_expiry if days_to_expiry != 999 else None,
+                        volume=opp_volume,
+                    )
+                if calibration_signal:
+                    calibrated_edge_pct = calibration_signal.get("calibrated_edge_pct", 0.0)
+                    if not opp.get("preferred_side"):
+                        opp["preferred_side"] = calibration_signal.get("preferred_side", "")
+                    opp["calibration_signal"] = calibration_signal
+                    if calibrated_edge_pct >= 12.0:
+                        score *= 1.5
+                    elif calibrated_edge_pct >= 6.0:
+                        score *= 1.2
+                    elif calibrated_edge_pct < 2.0 and not opp.get("_reference_backed"):
+                        self._record_skip("low_calibrated_edge")
+                        if self.dlog:
+                            self.dlog.log_opportunity_skip(
+                                opp_title, "low_calibrated_edge",
+                                calibrated_edge_pct=round(calibrated_edge_pct, 2),
+                                preferred_side=calibration_signal.get("preferred_side", ""),
+                                volume=opp_volume, strategy=opp_strategy,
+                            )
+                        continue
 
             # Kyle's lambda: adverse selection / informed flow signal
             kyle_mult = 1.0
@@ -889,6 +921,13 @@ class AutoTrader:
                 "entry_price": favored,
                 "side": "YES" if buy_yes_price <= buy_no_price else "NO",
             }
+            if calibration_signal:
+                score_metadata["calibration"] = {
+                    "preferred_side": calibration_signal.get("preferred_side", ""),
+                    "calibrated_yes": calibration_signal.get("calibrated_yes"),
+                    "edge_pct": calibration_signal.get("calibrated_edge_pct"),
+                    "confidence": calibration_signal.get("confidence"),
+                }
 
             # In extra-slots mode: only allow insider-signaled, news-driven,
             # or synthetic trades (synthetics have structural edge, not directional)

@@ -525,6 +525,7 @@ async def lifespan(app: FastAPI):
             insider.kalshi_whale_tracker = kalshi_whale  # Wire for cross-platform convergence
             global _auto_trader_ref, _probability_model
             _probability_model = ProbabilityModel()
+            app.state.consensus_calibration_engine = _probability_model
             _auto_trader = AutoTrader(pm, scanner=arb_scanner, insider_tracker=insider,
                                        decision_logger=decision_log,
                                        probability_model=_probability_model,
