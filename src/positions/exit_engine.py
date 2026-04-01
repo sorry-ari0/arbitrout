@@ -369,25 +369,97 @@ def _check_expiry_triggers(legs: list[dict], triggers: list[dict]):
     -$38.88 in losses. Prediction markets often move most in the final hours,
     so early exits destroy value. Now these are just informational — positions
     expire naturally and settle at $0 or $1.
+
+    Fires once per package (using soonest expiry), not per-leg, to avoid
+    duplicate triggers on multi-leg packages.
     """
     now = datetime.now()
+    soonest_hours = None
+    soonest_leg_id = None
     for leg in legs:
         if not leg.get("expiry"):
             continue
         try:
             exp = datetime.strptime(leg["expiry"], "%Y-%m-%d")
             hours_left = (exp - now).total_seconds() / 3600
-
-            if hours_left <= 6:
-                triggers.append({"trigger_id": T_TIME_6H, "name": "time_6h",
-                    "details": f"Leg {leg['leg_id']} expires in {hours_left:.1f}h",
-                    "action": "review", "safety_override": False})
-            elif hours_left <= 24:
-                triggers.append({"trigger_id": T_TIME_24H, "name": "time_24h",
-                    "details": f"Leg {leg['leg_id']} expires in {hours_left:.1f}h",
-                    "action": "review", "safety_override": False})
+            if soonest_hours is None or hours_left < soonest_hours:
+                soonest_hours = hours_left
+                soonest_leg_id = leg.get("leg_id", "?")
         except (ValueError, TypeError):
             pass
+
+    if soonest_hours is not None:
+        if soonest_hours <= 6:
+            triggers.append({"trigger_id": T_TIME_6H, "name": "time_6h",
+                "details": f"Soonest leg {soonest_leg_id} expires in {soonest_hours:.1f}h",
+                "action": "review", "safety_override": False})
+        elif soonest_hours <= 24:
+            triggers.append({"trigger_id": T_TIME_24H, "name": "time_24h",
+                "details": f"Soonest leg {soonest_leg_id} expires in {soonest_hours:.1f}h",
+                "action": "review", "safety_override": False})
+
+
+def _snap_resolution_prices(pkg: dict):
+    """Snap leg prices to binary resolution values ($0/$1) when market_resolved fires.
+
+    Binary contracts resolve to exactly $0 or $1. When market_resolved triggers
+    on one leg, the other legs in the package still have stale CLOB midpoint prices.
+    _place_limit_sell() uses leg["current_price"] as the limit price, so non-resolved
+    legs exit at their stale mid-price instead of the correct resolution value.
+
+    This function overrides current_price to the expected resolution price based on
+    the package strategy type before the exit loop runs.
+    """
+    strategy = pkg.get("strategy_type", "")
+    open_legs = [l for l in pkg["legs"] if l["status"] == "open"]
+
+    # Identify which legs triggered the resolution
+    winners = [l for l in open_legs if l.get("current_price", 0.5) >= 0.99]
+    losers = [l for l in open_legs if l.get("current_price", 0.5) <= 0.01]
+
+    # Snap resolved legs to exact $0/$1
+    for l in winners:
+        l["current_price"] = 1.0
+    for l in losers:
+        l["current_price"] = 0.0
+
+    # Determine non-resolved legs based on strategy
+    resolved_set = set(id(l) for l in winners + losers)
+    non_resolved = [l for l in open_legs if id(l) not in resolved_set]
+
+    if not non_resolved:
+        return  # All legs already at resolution price
+
+    if strategy == "multi_outcome_arb":
+        # All YES on different mutually exclusive outcomes.
+        # If a winner exists (one outcome resolved YES), all others → $0.
+        if winners:
+            for l in non_resolved:
+                l["current_price"] = 0.0
+                logger.info("Resolution snap [multi_outcome_arb]: %s → $0.00 (another outcome won)",
+                            l["leg_id"])
+    elif strategy == "portfolio_no":
+        # All NO on different outcomes. If a NO lost ($0, that outcome happened),
+        # all other NOs win ($1, those outcomes didn't happen).
+        if losers:
+            for l in non_resolved:
+                l["current_price"] = 1.0
+                logger.info("Resolution snap [portfolio_no]: %s → $1.00 (other outcomes didn't happen)",
+                            l["leg_id"])
+    elif strategy == "cross_platform_arb":
+        # YES on platform A, NO on platform B for same event.
+        # If resolved leg went HIGH ($1), the other side loses ($0).
+        # If resolved leg went LOW ($0), the other side wins ($1).
+        if winners:
+            for l in non_resolved:
+                l["current_price"] = 0.0
+                logger.info("Resolution snap [cross_platform_arb]: %s → $0.00 (opposite side lost)",
+                            l["leg_id"])
+        elif losers:
+            for l in non_resolved:
+                l["current_price"] = 1.0
+                logger.info("Resolution snap [cross_platform_arb]: %s → $1.00 (opposite side won)",
+                            l["leg_id"])
 
 
 class ExitEngine:
@@ -573,8 +645,8 @@ class ExitEngine:
             else:
                 pkg["_neg_streak"] = 0
 
-            # Skip packages currently being exited or with pending limit orders
-            if pkg.get("_exiting") or pkg.get("_pending_limit_orders"):
+            # Skip packages currently being exited
+            if pkg.get("_exiting"):
                 continue
 
             triggers = evaluate_heuristics(pkg)
@@ -606,6 +678,11 @@ class ExitEngine:
             safety_triggers = [t for t in filtered if t.get("safety_override")]
             ai_triggers = [t for t in filtered if not t.get("safety_override")]
 
+            # Skip non-safety triggers for packages with pending limit orders —
+            # but ALLOW safety overrides to fire (they cancel pending orders first).
+            if pkg.get("_pending_limit_orders") and not safety_triggers:
+                continue
+
             # Cancel bracket orders before safety override (only when safety triggers fire)
             if safety_triggers and self._bracket_manager and pkg.get("_brackets"):
                 await self._bracket_manager.cancel_brackets(pkg)
@@ -624,6 +701,13 @@ class ExitEngine:
                 logger.warning("SAFETY OVERRIDE [%s] on %s: %s", trigger["name"], pkg["id"], trigger["details"])
                 if self.dlog:
                     self.dlog.log_safety_override(pkg["id"], trigger["name"], trigger["details"])
+
+                # Snap leg prices to $0/$1 before exiting — _place_limit_sell
+                # uses leg["current_price"] as the limit price, which is stale
+                # for non-triggering legs in multi-leg packages.
+                if trigger["name"] in ("market_resolved", "political_event_resolved"):
+                    _snap_resolution_prices(pkg)
+
                 pkg["_exiting"] = True
                 try:
                     for leg in pkg["legs"]:
@@ -759,12 +843,18 @@ class ExitEngine:
                 if self.dlog:
                     self.dlog.log_auto_execute(pkg["id"], "partial_profit",
                                                "partial_exit", trigger["details"])
-                for leg in pkg["legs"]:
-                    if leg["status"] == "open":
-                        await self.pm.exit_leg(pkg["id"], leg["leg_id"],
-                            trigger=f"auto:{trigger['name']}",
-                            use_limit=True)
-                        break
+                # Exit the most profitable open leg, not an arbitrary first one.
+                # Exiting a losing leg from an arb while keeping winners creates
+                # an unhedged position.
+                best_leg = max(
+                    (l for l in pkg["legs"] if l["status"] == "open"),
+                    key=lambda l: (l.get("current_price", 0) - l.get("entry_price", 0)) / max(l.get("entry_price", 0.01), 0.01),
+                    default=None,
+                )
+                if best_leg:
+                    await self.pm.exit_leg(pkg["id"], best_leg["leg_id"],
+                        trigger=f"auto:{trigger['name']}",
+                        use_limit=True)
             elif trigger["name"] in ("correlation_break", "time_decay", "negative_drift",
                                        "platform_error", "longshot_decay"):
                 self.pm.add_alert(pkg["id"], trigger["trigger_id"], trigger["name"],
@@ -869,8 +959,12 @@ class ExitEngine:
                 new_value = verdict.get("value")
                 if new_value is not None:
                     matched_rule = False
+                    # Map trigger names to exit rule types (they don't always match)
+                    _trigger_to_rule = {"target_hit": "target_profit"}
+                    trig_name = trigger.get("name", "")
+                    rule_type = _trigger_to_rule.get(trig_name, trig_name)
                     for rule in pkg.get("exit_rules", []):
-                        if rule.get("type") == trigger.get("name"):
+                        if rule.get("type") == rule_type:
                             bounds = rule["params"]
                             bmin = bounds.get("bound_min", 0)
                             bmax = bounds.get("bound_max", 100)

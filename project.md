@@ -355,12 +355,34 @@ For each crypto market opportunity:
     if informed flow opposes our direction:      score *= 0.4–0.8
     if mixed/unclear flow:                       score *= 0.85
 
+  # Market category hard-skips (journal-driven, 2026-03-29)
+  SKIP if: "exact score" in title          (0% WR, -$24 from 3 trades)
+  SKIP if: commodities keyword in title    (0% WR, -$46 from 3 trades)
+  SKIP if: narrow-range pattern in title   (lottery-ticket asymmetry, -$71 from 7 trades)
+           regex: "between $X and $Y", "300-319 tweets", "5 to 6 inches"
+           BYPASS: multi_outcome_arb + portfolio_no (structural, not directional)
+
+  # Category score penalties
+  if NCAA keyword:         score *= 0.1  (0% WR, -$68 from 5 trades)
+  if sports keyword:       score *= 0.3  (20% WR, -$92 from 10 trades)
+    includes eSports: lol, dota, csgo, valorant, bo1/bo3/bo5
+
+  # Minimum upside gate (2026-03-29 audit: 52% of entries at 0.90+ with 5-10% upside)
+  SKIP if: max_profit_pct < 15%    (blocks entries above ~$0.87)
+    max_profit_pct = (1 - entry_price) / entry_price * 100
+    This is the primary risk/reward filter — blocks the "sell insurance" trap
+  # Synthetic derivatives DISABLED (0W/1L, -$33.22 in Phase 2)
+  SKIP if: is_synthetic             (scenario pricing too noisy for reliable entries)
+
   ENTER if: score >= 8.0 AND net_profit >= 8% (MIN_SPREAD_PCT)
   STRATEGY: directional bet (one side) on same-platform, arb (both sides) on cross-platform
   SIZE: variable Kelly — 1/4 for favorites (>=0.70), 1/5 mid-range, 1/8 for longshots (<=0.30)
-  LIMITS: 10 concurrent + 3 insider extra + 2 news extra = 13 hard max
-          $700 auto exposure, 3 trades/day cap (session-scoped, not restart)
-  EXTRA SLOTS: when at 10+ positions, only insider-signaled or news-driven trades enter
+  NO-BET WIPEOUT CAP: single-leg NO bets at >= 0.85 capped at 0.5% of bankroll
+  LIMITS: 20 concurrent + 3 insider extra + 2 news extra = 25 hard max
+          40% bankroll exposure, 3 trades/day cap (session-scoped, not restart)
+  EXTRA SLOTS: when at 20+, insider/news/structural-arb trades only
+    structural arbs (portfolio_no, multi_outcome_arb, cross_platform_arb) bypass
+    insider_news_only_mode — they're price-based, not signal-dependent
   CONCENTRATION: 50% max per category; multi_outcome_arb + portfolio_no bypass concentration
   DAILY LIMIT: guaranteed-profit strategies (multi_outcome_arb, portfolio_no) bypass daily cap
   ORDERS: limit orders (GTC) for entries + exits = 0% maker fee on Polymarket
@@ -398,11 +420,12 @@ ExitEngine trigger fires
 
 **Phase tagging:** Journal entries now include `_code_version: "v2-fee-fix"`. Entries without this field are Phase 1 (pre-fix). Enables before/after comparison.
 
-**Phase 2 success metrics (target after ~20 new trades):**
-- Win rate >30% (Phase 1: 25%)
-- Fee drag <5% of gross (Phase 1: 70%)
-- Net P&L positive
-- No premature exits from trailing_stop or stop_loss on winners
+**Phase 2 results (40 trades as of 2026-03-29):**
+- Win rate: 40.6% (13W/19L/8F) — target was >30%
+- Fee drag: 1.5% ($59 fees on $4004 deployed) — target was <5%
+- Net P&L: -$90.16 — dragged by narrow-range bets (-$71) and NO-bet wipeouts (-$49)
+- Fixes applied 2026-03-29: narrow-range filter, eSports penalty, NO-bet cap, outcome tolerance
+- Projected P&L with fixes active from start: -$19 to +$20 depending on bankroll
 
 ### Insider Signal Strength Formula
 
@@ -558,9 +581,9 @@ ArbitrageOpportunity:
 | `src/positions/position_router.py` | FastAPI router at `/api/derivatives/` — all position endpoints + WebSocket |
 | `src/positions/exit_engine.py` | 60s scan loop, 21 heuristic triggers, safety overrides, AI routing, limit order exits, news-validated decisions |
 | `src/positions/bracket_manager.py` | GTC target orders (0% maker) + monitored stop levels with rolling trail; safety override cancel; per-package bracket state |
-| `src/positions/auto_trader.py` | Autonomous paper trader — scans all platforms, limit orders, 3/day cap, 24h hold, variable Kelly, favorite-longshot bias |
+| `src/positions/auto_trader.py` | Autonomous paper trader — scans all platforms, limit orders, 3/day cap, 24h hold, variable Kelly, favorite-longshot bias, narrow-range filter, eSports penalty, NO-bet wipeout cap |
 | `src/positions/probability_model.py` | Consensus probability aggregator — volume-weighted prices across platforms, deviation detection |
-| `src/positions/trade_journal.py` | Records completed trades with P&L, fees, exit triggers, exit_order_type, performance analytics, hold duration analysis |
+| `src/positions/trade_journal.py` | Records completed trades with P&L, fees, exit triggers, exit_order_type, performance analytics, hold duration analysis. Outcome classification uses 0.001 tolerance (prevents -$0.00 = "loss" bug). |
 | `src/positions/calibration.py` | CalibrationEngine — 24h reports on entry/exit thresholds, hold duration, fee analysis, limit fill rates |
 | `src/positions/insider_tracker.py` | Whale/insider monitor — leaderboard, wallet classification (conviction 5x/market_maker 0x/watchlist 3x), conviction-weighted signals, per-wallet accuracy |
 | `src/positions/ai_advisor.py` | Multi-provider AI advisor for exit decisions (Groq/Gemini/OpenRouter/Anthropic) |

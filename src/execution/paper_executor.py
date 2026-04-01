@@ -87,11 +87,12 @@ class PaperExecutor:
         self.buy_fee_rate = DEFAULT_FEE_RATE
         self.sell_fee_rate = DEFAULT_FEE_RATE
         for name, rate in MAKER_FEE_RATES.items():
-            if name in platform:
+            # Strip underscores so "coinbase_spot" matches "coinbasespotexecutor"
+            if name.replace("_", "") in platform:
                 self.buy_fee_rate = rate if use_limit_orders else TAKER_FEE_RATES.get(name, DEFAULT_FEE_RATE)
                 break
         for name, rate in MAKER_FEE_RATES.items():
-            if name in platform:
+            if name.replace("_", "") in platform:
                 self.sell_fee_rate = rate if use_limit_orders else TAKER_FEE_RATES.get(name, DEFAULT_FEE_RATE)
                 break
         # Keep fee_rate for backwards compat (average of buy/sell)
@@ -213,9 +214,12 @@ class PaperExecutor:
             del self.positions[asset_id]
 
         tx_id = f"paper_{uuid.uuid4().hex[:12]}"
+        # Store avg_entry_price so cancel_order can restore it if position was deleted
+        entry_price = pos.get("avg_entry_price", price) if pos else price
         self._resting_orders[tx_id] = {
             "asset_id": asset_id, "quantity": quantity, "limit_price": price,
             "placed_at": time.time(), "status": "open",
+            "avg_entry_price": entry_price,
         }
         self.trade_history.append({
             "action": "sell_limit_placed", "asset_id": asset_id, "price": price,
@@ -230,8 +234,10 @@ class PaperExecutor:
         """
         resting = self._resting_orders.get(order_id)
         if not resting:
-            # Legacy behavior for non-bracket pending orders
-            return {"status": "filled", "price": 0, "size_matched": 0, "fee": 0.0}
+            # Unknown order ID — NOT a fill. Return "cancelled" so callers
+            # fall back to FOK instead of recording a phantom $0 fill.
+            logger.warning("check_order_status: unknown order_id %s (lost on restart?)", order_id)
+            return {"status": "cancelled", "price": 0, "size_matched": 0, "fee": 0.0}
         if resting["status"] != "open":
             return {"status": resting["status"], "price": resting.get("fill_price", 0),
                     "size_matched": resting["quantity"], "fee": resting.get("fee", 0.0)}
@@ -270,7 +276,8 @@ class PaperExecutor:
             if pos:
                 pos["quantity"] = pos.get("quantity", 0) + resting["quantity"]
             else:
-                self.positions[asset_id] = {"quantity": resting["quantity"], "avg_entry_price": 0}
+                self.positions[asset_id] = {"quantity": resting["quantity"],
+                                            "avg_entry_price": resting.get("avg_entry_price", 0)}
         return True
 
     async def get_balance(self) -> BalanceResult:
