@@ -62,6 +62,8 @@ class TestDecisionLogReconciliation:
             entries = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
             assert [e["type"] for e in entries] == ["trade_opened", "news_trade", "exit_complete"]
             assert entries[0]["timestamp"] == "2023-11-14T22:13:20Z"
+            assert "recorded_at" in entries[0]
+            assert entries[0]["reconciled"] is True
             assert entries[1]["timestamp"] == "2023-11-14T22:13:20Z"
             assert entries[1]["reconciled"] is True
             assert entries[2]["timestamp"] == "2023-11-15T00:13:20Z"
