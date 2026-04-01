@@ -346,7 +346,8 @@
       "estimated_sell_fees": 0.0,
       "_neg_streak": 0,
       "_hold_to_resolution": true,
-      "_journal_recorded": true
+      "_journal_recorded": true,
+      "journal_entry_id": "journal_57461a43"
     },
     {
       "id": "pkg_70b0ca6c39b4",
@@ -539,7 +540,8 @@
       "estimated_sell_fees": 0.0,
       "_neg_streak": 0,
       "_hold_to_resolution": true,
-      "_journal_recorded": true
+      "_journal_recorded": true,
+      "journal_entry_id": "journal_ea49c45d"
     },
     {
       "id": "pkg_85e71b1c4bee",
@@ -972,7 +974,8 @@
       "_neg_streak": 0,
       "_category": "other",
       "_hold_to_resolution": true,
-      "_journal_recorded": true
+      "_journal_recorded": true,
+      "journal_entry_id": "journal_6398fd74"
     },
     {
       "id": "pkg_e7ef8744e09c",
@@ -1079,7 +1082,8 @@
       "_neg_streak": 0,
       "_category": "other",
       "_hold_to_resolution": true,
-      "_journal_recorded": true
+      "_journal_recorded": true,
+      "journal_entry_id": "journal_57b8f73b"
     },
     {
       "id": "pkg_0d1462531ed3",
@@ -1186,7 +1190,8 @@
       "_neg_streak": 0,
       "_category": "other",
       "_hold_to_resolution": true,
-      "_journal_recorded": true
+      "_journal_recorded": true,
+      "journal_entry_id": "journal_09fb593c"
     },
     {
       "id": "pkg_4fefe1f81fff",
@@ -1293,7 +1298,8 @@
       "_neg_streak": 0,
       "_category": "crypto",
       "_hold_to_resolution": true,
-      "_journal_recorded": true
+      "_journal_recorded": true,
+      "journal_entry_id": "journal_1cd05b55"
     },
     {
       "id": "pkg_22cca064fb90",
@@ -1400,7 +1406,8 @@
       "_neg_streak": 5,
       "_category": "sports",
       "_hold_to_resolution": true,
-      "_journal_recorded": true
+      "_journal_recorded": true,
+      "journal_entry_id": "journal_d687692e"
     },
     {
       "id": "pkg_3adc2c114c1c",

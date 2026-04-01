@@ -1780,7 +1780,693 @@
       "max_drawdown_from_peak": 0.0,
       "created_at": 1773884182.6480772,
       "closed_at": 1773885348.70272
+    },
+    {
+      "id": "journal_57461a43",
+      "package_id": "pkg_f7a2042f99b2",
+      "name": "Auto: Trump announces end of military operations against Iran by A",
+      "strategy_type": "pure_prediction",
+      "ai_strategy": "balanced",
+      "mode": "paper",
+      "total_cost": 10.0,
+      "exit_value": 14.2446,
+      "total_fees": 0.0,
+      "buy_fees": 0.0,
+      "sell_fees": 0.0,
+      "pnl": 4.2446,
+      "pnl_usd": 4.24,
+      "pnl_pct": 42.45,
+      "outcome": "win",
+      "exit_trigger": "bracket_target",
+      "exit_order_type": "bracket_maker",
+      "legs": [
+        {
+          "leg_id": "leg_79ac1802",
+          "platform": "polymarket",
+          "type": "prediction_no",
+          "asset_id": "0x68beecc857017df8663fa36c0c86310dec7305aa88fe830c94651391314afc1c:NO",
+          "entry_price": 0.6950000000000001,
+          "exit_price": 0.99,
+          "quantity": 14.388489208633093,
+          "cost": 10.0,
+          "exit_value": 14.2446,
+          "buy_fees": 0.0,
+          "sell_fees": 0.0,
+          "leg_pnl": 4.2446,
+          "leg_pnl_pct": 42.45,
+          "status": "closed",
+          "exit_order_type": "bracket_maker"
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_87c647cc",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 10
+          },
+          "active": true,
+          "created_at": 1774209390.976293
+        },
+        {
+          "rule_id": "rule_41d01f3b",
+          "type": "stop_loss",
+          "params": {
+            "stop_pct": -60
+          },
+          "active": true,
+          "created_at": 1774209390.9762955
+        },
+        {
+          "rule_id": "rule_a97c6c67",
+          "type": "trailing_stop",
+          "params": {
+            "current": 35,
+            "bound_min": 15,
+            "bound_max": 50
+          },
+          "active": false,
+          "created_at": 1774209390.9762974
+        }
+      ],
+      "execution_log": [
+        {
+          "action": "buy",
+          "leg_id": "leg_79ac1802",
+          "platform": "polymarket",
+          "tx_id": "paper_d11181e7add0",
+          "price": 0.6950000000000001,
+          "quantity": 14.388489208633093,
+          "fees": 0.0,
+          "timestamp": 1774209390.976331
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_79ac1802",
+          "platform": "polymarket",
+          "tx_id": "paper_12be662479a4",
+          "price": 0.99,
+          "fees": 0.0,
+          "trigger": "bracket_target",
+          "exit_order_type": "bracket_maker",
+          "timestamp": 1774211731.704558
+        }
+      ],
+      "hold_duration_hours": 0.7,
+      "peak_value": 10.0,
+      "max_drawdown_from_peak": -42.45,
+      "created_at": 1774209390.9762747,
+      "closed_at": 1774211731.706429,
+      "_code_version": "v2-fee-fix"
+    },
+    {
+      "id": "journal_ea49c45d",
+      "package_id": "pkg_696530efe949",
+      "name": "Auto: Will LINK exceed $10.00 by end of 2026?",
+      "strategy_type": "pure_prediction",
+      "ai_strategy": "balanced",
+      "mode": "paper",
+      "total_cost": 10.0,
+      "exit_value": 14.1489,
+      "total_fees": 0.0,
+      "buy_fees": 0.0,
+      "sell_fees": 0.0,
+      "pnl": 4.1489,
+      "pnl_usd": 4.15,
+      "pnl_pct": 41.49,
+      "outcome": "win",
+      "exit_trigger": "bracket_target",
+      "exit_order_type": "bracket_maker",
+      "legs": [
+        {
+          "leg_id": "leg_f57d5220",
+          "platform": "crypto_spot",
+          "type": "prediction_no",
+          "asset_id": "crypto-link-10:NO",
+          "entry_price": 0.6997,
+          "exit_price": 0.99,
+          "quantity": 14.291839359725596,
+          "cost": 10.0,
+          "exit_value": 14.1489,
+          "buy_fees": 0.0,
+          "sell_fees": 0.0,
+          "leg_pnl": 4.1489,
+          "leg_pnl_pct": 41.49,
+          "status": "closed",
+          "exit_order_type": "bracket_maker"
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_91c35fa3",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 10
+          },
+          "active": true,
+          "created_at": 1774209390.981721
+        },
+        {
+          "rule_id": "rule_c269e022",
+          "type": "stop_loss",
+          "params": {
+            "stop_pct": -60
+          },
+          "active": true,
+          "created_at": 1774209390.9817228
+        },
+        {
+          "rule_id": "rule_de9ee4a4",
+          "type": "trailing_stop",
+          "params": {
+            "current": 35,
+            "bound_min": 15,
+            "bound_max": 50
+          },
+          "active": false,
+          "created_at": 1774209390.9817252
+        }
+      ],
+      "execution_log": [
+        {
+          "action": "buy",
+          "leg_id": "leg_f57d5220",
+          "platform": "crypto_spot",
+          "tx_id": "paper_14ee029f7bac",
+          "price": 0.6997,
+          "quantity": 14.291839359725596,
+          "fees": 0.0,
+          "timestamp": 1774209390.981768
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_f57d5220",
+          "platform": "crypto_spot",
+          "tx_id": "paper_f554d19e94e8",
+          "price": 0.99,
+          "fees": 0.0,
+          "trigger": "bracket_target",
+          "exit_order_type": "bracket_maker",
+          "timestamp": 1774211731.7095501
+        }
+      ],
+      "hold_duration_hours": 0.7,
+      "peak_value": 10.01715020723167,
+      "max_drawdown_from_peak": -41.25,
+      "created_at": 1774209390.9817061,
+      "closed_at": 1774211731.71177,
+      "_code_version": "v2-fee-fix"
+    },
+    {
+      "id": "journal_6398fd74",
+      "package_id": "pkg_7ebdcaf076ee",
+      "name": "News: US to pay almost $1bn to French energy company to kill wind ",
+      "strategy_type": "news_driven",
+      "ai_strategy": "balanced",
+      "mode": "paper",
+      "total_cost": 160.67,
+      "exit_value": 184.7601,
+      "total_fees": 0.0,
+      "buy_fees": 0.0,
+      "sell_fees": 0.0,
+      "pnl": 24.0901,
+      "pnl_usd": 24.09,
+      "pnl_pct": 14.99,
+      "outcome": "win",
+      "exit_trigger": "bracket_target",
+      "exit_order_type": "bracket_maker",
+      "legs": [
+        {
+          "leg_id": "leg_dc6f1716",
+          "platform": "polymarket",
+          "type": "prediction_no",
+          "asset_id": "0xe51fea7e9afd8de5f46872f028483ff6fb32fecfe0794b9b71822c6d2d896d95:NO",
+          "entry_price": 0.775,
+          "exit_price": 0.8912,
+          "quantity": 207.31612903225803,
+          "cost": 160.67,
+          "exit_value": 184.7601,
+          "buy_fees": 0.0,
+          "sell_fees": 0.0,
+          "leg_pnl": 24.0901,
+          "leg_pnl_pct": 14.99,
+          "status": "closed",
+          "exit_order_type": "bracket_maker"
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_e2d20bcc",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 10
+          },
+          "active": true,
+          "created_at": 1774302701.7548108
+        },
+        {
+          "rule_id": "rule_a7eade7b",
+          "type": "stop_loss",
+          "params": {
+            "stop_pct": -60
+          },
+          "active": true,
+          "created_at": 1774302701.7548192
+        },
+        {
+          "rule_id": "rule_53cd38b2",
+          "type": "trailing_stop",
+          "params": {
+            "current": 15,
+            "bound_min": 8,
+            "bound_max": 30
+          },
+          "active": false,
+          "created_at": 1774302701.7548237
+        }
+      ],
+      "execution_log": [
+        {
+          "action": "buy",
+          "leg_id": "leg_dc6f1716",
+          "platform": "polymarket",
+          "tx_id": "paper_343173c043ba",
+          "price": 0.775,
+          "quantity": 207.31612903225803,
+          "fees": 0.0,
+          "timestamp": 1774302701.7548969
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_dc6f1716",
+          "platform": "polymarket",
+          "tx_id": "paper_00cf23bcd415",
+          "price": 0.8912,
+          "fees": 0.0,
+          "trigger": "bracket_target",
+          "exit_order_type": "bracket_maker",
+          "timestamp": 1774305866.6048355
+        }
+      ],
+      "hold_duration_hours": 0.9,
+      "peak_value": 175.18212903225802,
+      "max_drawdown_from_peak": -5.47,
+      "created_at": 1774302701.7547824,
+      "closed_at": 1774305866.6076589,
+      "_code_version": "v2-fee-fix"
+    },
+    {
+      "id": "journal_57b8f73b",
+      "package_id": "pkg_e7ef8744e09c",
+      "name": "News: Nvidia To Deliver 1 Million AI Chips To Amazon Web Services ",
+      "strategy_type": "news_driven",
+      "ai_strategy": "balanced",
+      "mode": "paper",
+      "total_cost": 120.5,
+      "exit_value": 138.575,
+      "total_fees": 0.0,
+      "buy_fees": 0.0,
+      "sell_fees": 0.0,
+      "pnl": 18.075,
+      "pnl_usd": 18.07,
+      "pnl_pct": 15.0,
+      "outcome": "win",
+      "exit_trigger": "bracket_target",
+      "exit_order_type": "bracket_maker",
+      "legs": [
+        {
+          "leg_id": "leg_d75b4334",
+          "platform": "polymarket",
+          "type": "prediction_yes",
+          "asset_id": "0xa98a4c5901bef4c68582dfce11765a4366bde5a01133af1dc08042c57be6c6e5:YES",
+          "entry_price": 0.006,
+          "exit_price": 0.0069,
+          "quantity": 20083.333333333332,
+          "cost": 120.5,
+          "exit_value": 138.575,
+          "buy_fees": 0.0,
+          "sell_fees": 0.0,
+          "leg_pnl": 18.075,
+          "leg_pnl_pct": 15.0,
+          "status": "closed",
+          "exit_order_type": "bracket_maker"
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_3f8eb153",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 10
+          },
+          "active": true,
+          "created_at": 1774303981.9511025
+        },
+        {
+          "rule_id": "rule_7301a27c",
+          "type": "stop_loss",
+          "params": {
+            "stop_pct": -60
+          },
+          "active": true,
+          "created_at": 1774303981.951107
+        },
+        {
+          "rule_id": "rule_3c0cdd93",
+          "type": "trailing_stop",
+          "params": {
+            "current": 15,
+            "bound_min": 8,
+            "bound_max": 30
+          },
+          "active": false,
+          "created_at": 1774303981.9511108
+        }
+      ],
+      "execution_log": [
+        {
+          "action": "buy",
+          "leg_id": "leg_d75b4334",
+          "platform": "polymarket",
+          "tx_id": "paper_dd4ac540f141",
+          "price": 0.006,
+          "quantity": 20083.333333333332,
+          "fees": 0.0,
+          "timestamp": 1774303981.9511833
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_d75b4334",
+          "platform": "polymarket",
+          "tx_id": "paper_9b4753ff727c",
+          "price": 0.0069,
+          "fees": 0.0,
+          "trigger": "bracket_target",
+          "exit_order_type": "bracket_maker",
+          "timestamp": 1774305866.615385
+        }
+      ],
+      "hold_duration_hours": 0.5,
+      "peak_value": 120.5,
+      "max_drawdown_from_peak": -15.0,
+      "created_at": 1774303981.9510758,
+      "closed_at": 1774305866.6182318,
+      "_code_version": "v2-fee-fix"
+    },
+    {
+      "id": "journal_09fb593c",
+      "package_id": "pkg_0d1462531ed3",
+      "name": "News: Record Bookings Cannot Hide Royal Caribbean’s Growing Fuel P",
+      "strategy_type": "news_driven",
+      "ai_strategy": "balanced",
+      "mode": "paper",
+      "total_cost": 160.67,
+      "exit_value": 163.4772,
+      "total_fees": 0.0,
+      "buy_fees": 0.0,
+      "sell_fees": 0.0,
+      "pnl": 2.8072,
+      "pnl_usd": 2.81,
+      "pnl_pct": 1.75,
+      "outcome": "win",
+      "exit_trigger": "bracket_target",
+      "exit_order_type": "bracket_maker",
+      "legs": [
+        {
+          "leg_id": "leg_a9be15d9",
+          "platform": "polymarket",
+          "type": "prediction_no",
+          "asset_id": "0x2d8be7926a1a23fafa01e8e0e558d2add531e8fbf6efc4b7187f98de0944fd1d:NO",
+          "entry_price": 0.973,
+          "exit_price": 0.99,
+          "quantity": 165.1284686536485,
+          "cost": 160.67,
+          "exit_value": 163.4772,
+          "buy_fees": 0.0,
+          "sell_fees": 0.0,
+          "leg_pnl": 2.8072,
+          "leg_pnl_pct": 1.75,
+          "status": "closed",
+          "exit_order_type": "bracket_maker"
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_bffe1006",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 10
+          },
+          "active": true,
+          "created_at": 1774304466.7447295
+        },
+        {
+          "rule_id": "rule_ca81830f",
+          "type": "stop_loss",
+          "params": {
+            "stop_pct": -60
+          },
+          "active": true,
+          "created_at": 1774304466.7447352
+        },
+        {
+          "rule_id": "rule_72106b01",
+          "type": "trailing_stop",
+          "params": {
+            "current": 15,
+            "bound_min": 8,
+            "bound_max": 30
+          },
+          "active": false,
+          "created_at": 1774304466.7447393
+        }
+      ],
+      "execution_log": [
+        {
+          "action": "buy",
+          "leg_id": "leg_a9be15d9",
+          "platform": "polymarket",
+          "tx_id": "paper_def6086bcca2",
+          "price": 0.973,
+          "quantity": 165.1284686536485,
+          "fees": 0.0,
+          "timestamp": 1774304466.7447963
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_a9be15d9",
+          "platform": "polymarket",
+          "tx_id": "paper_f832c5f54ab2",
+          "price": 0.99,
+          "fees": 0.0,
+          "trigger": "bracket_target",
+          "exit_order_type": "bracket_maker",
+          "timestamp": 1774305866.6221101
+        }
+      ],
+      "hold_duration_hours": 0.4,
+      "peak_value": 160.91769270298047,
+      "max_drawdown_from_peak": -1.59,
+      "created_at": 1774304466.7447047,
+      "closed_at": 1774305866.6249807,
+      "_code_version": "v2-fee-fix"
+    },
+    {
+      "id": "journal_1cd05b55",
+      "package_id": "pkg_4fefe1f81fff",
+      "name": "News: Bitcoin, ether, solana prices move higher as Gulf allies inc",
+      "strategy_type": "news_driven",
+      "ai_strategy": "balanced",
+      "mode": "paper",
+      "total_cost": 50.0,
+      "exit_value": 56.8966,
+      "total_fees": 0.0,
+      "buy_fees": 0.0,
+      "sell_fees": 0.0,
+      "pnl": 6.8966,
+      "pnl_usd": 6.9,
+      "pnl_pct": 13.79,
+      "outcome": "win",
+      "exit_trigger": "bracket_target",
+      "exit_order_type": "bracket_maker",
+      "legs": [
+        {
+          "leg_id": "leg_d88f28e1",
+          "platform": "polymarket",
+          "type": "prediction_yes",
+          "asset_id": "0x6abaffbb96b4b3ff7e05d6a1739fa72399b46e07c88e0687c4d8283ae2d58c97:YES",
+          "entry_price": 0.87,
+          "exit_price": 0.99,
+          "quantity": 57.47126436781609,
+          "cost": 50.0,
+          "exit_value": 56.8966,
+          "buy_fees": 0.0,
+          "sell_fees": 0.0,
+          "leg_pnl": 6.8966,
+          "leg_pnl_pct": 13.79,
+          "status": "closed",
+          "exit_order_type": "bracket_maker"
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_6ec90ece",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 10
+          },
+          "active": true,
+          "created_at": 1774333456.5478854
+        },
+        {
+          "rule_id": "rule_b2740998",
+          "type": "stop_loss",
+          "params": {
+            "stop_pct": -60
+          },
+          "active": true,
+          "created_at": 1774333456.5478923
+        },
+        {
+          "rule_id": "rule_0392ca56",
+          "type": "trailing_stop",
+          "params": {
+            "current": 15,
+            "bound_min": 8,
+            "bound_max": 30
+          },
+          "active": false,
+          "created_at": 1774333456.547896
+        }
+      ],
+      "execution_log": [
+        {
+          "action": "buy",
+          "leg_id": "leg_d88f28e1",
+          "platform": "polymarket",
+          "tx_id": "paper_4d0f7867804d",
+          "price": 0.87,
+          "quantity": 57.47126436781609,
+          "fees": 0.0,
+          "timestamp": 1774333456.5479755
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_d88f28e1",
+          "platform": "polymarket",
+          "tx_id": "paper_ee04c099e3c8",
+          "price": 0.99,
+          "fees": 0.0,
+          "trigger": "bracket_target",
+          "exit_order_type": "bracket_maker",
+          "timestamp": 1774338315.458116
+        }
+      ],
+      "hold_duration_hours": 1.3,
+      "peak_value": 51.14942528735632,
+      "max_drawdown_from_peak": -11.24,
+      "created_at": 1774333456.5478606,
+      "closed_at": 1774338315.4588017,
+      "_code_version": "v2-fee-fix"
+    },
+    {
+      "id": "journal_d687692e",
+      "package_id": "pkg_22cca064fb90",
+      "name": "News: Oil back above $100 as conflicting claims emerge on US-Iran ",
+      "strategy_type": "news_driven",
+      "ai_strategy": "balanced",
+      "mode": "paper",
+      "total_cost": 50.0,
+      "exit_value": 57.5,
+      "total_fees": 0.0,
+      "buy_fees": 0.0,
+      "sell_fees": 0.0,
+      "pnl": 7.5,
+      "pnl_usd": 7.5,
+      "pnl_pct": 15.0,
+      "outcome": "win",
+      "exit_trigger": "bracket_target",
+      "exit_order_type": "bracket_maker",
+      "legs": [
+        {
+          "leg_id": "leg_f6e4ad7c",
+          "platform": "polymarket",
+          "type": "prediction_yes",
+          "asset_id": "0x4c90fa6d68ec63c09433517e8be32fe656353bcf9150267bb41722846f96364f:YES",
+          "entry_price": 0.74,
+          "exit_price": 0.851,
+          "quantity": 67.56756756756756,
+          "cost": 50.0,
+          "exit_value": 57.5,
+          "buy_fees": 0.0,
+          "sell_fees": 0.0,
+          "leg_pnl": 7.5,
+          "leg_pnl_pct": 15.0,
+          "status": "closed",
+          "exit_order_type": "bracket_maker"
+        }
+      ],
+      "exit_rules": [
+        {
+          "rule_id": "rule_f673a2c6",
+          "type": "target_profit",
+          "params": {
+            "target_pct": 10
+          },
+          "active": true,
+          "created_at": 1774333464.9354777
+        },
+        {
+          "rule_id": "rule_3eac694a",
+          "type": "stop_loss",
+          "params": {
+            "stop_pct": -60
+          },
+          "active": true,
+          "created_at": 1774333464.935481
+        },
+        {
+          "rule_id": "rule_b59526d3",
+          "type": "trailing_stop",
+          "params": {
+            "current": 15,
+            "bound_min": 8,
+            "bound_max": 30
+          },
+          "active": false,
+          "created_at": 1774333464.9354844
+        }
+      ],
+      "execution_log": [
+        {
+          "action": "buy",
+          "leg_id": "leg_f6e4ad7c",
+          "platform": "polymarket",
+          "tx_id": "paper_6cadde4fdba1",
+          "price": 0.74,
+          "quantity": 67.56756756756756,
+          "fees": 0.0,
+          "timestamp": 1774333464.9355402
+        },
+        {
+          "action": "sell",
+          "leg_id": "leg_f6e4ad7c",
+          "platform": "polymarket",
+          "tx_id": "paper_56c436ec8c73",
+          "price": 0.851,
+          "fees": 0.0,
+          "trigger": "bracket_target",
+          "exit_order_type": "bracket_maker",
+          "timestamp": 1774338315.4640055
+        }
+      ],
+      "hold_duration_hours": 1.3,
+      "peak_value": 51.01351351351351,
+      "max_drawdown_from_peak": -12.72,
+      "created_at": 1774333464.9354546,
+      "closed_at": 1774338315.4646199,
+      "_code_version": "v2-fee-fix"
     }
   ],
-  "saved_at": 1773885348.70298
+  "saved_at": 1774998995.3318312
 }
