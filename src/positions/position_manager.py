@@ -180,9 +180,18 @@ class PositionManager:
         if pkg:
             pkg["status"] = STATUS_CLOSED
             pkg["updated_at"] = time.time()
+            now = time.time()
             for leg in pkg["legs"]:
                 if leg["status"] == "open":
                     leg["status"] = "closed"
+                    # Fill in exit data so trade journal has complete records
+                    if "exit_price" not in leg:
+                        leg["exit_price"] = leg.get("current_price", leg.get("entry_price", 0))
+                    if "exit_time" not in leg:
+                        leg["exit_time"] = now
+                    if "exit_value" not in leg:
+                        qty = leg.get("quantity", 0)
+                        leg["exit_value"] = round(qty * leg["exit_price"], 4)
             if not pkg.get("_journal_recorded") and self.trade_journal:
                 try:
                     self.trade_journal.record_close(pkg, exit_trigger=exit_trigger)
@@ -527,9 +536,10 @@ class PositionManager:
             })
             if all(l["status"] in ("closed", "advisory") for l in pkg["legs"]):
                 pkg["status"] = STATUS_CLOSED
-                # Recalculate current_value from actual exit data before journaling
+                # Recalculate current_value from actual exit data before journaling (net of sell fees)
                 pkg["current_value"] = round(sum(
                     l.get("quantity", 0) * l.get("exit_price", l.get("current_price", l.get("entry_price", 0)))
+                    - l.get("sell_fees", 0)
                     for l in pkg["legs"] if l.get("status") != "advisory"
                 ), 4)
                 if not pkg.get("_journal_recorded") and self.trade_journal:
@@ -686,6 +696,15 @@ class PositionManager:
                 self.save()
                 return {"success": True, "exit_order_type": "limit_partial_maker"}
 
+            elif order_status == "cancelled":
+                # Order was cancelled or lost (e.g., server restart wiped _resting_orders).
+                # Fall back to FOK to actually close the position.
+                del pkg["_pending_limit_orders"][leg_id]
+                if not pkg["_pending_limit_orders"]:
+                    del pkg["_pending_limit_orders"]
+                logger.warning("Limit order %s cancelled/lost for %s, falling back to FOK", order_id, leg_id)
+                return await self._exit_leg_locked(pkg_id, leg_id, pending["trigger"])
+
             elif time.time() - pending["placed_at"] > pending.get("timeout", 60):
                 await executor.cancel_order(order_id)
                 del pkg["_pending_limit_orders"][leg_id]
@@ -719,6 +738,7 @@ class PositionManager:
             pkg["status"] = STATUS_CLOSED
             pkg["current_value"] = round(sum(
                 l.get("quantity", 0) * l.get("exit_price", l.get("current_price", l.get("entry_price", 0)))
+                - l.get("sell_fees", 0)
                 for l in pkg["legs"] if l.get("status") != "advisory"
             ), 4)
             if not pkg.get("_journal_recorded") and self.trade_journal:

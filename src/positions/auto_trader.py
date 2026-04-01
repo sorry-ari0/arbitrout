@@ -9,6 +9,7 @@ Respects position limits and only trades in paper mode.
 """
 import asyncio
 import logging
+import re
 import time
 from datetime import datetime, date, timedelta
 
@@ -104,7 +105,24 @@ SPORTS_KEYWORDS = [
     "atp", "wta", "wimbledon", "tournament", "playoff",
     "super bowl", "world cup", "world series", "vs.", "vs ",
     "match", "game", "winner",
+    # eSports — journal: 2 open LoL bets, no documented edge, treat as sports
+    "lol", "league of legends", "dota", "cs:go", "csgo", "counter-strike",
+    "valorant", "overwatch", "esports", "e-sports", "bo1", "bo3", "bo5",
 ]
+
+# Narrow-range market detection — journal: 8 trades, -$74.91, lottery-ticket asymmetry
+# Detects questions about specific numeric ranges (e.g., "between $1,900 and $2,000",
+# "300-319 tweets", "5 to 6 inches"). These are low-probability events with 100% downside.
+NARROW_RANGE_PATTERN = re.compile(
+    r"(?:"
+    r"between\s+\$?[\d,.]+\s+and\s+\$?[\d,.]+"       # "between $X and $Y"
+    r"|"
+    r"\d+[\s-]+(?:to|and)[\s-]+\d+\s+(?:tweets?|posts?|times?|strikes?|inches|mm|cm)"
+    r"|"
+    r"\d+-\d+\s+(?:tweets?|posts?|times?|strikes?)"   # "300-319 tweets"
+    r")",
+    re.IGNORECASE,
+)
 COMMODITIES_KEYWORDS = [
     "crude oil", "wti", "brent", "natural gas", "gold price",
     "silver price", "copper",
@@ -163,7 +181,19 @@ class AutoTrader:
         self._refresh_limits()
 
     def _get_current_bankroll(self) -> float:
-        """Current bankroll = initial + cumulative P&L from journal."""
+        """Current bankroll from paper executor balance (ground truth) or initial + P&L fallback.
+
+        Paper executor balance is decremented on buys and incremented on sells/fills,
+        so it always reflects actual available + deployed capital. Using initial + journal_pnl
+        can drift because the journal only records closed trades.
+        """
+        # Prefer paper executor balance + value of open positions as ground truth
+        for executor in self.pm.executors.values():
+            if hasattr(executor, 'balance') and hasattr(executor, 'starting_balance'):
+                # executor.balance = cash on hand; add back value of open positions
+                open_cost = sum(p.get("total_cost", 0) for p in self.pm.list_packages("open"))
+                return executor.balance + open_cost
+        # Fallback for non-paper mode
         pnl = 0.0
         if self.pm.trade_journal:
             pnl = self.pm.trade_journal.get_cumulative_pnl()
@@ -736,6 +766,14 @@ class AutoTrader:
                     self.dlog.log_opportunity_skip(opp_title, "commodities_market",
                                                    volume=opp_volume, strategy=opp_strategy)
                 continue
+            # Narrow-range bets: journal -$74.91/8 trades. Lottery-ticket asymmetry —
+            # small wins, 100% wipeouts. Skip unless guaranteed-profit strategy.
+            if not guaranteed_profit and NARROW_RANGE_PATTERN.search(title):
+                self._record_skip("narrow_range_market")
+                if self.dlog:
+                    self.dlog.log_opportunity_skip(opp_title, "narrow_range_market",
+                                                   volume=opp_volume, strategy=opp_strategy)
+                continue
 
             # Favorite-longshot bias (research-validated):
             # Research: longshots lose ~40%, favorites lose ~5%
@@ -930,10 +968,13 @@ class AutoTrader:
                 }
 
             # In extra-slots mode: only allow insider-signaled, news-driven,
-            # or synthetic trades (synthetics have structural edge, not directional)
+            # synthetic, or structural arb strategies (they have price-based edge,
+            # not signal-dependent). Audit: insider_news_only_mode was blocking
+            # 337 portfolio_no, 254 multi_outcome_arb, 129 cross_platform_arb plays.
             is_news = bool(opp.get("_news_driven"))
             _is_synth = opp.get("is_synthetic", False)
-            if (insider_only_mode or news_only_mode) and insider_mult <= 1.0 and cross_platform_mult <= 1.0 and not is_news and not _is_synth:
+            _is_structural_arb = opp_strategy in ("multi_outcome_arb", "portfolio_no", "cross_platform_arb")
+            if (insider_only_mode or news_only_mode) and insider_mult <= 1.0 and cross_platform_mult <= 1.0 and not is_news and not _is_synth and not _is_structural_arb:
                 self._record_skip("insider_news_only_mode")
                 insider_mode_skipped_filter_count += 1
                 if self.dlog:
@@ -1156,6 +1197,18 @@ class AutoTrader:
                     self._record_skip("multi_outcome_over_budget")
                     continue
 
+                # Verify arb is still guaranteed profitable after min_trade_size floor.
+                # min_qty = fewest contracts on any single outcome. If that outcome
+                # wins, payout = min_qty × $1.00. Must exceed total cost.
+                min_qty = min((l["cost"] / l["entry_price"] for l in pkg["legs"] if l["entry_price"] > 0), default=0)
+                if min_qty <= 0 or actual_cost >= min_qty:
+                    self._record_skip("multi_outcome_arb_unprofitable_after_floor")
+                    if self.dlog:
+                        self.dlog.log_opportunity_skip(opp_title, "arb_unprofitable_after_floor",
+                                                       actual_cost=round(actual_cost, 2),
+                                                       min_payout=round(min_qty, 2))
+                    continue
+
                 pkg["_use_limit_orders"] = True
                 pkg["_category"] = self._detect_category(opp_title)
                 pkg_name = pkg.get("name", opp_title)
@@ -1229,9 +1282,9 @@ class AutoTrader:
                         expiry=opp.get("expiry", "2026-12-31")[:10],
                     ))
 
-                # Near-guaranteed profit — hold to resolution
-                # NO stop loss — journal shows stop-losses destroy EV.
-                pkg["exit_rules"].append(create_exit_rule("target_profit", {"target_pct": 15}))
+                # Near-guaranteed profit — hold to resolution only.
+                # NO target_profit, NO stop loss — these are structurally profitable
+                # and must not exit prematurely. market_resolved is the only valid trigger.
 
                 if not pkg["legs"]:
                     self._record_skip("portfolio_no_no_legs")
@@ -1511,57 +1564,14 @@ class AutoTrader:
             is_synthetic = opp.get("is_synthetic", False)
 
             if is_synthetic:
-                # Synthetics work on same or different platforms — different strike prices
-                # create the edge, not platform differences.
-                # Gate: require high EV confidence before entering synthetics.
-                # Journal: synthetic_derivative with low-confidence legs lost -$33.22.
-                # The arb engine already rejects loss_prob > 0.60, but that's too loose —
-                # prediction markets have noisy pricing, so require tighter thresholds.
-                synth_info = opp.get("synthetic_info", {})
-                synth_loss_prob = synth_info.get("loss_probability", 0.5)
-
-                # Compute true probability-weighted EV from scenario data.
-                # The arb engine's profit_pct uses spread*(1-loss_prob) which is
-                # "probability-adjusted spread % of payout" — not the true expected
-                # return on capital. Use scenarios for accurate EV.
-                scenarios = synth_info.get("scenarios", {})
-                total_cost = synth_info.get("total_cost", 0)
-                if scenarios and total_cost > 0:
-                    # Conservative EV: use MINIMUM win return, not uniform average.
-                    # Zone probabilities aren't known per-zone — the arb engine only
-                    # computes aggregate loss_probability. Uniform weighting inflates
-                    # EV because narrow "bonus zones" (e.g., $48 range at 785%)
-                    # get the same weight as wide zones ($1000+ range at 342%).
-                    # Using min(win returns) is conservative: assumes you'll land in
-                    # the worst winning zone, which is also usually the widest.
-                    win_returns = [s["return_pct"] for s in scenarios.values() if s["return_pct"] > 0]
-                    loss_returns = [s["return_pct"] for s in scenarios.values() if s["return_pct"] <= 0]
-                    if win_returns and loss_returns:
-                        min_win = min(win_returns)
-                        avg_loss = sum(loss_returns) / len(loss_returns)
-                        synth_ev = (1.0 - synth_loss_prob) * min_win + synth_loss_prob * avg_loss
-                    else:
-                        synth_ev = opp.get("profit_pct", 0)
-                else:
-                    synth_ev = opp.get("profit_pct", 0)
-
-                if synth_loss_prob >= 0.20:
-                    self._record_skip("synthetic_high_loss_prob")
-                    if self.dlog:
-                        self.dlog.log_opportunity_skip(opp_title, "synthetic_high_loss_prob",
-                                                       loss_prob=round(synth_loss_prob, 3),
-                                                       ev_pct=round(synth_ev, 2),
-                                                       volume=opp_volume, strategy=opp_strategy)
-                    continue
-                if synth_ev < 15.0:
-                    self._record_skip("synthetic_low_ev")
-                    if self.dlog:
-                        self.dlog.log_opportunity_skip(opp_title, "synthetic_low_ev",
-                                                       ev_pct=round(synth_ev, 2),
-                                                       loss_prob=round(synth_loss_prob, 3),
-                                                       volume=opp_volume, strategy=opp_strategy)
-                    continue
-                strategy = "synthetic_derivative"
+                # Synthetics DISABLED — 0W/1L in Phase 2, -$33.22. Not production-ready.
+                # The EV calculation and loss_prob gates work but the underlying
+                # scenario pricing is too noisy for reliable entries.
+                self._record_skip("synthetic_disabled")
+                if self.dlog:
+                    self.dlog.log_opportunity_skip(opp_title, "synthetic_disabled",
+                                                   volume=opp_volume, strategy="synthetic_derivative")
+                continue
             elif is_cross_platform:
                 strategy = "cross_platform_arb"
             else:
@@ -1627,7 +1637,17 @@ class AutoTrader:
                     yes_label = f"YES @ {buy_yes_platform} (strike: ${synth.get('yes_target', '?'):,.0f})"
                     no_label = f"NO @ {buy_no_platform} (strike: ${synth.get('no_target', '?'):,.0f})"
                 else:
-                    yes_alloc = no_alloc = round(trade_size / 2, 2)
+                    # Cross-platform arb: match contract QUANTITY on both sides.
+                    # Equal dollar allocation breaks the arb guarantee because
+                    # different prices → different quantities → payout depends
+                    # on which side wins. Matched qty = guaranteed profit.
+                    pair_cost = buy_yes_price + buy_no_price
+                    if pair_cost > 0:
+                        qty = trade_size / pair_cost
+                        yes_alloc = round(qty * buy_yes_price, 2)
+                        no_alloc = round(qty * buy_no_price, 2)
+                    else:
+                        yes_alloc = no_alloc = round(trade_size / 2, 2)
                     yes_label = f"YES @ {buy_yes_platform}"
                     no_label = f"NO @ {buy_no_platform}"
 
@@ -1706,6 +1726,20 @@ class AutoTrader:
                                                        volume=opp_volume, strategy=opp_strategy)
                     continue
 
+                # Minimum upside gate: require >= 15% max profit potential.
+                # Audit found 52% of entries at 0.90+ with only 5-10% upside,
+                # avg R/R 0.07x. These risk 100% to gain pennies.
+                # max_profit_pct = (1 - price) / price for the chosen side.
+                max_profit_pct = ((1.0 - side_price) / side_price) * 100 if side_price > 0 else 0
+                if max_profit_pct < 15.0:
+                    self._record_skip("low_upside")
+                    if self.dlog:
+                        self.dlog.log_opportunity_skip(opp_title, "low_upside",
+                                                       side=side, price=round(side_price, 4),
+                                                       max_profit_pct=round(max_profit_pct, 1),
+                                                       volume=opp_volume, strategy=opp_strategy)
+                    continue
+
                 # Quarter Kelly position sizing (research-validated: retains 56% of
                 # max growth rate, ~3% chance of halving bankroll)
                 #
@@ -1742,6 +1776,16 @@ class AutoTrader:
                 # Apply Kelly fraction to directional budget, capped at _max_trade_size
                 sized_trade = round(min(self._max_trade_size, directional_budget * kelly_quarter), 2)
                 sized_trade = max(self._min_trade_size, min(sized_trade, trade_size))
+
+                # NO-bet wipeout cap: high-probability NO bets (>= 0.85) risk 100%
+                # loss when the event occurs. Journal: SOL $90 (-$18.25, -100%),
+                # Musk tweets (-$31.18, -100%). Cap at 0.5% of bankroll.
+                if leg_type == "prediction_no" and side_price >= 0.85:
+                    no_cap = round(self._total_bankroll * 0.005, 2)
+                    if sized_trade > no_cap:
+                        logger.info("NO-bet wipeout cap: %s capped $%.2f -> $%.2f (NO@%.2f)",
+                                    trade_title[:40], sized_trade, no_cap, side_price)
+                        sized_trade = max(self._min_trade_size, no_cap)
 
                 pkg["legs"].append(create_leg(
                     platform=buy_yes_platform if side == "YES" else buy_no_platform,
@@ -1951,14 +1995,17 @@ class AutoTrader:
             return None
 
         # Enforce per-platform-pair minimum spread thresholds
-        # Cross-platform fees: Polymarket maker 0% + Kalshi ~1.2% = ~1.2% round-trip
+        # Use net_profit_pct (fee-adjusted) as the gate — gross profit_pct ignores
+        # PredictIt's 10% profit tax + 5% withdrawal fee which can erase 15%+ spreads.
         profit_pct = arb.get("profit_pct", 0)
+        net_profit_pct = arb.get("net_profit_pct", profit_pct)
         is_cross_platform = buy_yes_platform != buy_no_platform
         if is_cross_platform:
-            min_spread = 2.0  # Must exceed combined cross-platform fees (0% Poly + 1.2% Kalshi)
-            if profit_pct < min_spread:
-                logger.debug("Cross-platform spread too thin (%.1f%% < %.1f%%): %s",
-                             profit_pct, min_spread, title[:40])
+            # Net profit must be positive with margin — if fees eat the spread, skip
+            min_net_spread = 2.0  # 2% net profit minimum after all platform fees
+            if net_profit_pct < min_net_spread:
+                logger.debug("Cross-platform net spread too thin (%.1f%% net < %.1f%%): %s",
+                             net_profit_pct, min_net_spread, title[:40])
                 return None
 
         # Log when we find cross-platform matches but can't execute

@@ -135,7 +135,7 @@ class TradeJournal:
             "pnl": round(pnl, 4),  # 4-decimal for computation
             "pnl_usd": round(pnl, 2),  # 2-decimal display value for cross-referencing
             "pnl_pct": round(pnl / total_cost * 100, 2) if total_cost > 0 else 0,
-            "outcome": "win" if pnl > 0 else ("loss" if pnl < 0 else "flat"),
+            "outcome": "win" if pnl > 0.001 else ("loss" if pnl < -0.001 else "flat"),
             "exit_trigger": exit_trigger,
             "exit_order_type": pkg.get("legs", [{}])[0].get("exit_order_type", "fok_direct"),
             "legs": legs_detail,

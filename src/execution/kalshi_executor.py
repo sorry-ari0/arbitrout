@@ -96,14 +96,14 @@ class KalshiExecutor(BaseExecutor):
         return asset_id, "yes"
 
     async def buy(self, asset_id: str, amount_usd: float) -> ExecutionResult:
-        """Place a market buy order on Kalshi."""
+        """Place a limit buy order on Kalshi (maker, 0% fee)."""
         try:
             from kalshi_python.models import CreateOrderRequest
 
             ticker, side = self._parse_asset_id(asset_id)
             client = self._get_client()
 
-            # Get current price to calculate contract count
+            # Get current price to calculate contract count + limit price
             market = await self._run_sync(client.get_market, ticker)
             market_data = market.market if hasattr(market, "market") else market
             yes_price_cents = getattr(market_data, "yes_price", None) or 50
@@ -114,8 +114,10 @@ class KalshiExecutor(BaseExecutor):
                 ticker=ticker,
                 side=side,
                 action="buy",
-                type="market",
+                type="limit",
                 count=count,
+                yes_price=price_cents if side == "yes" else None,
+                no_price=price_cents if side == "no" else None,
                 client_order_id=str(uuid.uuid4()),
             )
 
@@ -126,8 +128,8 @@ class KalshiExecutor(BaseExecutor):
             filled = getattr(order, "count", count)
 
             logger.info(
-                "Kalshi BUY market: %s %s x%d @ %dc",
-                ticker, side, count, avg_price,
+                "Kalshi BUY limit: %s %s x%d @ %dc",
+                ticker, side, count, price_cents,
             )
 
             return ExecutionResult(
@@ -139,28 +141,36 @@ class KalshiExecutor(BaseExecutor):
             return ExecutionResult(False, None, 0, 0, 0, str(e))
 
     async def sell(self, asset_id: str, quantity: float) -> ExecutionResult:
-        """Place a market sell order on Kalshi."""
+        """Place a limit sell order on Kalshi (maker, 0% fee)."""
         try:
             from kalshi_python.models import CreateOrderRequest
 
             ticker, side = self._parse_asset_id(asset_id)
             client = self._get_client()
 
+            # Get current price for limit
+            market = await self._run_sync(client.get_market, ticker)
+            market_data = market.market if hasattr(market, "market") else market
+            yes_price_cents = getattr(market_data, "yes_price", None) or 50
+            price_cents = yes_price_cents if side == "yes" else (100 - yes_price_cents)
+
             order_req = CreateOrderRequest(
                 ticker=ticker,
                 side=side,
                 action="sell",
-                type="market",
+                type="limit",
                 count=int(quantity),
+                yes_price=price_cents if side == "yes" else None,
+                no_price=price_cents if side == "no" else None,
                 client_order_id=str(uuid.uuid4()),
             )
 
             result = await self._run_sync(client.create_order, order_req)
             order = result.order if hasattr(result, "order") else result
             order_id = getattr(order, "order_id", "") or ""
-            avg_price = getattr(order, "avg_price", 0)
+            avg_price = getattr(order, "avg_price", price_cents)
 
-            logger.info("Kalshi SELL market: %s %s x%d", ticker, side, int(quantity))
+            logger.info("Kalshi SELL limit: %s %s x%d @ %dc", ticker, side, int(quantity), price_cents)
 
             return ExecutionResult(
                 True, order_id, float(avg_price) / 100,

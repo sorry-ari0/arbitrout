@@ -174,7 +174,7 @@ class CryptoSpotExecutor(BaseExecutor):
         return f"{symbol}/{quote}"
 
     async def buy(self, asset_id: str, amount_usd: float) -> ExecutionResult:
-        """Buy crypto spot via CCXT market order."""
+        """Buy crypto spot via CCXT limit order (maker fee)."""
         exchange = await self._get_exchange()
         if not exchange:
             return ExecutionResult(False, None, 0, 0, 0,
@@ -187,14 +187,14 @@ class CryptoSpotExecutor(BaseExecutor):
                 return ExecutionResult(False, None, 0, 0, 0, f"Cannot get price for {pair}")
 
             amount = amount_usd / price
-            order = await exchange.create_market_buy_order(pair, amount)
+            order = await exchange.create_limit_buy_order(pair, amount, price)
 
             fill_price = float(order.get("average", order.get("price", price)))
             fill_qty = float(order.get("filled", order.get("amount", amount)))
             fees = float(order.get("fee", {}).get("cost", 0))
             order_id = order.get("id", "")
 
-            logger.info("Crypto spot BUY %s: %.6f @ $%.2f on %s (order=%s)",
+            logger.info("Crypto spot BUY limit %s: %.6f @ $%.2f on %s (order=%s)",
                         pair, fill_qty, fill_price, self._exchange_name, order_id)
             return ExecutionResult(True, order_id, fill_price, fill_qty, fees, None)
 
@@ -203,26 +203,68 @@ class CryptoSpotExecutor(BaseExecutor):
             return ExecutionResult(False, None, 0, 0, 0, str(e))
 
     async def sell(self, asset_id: str, quantity: float) -> ExecutionResult:
-        """Sell crypto spot via CCXT market order."""
+        """Sell crypto spot via CCXT limit order (maker fee)."""
         exchange = await self._get_exchange()
         if not exchange:
             return ExecutionResult(False, None, 0, 0, 0,
                                    "No crypto exchange configured")
         try:
             pair = self._resolve_pair(asset_id)
-            order = await exchange.create_market_sell_order(pair, quantity)
+            ticker = await exchange.fetch_ticker(pair)
+            price = float(ticker.get("last", 0) or ticker.get("bid", 0))
+            if price <= 0:
+                return ExecutionResult(False, None, 0, 0, 0, f"Cannot get price for {pair}")
 
-            fill_price = float(order.get("average", order.get("price", 0)))
+            order = await exchange.create_limit_sell_order(pair, quantity, price)
+
+            fill_price = float(order.get("average", order.get("price", price)))
             fill_qty = float(order.get("filled", order.get("amount", quantity)))
             fees = float(order.get("fee", {}).get("cost", 0))
             order_id = order.get("id", "")
 
-            logger.info("Crypto spot SELL %s: %.6f @ $%.2f on %s (order=%s)",
+            logger.info("Crypto spot SELL limit %s: %.6f @ $%.2f on %s (order=%s)",
                         pair, fill_qty, fill_price, self._exchange_name, order_id)
             return ExecutionResult(True, order_id, fill_price, fill_qty, fees, None)
 
         except Exception as e:
             logger.error("Crypto spot sell failed for %s: %s", asset_id, e)
+            return ExecutionResult(False, None, 0, 0, 0, str(e))
+
+    async def buy_limit(self, asset_id: str, amount_usd: float, price: float) -> ExecutionResult:
+        """Place a limit buy at a specific price (maker fee)."""
+        exchange = await self._get_exchange()
+        if not exchange:
+            return ExecutionResult(False, None, 0, 0, 0, "No crypto exchange configured")
+        try:
+            pair = self._resolve_pair(asset_id)
+            amount = amount_usd / price
+            order = await exchange.create_limit_buy_order(pair, amount, price)
+            fill_price = float(order.get("average", order.get("price", price)))
+            fill_qty = float(order.get("filled", order.get("amount", amount)))
+            fees = float(order.get("fee", {}).get("cost", 0))
+            order_id = order.get("id", "")
+            logger.info("Crypto spot BUY limit %s: %.6f @ $%.2f on %s", pair, fill_qty, price, self._exchange_name)
+            return ExecutionResult(True, order_id, fill_price, fill_qty, fees, None)
+        except Exception as e:
+            logger.error("Crypto spot buy_limit failed for %s: %s", asset_id, e)
+            return ExecutionResult(False, None, 0, 0, 0, str(e))
+
+    async def sell_limit(self, asset_id: str, quantity: float, price: float) -> ExecutionResult:
+        """Place a limit sell at a specific price (maker fee)."""
+        exchange = await self._get_exchange()
+        if not exchange:
+            return ExecutionResult(False, None, 0, 0, 0, "No crypto exchange configured")
+        try:
+            pair = self._resolve_pair(asset_id)
+            order = await exchange.create_limit_sell_order(pair, quantity, price)
+            fill_price = float(order.get("average", order.get("price", price)))
+            fill_qty = float(order.get("filled", order.get("amount", quantity)))
+            fees = float(order.get("fee", {}).get("cost", 0))
+            order_id = order.get("id", "")
+            logger.info("Crypto spot SELL limit %s: %.6f @ $%.2f on %s", pair, fill_qty, price, self._exchange_name)
+            return ExecutionResult(True, order_id, fill_price, fill_qty, fees, None)
+        except Exception as e:
+            logger.error("Crypto spot sell_limit failed for %s: %s", asset_id, e)
             return ExecutionResult(False, None, 0, 0, 0, str(e))
 
     async def get_balance(self) -> BalanceResult:
