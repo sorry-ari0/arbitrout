@@ -1,8 +1,8 @@
 """Coinbase Advanced Trade executor — spot crypto buy/sell via official SDK.
 
 Uses coinbase-advanced-py SDK with EC key authentication for proper
-request signing. Supports market orders (IOC) and provides USDC
-management for funding Polymarket wallets.
+request signing. All orders use GTC limit (maker, 0.4% fee) — never
+market/IOC orders. Provides USDC management for funding Polymarket wallets.
 
 Auth: Set COINBASE_API_KEY and COINBASE_API_SECRET env vars, or provide
 a key file path via COINBASE_KEY_FILE.
@@ -63,61 +63,100 @@ class CoinbaseSpotExecutor(BaseExecutor):
         else:
             return await loop.run_in_executor(None, func)
 
+    def _parse_order_response(self, result) -> str:
+        """Extract order_id from SDK response (object or dict)."""
+        success_resp = getattr(result, "success_response", None)
+        if success_resp:
+            return getattr(success_resp, "order_id", "")
+        if isinstance(result, dict):
+            sr = result.get("success_response", result)
+            return sr.get("order_id", "")
+        return ""
+
     async def buy(self, asset_id: str, amount_usd: float) -> ExecutionResult:
-        """Market buy crypto with USD amount."""
+        """Limit buy crypto (maker, 0.4% fee). Gets current price and places GTC limit."""
         try:
             client = self._get_client()
             product_id = f"{asset_id.upper()}-USD"
+            price = await self.get_current_price(asset_id)
+            if price <= 0:
+                return ExecutionResult(False, None, 0, 0, 0, f"Cannot get price for {asset_id}")
 
+            qty = round(amount_usd / price, 8)
             result = await self._run_sync(
-                client.market_order_buy,
+                client.limit_order_gtc_buy,
                 client_order_id=str(uuid.uuid4()),
                 product_id=product_id,
-                quote_size=str(round(amount_usd, 2)),
+                base_size=str(qty),
+                limit_price=str(round(price, 2)),
             )
-
-            success_resp = getattr(result, "success_response", None)
-            if success_resp:
-                order_id = getattr(success_resp, "order_id", "")
-                return ExecutionResult(True, order_id, 0, 0, 0, None)
-
-            # Parse dict response
-            if isinstance(result, dict):
-                sr = result.get("success_response", result)
-                order_id = sr.get("order_id", "")
-                return ExecutionResult(True, order_id, 0, 0, 0, None)
-
-            return ExecutionResult(True, "", 0, 0, 0, None)
+            order_id = self._parse_order_response(result)
+            logger.info("Coinbase BUY limit: %s %.8f @ $%.2f", product_id, qty, price)
+            return ExecutionResult(True, order_id, price, qty, 0, None)
         except Exception as e:
             logger.error("Coinbase buy failed for %s: %s", asset_id, e)
             return ExecutionResult(False, None, 0, 0, 0, str(e))
 
     async def sell(self, asset_id: str, quantity: float) -> ExecutionResult:
-        """Market sell crypto by quantity."""
+        """Limit sell crypto (maker, 0.4% fee). Gets current price and places GTC limit."""
         try:
             client = self._get_client()
             product_id = f"{asset_id.upper()}-USD"
+            price = await self.get_current_price(asset_id)
+            if price <= 0:
+                return ExecutionResult(False, None, 0, 0, 0, f"Cannot get price for {asset_id}")
 
             result = await self._run_sync(
-                client.market_order_sell,
+                client.limit_order_gtc_sell,
                 client_order_id=str(uuid.uuid4()),
                 product_id=product_id,
                 base_size=str(round(quantity, 8)),
+                limit_price=str(round(price, 2)),
             )
-
-            success_resp = getattr(result, "success_response", None)
-            if success_resp:
-                order_id = getattr(success_resp, "order_id", "")
-                return ExecutionResult(True, order_id, 0, 0, 0, None)
-
-            if isinstance(result, dict):
-                sr = result.get("success_response", result)
-                order_id = sr.get("order_id", "")
-                return ExecutionResult(True, order_id, 0, 0, 0, None)
-
-            return ExecutionResult(True, "", 0, 0, 0, None)
+            order_id = self._parse_order_response(result)
+            logger.info("Coinbase SELL limit: %s %.8f @ $%.2f", product_id, quantity, price)
+            return ExecutionResult(True, order_id, price, quantity, 0, None)
         except Exception as e:
             logger.error("Coinbase sell failed for %s: %s", asset_id, e)
+            return ExecutionResult(False, None, 0, 0, 0, str(e))
+
+    async def buy_limit(self, asset_id: str, amount_usd: float, price: float) -> ExecutionResult:
+        """Place a GTC limit buy at a specific price (maker, 0.4% fee)."""
+        try:
+            client = self._get_client()
+            product_id = f"{asset_id.upper()}-USD"
+            qty = round(amount_usd / price, 8)
+            result = await self._run_sync(
+                client.limit_order_gtc_buy,
+                client_order_id=str(uuid.uuid4()),
+                product_id=product_id,
+                base_size=str(qty),
+                limit_price=str(round(price, 2)),
+            )
+            order_id = self._parse_order_response(result)
+            logger.info("Coinbase BUY limit: %s %.8f @ $%.2f", product_id, qty, price)
+            return ExecutionResult(True, order_id, price, qty, 0, None)
+        except Exception as e:
+            logger.error("Coinbase buy_limit failed for %s: %s", asset_id, e)
+            return ExecutionResult(False, None, 0, 0, 0, str(e))
+
+    async def sell_limit(self, asset_id: str, quantity: float, price: float) -> ExecutionResult:
+        """Place a GTC limit sell at a specific price (maker, 0.4% fee)."""
+        try:
+            client = self._get_client()
+            product_id = f"{asset_id.upper()}-USD"
+            result = await self._run_sync(
+                client.limit_order_gtc_sell,
+                client_order_id=str(uuid.uuid4()),
+                product_id=product_id,
+                base_size=str(round(quantity, 8)),
+                limit_price=str(round(price, 2)),
+            )
+            order_id = self._parse_order_response(result)
+            logger.info("Coinbase SELL limit: %s %.8f @ $%.2f", product_id, quantity, price)
+            return ExecutionResult(True, order_id, price, quantity, 0, None)
+        except Exception as e:
+            logger.error("Coinbase sell_limit failed for %s: %s", asset_id, e)
             return ExecutionResult(False, None, 0, 0, 0, str(e))
 
     async def get_balance(self) -> BalanceResult:

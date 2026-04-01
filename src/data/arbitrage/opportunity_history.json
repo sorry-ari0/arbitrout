@@ -1,0 +1,6363 @@
+{
+  "auto-d2633229f622": [
+    {
+      "timestamp": 1774641560,
+      "profit_pct": 38.0,
+      "net_profit_pct": 24.35
+    },
+    {
+      "timestamp": 1774643306,
+      "profit_pct": 38.0,
+      "net_profit_pct": 24.35
+    },
+    {
+      "timestamp": 1774647408,
+      "profit_pct": 38.0,
+      "net_profit_pct": 24.35
+    },
+    {
+      "timestamp": 1774649040,
+      "profit_pct": 39.0,
+      "net_profit_pct": 25.25
+    },
+    {
+      "timestamp": 1774731393,
+      "profit_pct": 34.0,
+      "net_profit_pct": 20.62
+    },
+    {
+      "timestamp": 1774759332,
+      "profit_pct": 34.0,
+      "net_profit_pct": 20.62
+    },
+    {
+      "timestamp": 1774780384,
+      "profit_pct": 34.0,
+      "net_profit_pct": 20.62
+    },
+    {
+      "timestamp": 1774813801,
+      "profit_pct": 34.0,
+      "net_profit_pct": 20.62
+    },
+    {
+      "timestamp": 1774814279,
+      "profit_pct": 34.0,
+      "net_profit_pct": 20.62
+    },
+    {
+      "timestamp": 1774814829,
+      "profit_pct": 34.0,
+      "net_profit_pct": 20.62
+    },
+    {
+      "timestamp": 1774815924,
+      "profit_pct": 33.0,
+      "net_profit_pct": 19.61
+    },
+    {
+      "timestamp": 1774821081,
+      "profit_pct": 34.0,
+      "net_profit_pct": 20.62
+    },
+    {
+      "timestamp": 1774822915,
+      "profit_pct": 34.0,
+      "net_profit_pct": 20.62
+    },
+    {
+      "timestamp": 1774868735,
+      "profit_pct": 31.0,
+      "net_profit_pct": 17.7
+    },
+    {
+      "timestamp": 1774940165,
+      "profit_pct": 36.0,
+      "net_profit_pct": 22.22
+    },
+    {
+      "timestamp": 1774941270,
+      "profit_pct": 36.0,
+      "net_profit_pct": 22.22
+    },
+    {
+      "timestamp": 1774941981,
+      "profit_pct": 36.0,
+      "net_profit_pct": 22.22
+    },
+    {
+      "timestamp": 1774942794,
+      "profit_pct": 36.0,
+      "net_profit_pct": 22.22
+    },
+    {
+      "timestamp": 1774943421,
+      "profit_pct": 36.0,
+      "net_profit_pct": 22.22
+    },
+    {
+      "timestamp": 1774943553,
+      "profit_pct": 36.0,
+      "net_profit_pct": 22.22
+    },
+    {
+      "timestamp": 1774955363,
+      "profit_pct": 36.0,
+      "net_profit_pct": 22.22
+    },
+    {
+      "timestamp": 1774962684,
+      "profit_pct": 36.0,
+      "net_profit_pct": 22.22
+    }
+  ],
+  "auto-ce3616d40498": [
+    {
+      "timestamp": 1774641615,
+      "profit_pct": 41.0,
+      "net_profit_pct": 28.54
+    },
+    {
+      "timestamp": 1774647097,
+      "profit_pct": 41.0,
+      "net_profit_pct": 28.54
+    },
+    {
+      "timestamp": 1774734434,
+      "profit_pct": 41.0,
+      "net_profit_pct": 28.54
+    },
+    {
+      "timestamp": 1774815806,
+      "profit_pct": 38.0,
+      "net_profit_pct": 25.5
+    },
+    {
+      "timestamp": 1774817005,
+      "profit_pct": 39.0,
+      "net_profit_pct": 26.52
+    },
+    {
+      "timestamp": 1774818761,
+      "profit_pct": 38.0,
+      "net_profit_pct": 25.5
+    },
+    {
+      "timestamp": 1774819092,
+      "profit_pct": 37.0,
+      "net_profit_pct": 24.5
+    },
+    {
+      "timestamp": 1774826792,
+      "profit_pct": 38.0,
+      "net_profit_pct": 25.5
+    },
+    {
+      "timestamp": 1774829158,
+      "profit_pct": 38.0,
+      "net_profit_pct": 25.5
+    },
+    {
+      "timestamp": 1774830976,
+      "profit_pct": 38.0,
+      "net_profit_pct": 25.5
+    },
+    {
+      "timestamp": 1774862125,
+      "profit_pct": 40.0,
+      "net_profit_pct": 27.53
+    },
+    {
+      "timestamp": 1774879876,
+      "profit_pct": 40.0,
+      "net_profit_pct": 27.53
+    },
+    {
+      "timestamp": 1774933785,
+      "profit_pct": 40.0,
+      "net_profit_pct": 27.53
+    },
+    {
+      "timestamp": 1774933849,
+      "profit_pct": 40.0,
+      "net_profit_pct": 27.53
+    },
+    {
+      "timestamp": 1774943293,
+      "profit_pct": 40.0,
+      "net_profit_pct": 27.53
+    },
+    {
+      "timestamp": 1774943702,
+      "profit_pct": 40.0,
+      "net_profit_pct": 27.53
+    },
+    {
+      "timestamp": 1774944236,
+      "profit_pct": 40.0,
+      "net_profit_pct": 27.53
+    },
+    {
+      "timestamp": 1774948455,
+      "profit_pct": 40.0,
+      "net_profit_pct": 27.53
+    },
+    {
+      "timestamp": 1774953820,
+      "profit_pct": 41.0,
+      "net_profit_pct": 28.54
+    },
+    {
+      "timestamp": 1774955056,
+      "profit_pct": 41.0,
+      "net_profit_pct": 28.54
+    }
+  ],
+  "auto-27e39122c463": [
+    {
+      "timestamp": 1774641615,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774642801,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774642825,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774642887,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774642913,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774642977,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774643010,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774643046,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774643104,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774643142,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774643213,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774643257,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774643306,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774643364,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774643420,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774643475,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774643531,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774643592,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774643657,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774643733,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774643797,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774643864,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774643936,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774644013,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774644099,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774644189,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774644281,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774644394,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774644498,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774644589,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774644680,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774644767,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774644859,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774644950,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774645076,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774645170,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774645264,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774645363,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774645459,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774645579,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774645716,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774645851,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774645988,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774646120,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774646251,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774646393,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774646541,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774646676,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774646825,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774646959,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774647097,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774647240,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774647408,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774647555,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774647706,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774647864,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774648028,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774648194,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774648360,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774648525,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774648692,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774648861,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774649040,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774649231,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774649440,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774649621,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774649812,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774730164,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774730584,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774731008,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774731393,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774731814,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774732456,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774773976,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774775437,
+      "profit_pct": 16.85,
+      "net_profit_pct": 10.24
+    },
+    {
+      "timestamp": 1774779929,
+      "profit_pct": 16.0,
+      "net_profit_pct": 9.38
+    },
+    {
+      "timestamp": 1774858188,
+      "profit_pct": 16.0,
+      "net_profit_pct": 9.38
+    },
+    {
+      "timestamp": 1774921285,
+      "profit_pct": 16.25,
+      "net_profit_pct": 9.64
+    },
+    {
+      "timestamp": 1774924139,
+      "profit_pct": 16.25,
+      "net_profit_pct": 9.64
+    },
+    {
+      "timestamp": 1774926745,
+      "profit_pct": 16.25,
+      "net_profit_pct": 9.64
+    },
+    {
+      "timestamp": 1774928587,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774929572,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774933734,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774933785,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774933850,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774933925,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774934001,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774934094,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774934198,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774934308,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774934414,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774940165,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774940270,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774940347,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774940431,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774940515,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774940603,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774940691,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774940782,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774940876,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774941270,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774941379,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774941499,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774941623,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774941741,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774941860,
+      "profit_pct": 25.2,
+      "net_profit_pct": 24.46
+    },
+    {
+      "timestamp": 1774941981,
+      "profit_pct": 25.2,
+      "net_profit_pct": 24.46
+    },
+    {
+      "timestamp": 1774942109,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774942240,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774942373,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774942509,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774942650,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774942794,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774942971,
+      "profit_pct": 25.2,
+      "net_profit_pct": 24.46
+    },
+    {
+      "timestamp": 1774943035,
+      "profit_pct": 25.2,
+      "net_profit_pct": 24.46
+    },
+    {
+      "timestamp": 1774943104,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774943169,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774943229,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774943293,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774943355,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774943421,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774943484,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774943553,
+      "profit_pct": 25.2,
+      "net_profit_pct": 24.46
+    },
+    {
+      "timestamp": 1774943624,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774943702,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774943781,
+      "profit_pct": 25.2,
+      "net_profit_pct": 24.46
+    },
+    {
+      "timestamp": 1774943864,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774943953,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774944043,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774944141,
+      "profit_pct": 25.2,
+      "net_profit_pct": 24.46
+    },
+    {
+      "timestamp": 1774944236,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774944339,
+      "profit_pct": 25.2,
+      "net_profit_pct": 24.46
+    },
+    {
+      "timestamp": 1774944449,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774944557,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774944668,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774944790,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774944900,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774944994,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774945099,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774945227,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774945355,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774945499,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774945645,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774945792,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774945938,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774946087,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774946243,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774946410,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774946577,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774946744,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774946916,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774947092,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774947278,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774947457,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774947828,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774948023,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774948222,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774948455,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774948661,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774948872,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774949096,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774949314,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774949560,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774949791,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774950024,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774950260,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774950505,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774950776,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774951045,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774951302,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774951560,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774951830,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774952092,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774952344,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774953515,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774953820,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774954124,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774954435,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774954738,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774955056,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774955363,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774955669,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774955987,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774956310,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774956641,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774956974,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774957313,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774957645,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774957993,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774958346,
+      "profit_pct": 16.2,
+      "net_profit_pct": 9.58
+    },
+    {
+      "timestamp": 1774958700,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774959063,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774959436,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774959813,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774960190,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774960635,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774961061,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    },
+    {
+      "timestamp": 1774962241,
+      "profit_pct": 16.15,
+      "net_profit_pct": 9.54
+    }
+  ],
+  "auto-e7c68f6c0a4e": [
+    {
+      "timestamp": 1774642801,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774642825,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774642887,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774642913,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774642977,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774643010,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774643046,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774643104,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774643142,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774643213,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774643257,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774643305,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774643364,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774643420,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774643475,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774643531,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774643592,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774643657,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774643733,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774643797,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774643864,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774643936,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774644013,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774644099,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774644189,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774644281,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774644394,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774644498,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774644589,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774644680,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774644767,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774644859,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774644950,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774645076,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774645170,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774645264,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774645363,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774645459,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774645579,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774645716,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774645850,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774645988,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774646120,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774646251,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774646393,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774646541,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774646676,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774646825,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774646959,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774647097,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774647240,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774647408,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774647555,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774647706,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774647864,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774648028,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774648194,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774648360,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774648525,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774648692,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774648861,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774649040,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774649231,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774649440,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774649621,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774649812,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    },
+    {
+      "timestamp": 1774730164,
+      "profit_pct": 49.95,
+      "net_profit_pct": 49.45
+    }
+  ],
+  "auto-79358343af99": [
+    {
+      "timestamp": 1774642825,
+      "profit_pct": 7.6,
+      "net_profit_pct": 6.69
+    },
+    {
+      "timestamp": 1774642887,
+      "profit_pct": 7.6,
+      "net_profit_pct": 6.69
+    },
+    {
+      "timestamp": 1774642913,
+      "profit_pct": 7.6,
+      "net_profit_pct": 6.69
+    },
+    {
+      "timestamp": 1774644099,
+      "profit_pct": 7.6,
+      "net_profit_pct": 6.69
+    },
+    {
+      "timestamp": 1774644189,
+      "profit_pct": 7.6,
+      "net_profit_pct": 6.69
+    },
+    {
+      "timestamp": 1774644281,
+      "profit_pct": 7.6,
+      "net_profit_pct": 6.69
+    },
+    {
+      "timestamp": 1774645363,
+      "profit_pct": 7.3,
+      "net_profit_pct": 6.39
+    },
+    {
+      "timestamp": 1774645579,
+      "profit_pct": 7.3,
+      "net_profit_pct": 6.39
+    },
+    {
+      "timestamp": 1774645851,
+      "profit_pct": 7.3,
+      "net_profit_pct": 6.39
+    },
+    {
+      "timestamp": 1774645988,
+      "profit_pct": 7.3,
+      "net_profit_pct": 6.39
+    },
+    {
+      "timestamp": 1774646120,
+      "profit_pct": 7.3,
+      "net_profit_pct": 6.39
+    },
+    {
+      "timestamp": 1774646251,
+      "profit_pct": 7.3,
+      "net_profit_pct": 6.39
+    },
+    {
+      "timestamp": 1774646393,
+      "profit_pct": 7.3,
+      "net_profit_pct": 6.39
+    },
+    {
+      "timestamp": 1774646541,
+      "profit_pct": 7.4,
+      "net_profit_pct": 6.49
+    },
+    {
+      "timestamp": 1774646676,
+      "profit_pct": 7.4,
+      "net_profit_pct": 6.49
+    },
+    {
+      "timestamp": 1774646959,
+      "profit_pct": 7.4,
+      "net_profit_pct": 6.49
+    },
+    {
+      "timestamp": 1774647706,
+      "profit_pct": 7.4,
+      "net_profit_pct": 6.49
+    },
+    {
+      "timestamp": 1774648194,
+      "profit_pct": 7.4,
+      "net_profit_pct": 6.49
+    },
+    {
+      "timestamp": 1774648360,
+      "profit_pct": 7.4,
+      "net_profit_pct": 6.49
+    },
+    {
+      "timestamp": 1774648525,
+      "profit_pct": 7.4,
+      "net_profit_pct": 6.49
+    },
+    {
+      "timestamp": 1774648692,
+      "profit_pct": 7.5,
+      "net_profit_pct": 6.59
+    },
+    {
+      "timestamp": 1774649040,
+      "profit_pct": 7.5,
+      "net_profit_pct": 6.59
+    },
+    {
+      "timestamp": 1774649621,
+      "profit_pct": 7.5,
+      "net_profit_pct": 6.59
+    }
+  ],
+  "auto-ea27d37001ac": [
+    {
+      "timestamp": 1774642977,
+      "profit_pct": 20.0,
+      "net_profit_pct": 12.89
+    },
+    {
+      "timestamp": 1774643010,
+      "profit_pct": 20.0,
+      "net_profit_pct": 12.89
+    },
+    {
+      "timestamp": 1774643046,
+      "profit_pct": 20.0,
+      "net_profit_pct": 12.89
+    },
+    {
+      "timestamp": 1774645850,
+      "profit_pct": 50.0,
+      "net_profit_pct": 37.84
+    },
+    {
+      "timestamp": 1774647240,
+      "profit_pct": 20.0,
+      "net_profit_pct": 12.89
+    },
+    {
+      "timestamp": 1774647555,
+      "profit_pct": 20.0,
+      "net_profit_pct": 12.89
+    },
+    {
+      "timestamp": 1774648194,
+      "profit_pct": 50.0,
+      "net_profit_pct": 37.84
+    },
+    {
+      "timestamp": 1774733958,
+      "profit_pct": 20.0,
+      "net_profit_pct": 12.89
+    },
+    {
+      "timestamp": 1774756396,
+      "profit_pct": 50.0,
+      "net_profit_pct": 37.84
+    },
+    {
+      "timestamp": 1774832152,
+      "profit_pct": 21.0,
+      "net_profit_pct": 13.79
+    },
+    {
+      "timestamp": 1774859394,
+      "profit_pct": 50.0,
+      "net_profit_pct": 37.84
+    },
+    {
+      "timestamp": 1774861733,
+      "profit_pct": 21.0,
+      "net_profit_pct": 13.79
+    },
+    {
+      "timestamp": 1774876854,
+      "profit_pct": 21.0,
+      "net_profit_pct": 13.79
+    }
+  ],
+  "auto-41e31f101376": [
+    {
+      "timestamp": 1774642977,
+      "profit_pct": 20.0,
+      "net_profit_pct": 4.91
+    },
+    {
+      "timestamp": 1774643010,
+      "profit_pct": 20.0,
+      "net_profit_pct": 4.91
+    },
+    {
+      "timestamp": 1774643046,
+      "profit_pct": 20.0,
+      "net_profit_pct": 4.91
+    },
+    {
+      "timestamp": 1774643657,
+      "profit_pct": 20.0,
+      "net_profit_pct": 4.91
+    },
+    {
+      "timestamp": 1774648861,
+      "profit_pct": 20.0,
+      "net_profit_pct": 4.91
+    },
+    {
+      "timestamp": 1774649231,
+      "profit_pct": 36.0,
+      "net_profit_pct": 21.07
+    },
+    {
+      "timestamp": 1774730164,
+      "profit_pct": 20.0,
+      "net_profit_pct": 4.91
+    },
+    {
+      "timestamp": 1774753569,
+      "profit_pct": 8.0,
+      "net_profit_pct": 0.14
+    },
+    {
+      "timestamp": 1774813991,
+      "profit_pct": 21.0,
+      "net_profit_pct": 5.81
+    },
+    {
+      "timestamp": 1774814081,
+      "profit_pct": 37.0,
+      "net_profit_pct": 21.98
+    },
+    {
+      "timestamp": 1774814510,
+      "profit_pct": 21.0,
+      "net_profit_pct": 5.81
+    },
+    {
+      "timestamp": 1774820423,
+      "profit_pct": 37.0,
+      "net_profit_pct": 21.98
+    },
+    {
+      "timestamp": 1774820778,
+      "profit_pct": 11.0,
+      "net_profit_pct": 4.01
+    },
+    {
+      "timestamp": 1774824261,
+      "profit_pct": 21.0,
+      "net_profit_pct": 5.81
+    },
+    {
+      "timestamp": 1774824957,
+      "profit_pct": 21.0,
+      "net_profit_pct": 5.81
+    },
+    {
+      "timestamp": 1774826196,
+      "profit_pct": 21.0,
+      "net_profit_pct": 5.81
+    },
+    {
+      "timestamp": 1774873093,
+      "profit_pct": 15.0,
+      "net_profit_pct": 7.63
+    },
+    {
+      "timestamp": 1774876354,
+      "profit_pct": 37.0,
+      "net_profit_pct": 21.98
+    },
+    {
+      "timestamp": 1774877365,
+      "profit_pct": 37.0,
+      "net_profit_pct": 21.98
+    },
+    {
+      "timestamp": 1774881413,
+      "profit_pct": 37.0,
+      "net_profit_pct": 21.98
+    },
+    {
+      "timestamp": 1774895464,
+      "profit_pct": 21.0,
+      "net_profit_pct": 5.81
+    },
+    {
+      "timestamp": 1774896123,
+      "profit_pct": 21.0,
+      "net_profit_pct": 5.81
+    },
+    {
+      "timestamp": 1774934001,
+      "profit_pct": 25.0,
+      "net_profit_pct": 15.52
+    },
+    {
+      "timestamp": 1774934414,
+      "profit_pct": 36.0,
+      "net_profit_pct": 26.63
+    },
+    {
+      "timestamp": 1774940347,
+      "profit_pct": 25.0,
+      "net_profit_pct": 15.52
+    },
+    {
+      "timestamp": 1774942509,
+      "profit_pct": 25.0,
+      "net_profit_pct": 15.52
+    },
+    {
+      "timestamp": 1774943104,
+      "profit_pct": 25.0,
+      "net_profit_pct": 15.52
+    },
+    {
+      "timestamp": 1774944043,
+      "profit_pct": 36.0,
+      "net_profit_pct": 26.63
+    },
+    {
+      "timestamp": 1774944141,
+      "profit_pct": 36.0,
+      "net_profit_pct": 26.63
+    },
+    {
+      "timestamp": 1774946087,
+      "profit_pct": 36.0,
+      "net_profit_pct": 26.63
+    },
+    {
+      "timestamp": 1774949314,
+      "profit_pct": 36.0,
+      "net_profit_pct": 26.63
+    },
+    {
+      "timestamp": 1774950260,
+      "profit_pct": 36.0,
+      "net_profit_pct": 26.63
+    },
+    {
+      "timestamp": 1774951045,
+      "profit_pct": 25.0,
+      "net_profit_pct": 15.52
+    },
+    {
+      "timestamp": 1774951830,
+      "profit_pct": 36.0,
+      "net_profit_pct": 26.63
+    },
+    {
+      "timestamp": 1774955669,
+      "profit_pct": 36.0,
+      "net_profit_pct": 26.63
+    },
+    {
+      "timestamp": 1774960635,
+      "profit_pct": 25.0,
+      "net_profit_pct": 15.52
+    }
+  ],
+  "auto-c3df57b562cf": [
+    {
+      "timestamp": 1774645076,
+      "profit_pct": 16.0,
+      "net_profit_pct": 2.55
+    },
+    {
+      "timestamp": 1774730584,
+      "profit_pct": 16.0,
+      "net_profit_pct": 8.85
+    },
+    {
+      "timestamp": 1774731008,
+      "profit_pct": 16.0,
+      "net_profit_pct": 8.85
+    },
+    {
+      "timestamp": 1774731814,
+      "profit_pct": 16.0,
+      "net_profit_pct": 8.85
+    },
+    {
+      "timestamp": 1774736887,
+      "profit_pct": 16.0,
+      "net_profit_pct": 8.85
+    },
+    {
+      "timestamp": 1774816835,
+      "profit_pct": 16.0,
+      "net_profit_pct": 8.85
+    },
+    {
+      "timestamp": 1774835259,
+      "profit_pct": 17.0,
+      "net_profit_pct": 3.45
+    },
+    {
+      "timestamp": 1774858188,
+      "profit_pct": 17.0,
+      "net_profit_pct": 3.45
+    },
+    {
+      "timestamp": 1774869091,
+      "profit_pct": 17.0,
+      "net_profit_pct": 3.45
+    },
+    {
+      "timestamp": 1774871356,
+      "profit_pct": 16.0,
+      "net_profit_pct": 8.85
+    },
+    {
+      "timestamp": 1774878840,
+      "profit_pct": 17.0,
+      "net_profit_pct": 3.45
+    },
+    {
+      "timestamp": 1774879344,
+      "profit_pct": 16.0,
+      "net_profit_pct": 8.85
+    },
+    {
+      "timestamp": 1774947642,
+      "profit_pct": 17.0,
+      "net_profit_pct": 3.45
+    },
+    {
+      "timestamp": 1774956641,
+      "profit_pct": 17.0,
+      "net_profit_pct": 3.45
+    },
+    {
+      "timestamp": 1774957313,
+      "profit_pct": 17.0,
+      "net_profit_pct": 3.45
+    }
+  ],
+  "auto-fd3258f8a08c": [
+    {
+      "timestamp": 1774645579,
+      "profit_pct": 9.0,
+      "net_profit_pct": 2.52
+    },
+    {
+      "timestamp": 1774648194,
+      "profit_pct": 9.0,
+      "net_profit_pct": 2.52
+    },
+    {
+      "timestamp": 1774648692,
+      "profit_pct": 9.0,
+      "net_profit_pct": 2.52
+    },
+    {
+      "timestamp": 1774732456,
+      "profit_pct": 9.0,
+      "net_profit_pct": 2.52
+    },
+    {
+      "timestamp": 1774735838,
+      "profit_pct": 9.0,
+      "net_profit_pct": 2.52
+    },
+    {
+      "timestamp": 1774740512,
+      "profit_pct": 9.0,
+      "net_profit_pct": 2.52
+    },
+    {
+      "timestamp": 1774770397,
+      "profit_pct": 9.0,
+      "net_profit_pct": 2.52
+    },
+    {
+      "timestamp": 1774814829,
+      "profit_pct": 9.0,
+      "net_profit_pct": 2.52
+    },
+    {
+      "timestamp": 1774816051,
+      "profit_pct": 9.0,
+      "net_profit_pct": 2.52
+    },
+    {
+      "timestamp": 1774816580,
+      "profit_pct": 9.0,
+      "net_profit_pct": 2.52
+    },
+    {
+      "timestamp": 1774824957,
+      "profit_pct": 9.0,
+      "net_profit_pct": 2.52
+    },
+    {
+      "timestamp": 1774879344,
+      "profit_pct": 9.0,
+      "net_profit_pct": 2.52
+    },
+    {
+      "timestamp": 1774929572,
+      "profit_pct": 9.0,
+      "net_profit_pct": 2.52
+    },
+    {
+      "timestamp": 1774933785,
+      "profit_pct": 9.0,
+      "net_profit_pct": 2.52
+    },
+    {
+      "timestamp": 1774933850,
+      "profit_pct": 9.0,
+      "net_profit_pct": 2.52
+    },
+    {
+      "timestamp": 1774943954,
+      "profit_pct": 9.0,
+      "net_profit_pct": 2.52
+    },
+    {
+      "timestamp": 1774944236,
+      "profit_pct": 9.0,
+      "net_profit_pct": 2.52
+    },
+    {
+      "timestamp": 1774944339,
+      "profit_pct": 9.0,
+      "net_profit_pct": 2.52
+    },
+    {
+      "timestamp": 1774952918,
+      "profit_pct": 9.0,
+      "net_profit_pct": 2.52
+    },
+    {
+      "timestamp": 1774954124,
+      "profit_pct": 9.0,
+      "net_profit_pct": 2.52
+    },
+    {
+      "timestamp": 1774960190,
+      "profit_pct": 9.0,
+      "net_profit_pct": 2.52
+    }
+  ],
+  "auto-68b7bbc5b4d1": [
+    {
+      "timestamp": 1774645716,
+      "profit_pct": 42.0,
+      "net_profit_pct": 32.9
+    },
+    {
+      "timestamp": 1774645988,
+      "profit_pct": 42.0,
+      "net_profit_pct": 32.9
+    },
+    {
+      "timestamp": 1774649440,
+      "profit_pct": 25.0,
+      "net_profit_pct": 15.73
+    },
+    {
+      "timestamp": 1774736338,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774736887,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774780919,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774831371,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774854238,
+      "profit_pct": 16.0,
+      "net_profit_pct": 6.54
+    },
+    {
+      "timestamp": 1774856619,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774859953,
+      "profit_pct": 33.0,
+      "net_profit_pct": 23.71
+    },
+    {
+      "timestamp": 1774874908,
+      "profit_pct": 33.0,
+      "net_profit_pct": 23.71
+    },
+    {
+      "timestamp": 1774876354,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    }
+  ],
+  "auto-21b010a95609": [
+    {
+      "timestamp": 1774645716,
+      "profit_pct": 11.0,
+      "net_profit_pct": 4.01
+    },
+    {
+      "timestamp": 1774646393,
+      "profit_pct": 11.0,
+      "net_profit_pct": 4.01
+    },
+    {
+      "timestamp": 1774646825,
+      "profit_pct": 11.0,
+      "net_profit_pct": 4.01
+    },
+    {
+      "timestamp": 1774731814,
+      "profit_pct": 11.0,
+      "net_profit_pct": 4.01
+    },
+    {
+      "timestamp": 1774738467,
+      "profit_pct": 11.0,
+      "net_profit_pct": 4.01
+    },
+    {
+      "timestamp": 1774763371,
+      "profit_pct": 11.0,
+      "net_profit_pct": 4.01
+    },
+    {
+      "timestamp": 1774814182,
+      "profit_pct": 12.5,
+      "net_profit_pct": 12.41
+    },
+    {
+      "timestamp": 1774814396,
+      "profit_pct": 12.5,
+      "net_profit_pct": 12.41
+    },
+    {
+      "timestamp": 1774817556,
+      "profit_pct": 12.5,
+      "net_profit_pct": 12.41
+    },
+    {
+      "timestamp": 1774832940,
+      "profit_pct": 12.5,
+      "net_profit_pct": 12.41
+    },
+    {
+      "timestamp": 1774833785,
+      "profit_pct": 12.5,
+      "net_profit_pct": 12.41
+    },
+    {
+      "timestamp": 1774858188,
+      "profit_pct": 12.5,
+      "net_profit_pct": 12.41
+    },
+    {
+      "timestamp": 1774869452,
+      "profit_pct": 12.5,
+      "net_profit_pct": 12.41
+    },
+    {
+      "timestamp": 1774934308,
+      "profit_pct": 12.5,
+      "net_profit_pct": 12.41
+    },
+    {
+      "timestamp": 1774940431,
+      "profit_pct": 12.5,
+      "net_profit_pct": 12.41
+    },
+    {
+      "timestamp": 1774940876,
+      "profit_pct": 12.5,
+      "net_profit_pct": 12.41
+    },
+    {
+      "timestamp": 1774941270,
+      "profit_pct": 12.5,
+      "net_profit_pct": 12.41
+    },
+    {
+      "timestamp": 1774943104,
+      "profit_pct": 12.5,
+      "net_profit_pct": 12.41
+    },
+    {
+      "timestamp": 1774943953,
+      "profit_pct": 12.5,
+      "net_profit_pct": 12.41
+    },
+    {
+      "timestamp": 1774948455,
+      "profit_pct": 12.5,
+      "net_profit_pct": 12.41
+    },
+    {
+      "timestamp": 1774950776,
+      "profit_pct": 12.5,
+      "net_profit_pct": 12.41
+    },
+    {
+      "timestamp": 1774951045,
+      "profit_pct": 12.5,
+      "net_profit_pct": 12.41
+    }
+  ],
+  "auto-7a02afdf83de": [
+    {
+      "timestamp": 1774645850,
+      "profit_pct": 36.0,
+      "net_profit_pct": 20.96
+    },
+    {
+      "timestamp": 1774647555,
+      "profit_pct": 36.0,
+      "net_profit_pct": 20.96
+    },
+    {
+      "timestamp": 1774738467,
+      "profit_pct": 36.0,
+      "net_profit_pct": 20.96
+    },
+    {
+      "timestamp": 1774756396,
+      "profit_pct": 36.0,
+      "net_profit_pct": 20.96
+    },
+    {
+      "timestamp": 1774764512,
+      "profit_pct": 36.0,
+      "net_profit_pct": 20.96
+    },
+    {
+      "timestamp": 1774813579,
+      "profit_pct": 36.0,
+      "net_profit_pct": 20.96
+    },
+    {
+      "timestamp": 1774819775,
+      "profit_pct": 36.0,
+      "net_profit_pct": 20.96
+    },
+    {
+      "timestamp": 1774822257,
+      "profit_pct": 36.0,
+      "net_profit_pct": 20.96
+    },
+    {
+      "timestamp": 1774833785,
+      "profit_pct": 36.0,
+      "net_profit_pct": 20.96
+    },
+    {
+      "timestamp": 1774859953,
+      "profit_pct": 36.0,
+      "net_profit_pct": 20.96
+    },
+    {
+      "timestamp": 1774862125,
+      "profit_pct": 36.0,
+      "net_profit_pct": 20.96
+    },
+    {
+      "timestamp": 1774893788,
+      "profit_pct": 36.0,
+      "net_profit_pct": 20.96
+    },
+    {
+      "timestamp": 1774944449,
+      "profit_pct": 36.0,
+      "net_profit_pct": 20.96
+    },
+    {
+      "timestamp": 1774948872,
+      "profit_pct": 36.0,
+      "net_profit_pct": 20.96
+    },
+    {
+      "timestamp": 1774954738,
+      "profit_pct": 36.0,
+      "net_profit_pct": 20.96
+    }
+  ],
+  "auto-619a0c9662d8": [
+    {
+      "timestamp": 1774646393,
+      "profit_pct": 19.0,
+      "net_profit_pct": 11.88
+    },
+    {
+      "timestamp": 1774649812,
+      "profit_pct": 19.0,
+      "net_profit_pct": 11.88
+    },
+    {
+      "timestamp": 1774732456,
+      "profit_pct": 25.0,
+      "net_profit_pct": 17.31
+    },
+    {
+      "timestamp": 1774766705,
+      "profit_pct": 26.0,
+      "net_profit_pct": 18.21
+    },
+    {
+      "timestamp": 1774771926,
+      "profit_pct": 26.0,
+      "net_profit_pct": 18.21
+    },
+    {
+      "timestamp": 1774779929,
+      "profit_pct": 26.0,
+      "net_profit_pct": 18.21
+    },
+    {
+      "timestamp": 1774814182,
+      "profit_pct": 17.0,
+      "net_profit_pct": 10.07
+    },
+    {
+      "timestamp": 1774815543,
+      "profit_pct": 17.0,
+      "net_profit_pct": 10.07
+    },
+    {
+      "timestamp": 1774817361,
+      "profit_pct": 17.0,
+      "net_profit_pct": 10.07
+    },
+    {
+      "timestamp": 1774823445,
+      "profit_pct": 17.0,
+      "net_profit_pct": 10.07
+    },
+    {
+      "timestamp": 1774827342,
+      "profit_pct": 17.0,
+      "net_profit_pct": 10.07
+    },
+    {
+      "timestamp": 1774832940,
+      "profit_pct": 17.0,
+      "net_profit_pct": 10.07
+    },
+    {
+      "timestamp": 1774833363,
+      "profit_pct": 17.0,
+      "net_profit_pct": 10.07
+    },
+    {
+      "timestamp": 1774863665,
+      "profit_pct": 21.0,
+      "net_profit_pct": 13.69
+    },
+    {
+      "timestamp": 1774870590,
+      "profit_pct": 21.0,
+      "net_profit_pct": 13.69
+    },
+    {
+      "timestamp": 1774870973,
+      "profit_pct": 21.0,
+      "net_profit_pct": 13.69
+    },
+    {
+      "timestamp": 1774872218,
+      "profit_pct": 21.0,
+      "net_profit_pct": 13.69
+    },
+    {
+      "timestamp": 1774940782,
+      "profit_pct": 42.0,
+      "net_profit_pct": 32.69
+    },
+    {
+      "timestamp": 1774943864,
+      "profit_pct": 42.0,
+      "net_profit_pct": 32.69
+    },
+    {
+      "timestamp": 1774945227,
+      "profit_pct": 42.0,
+      "net_profit_pct": 32.69
+    },
+    {
+      "timestamp": 1774952344,
+      "profit_pct": 42.0,
+      "net_profit_pct": 32.69
+    },
+    {
+      "timestamp": 1774956310,
+      "profit_pct": 42.0,
+      "net_profit_pct": 32.69
+    },
+    {
+      "timestamp": 1774958700,
+      "profit_pct": 42.0,
+      "net_profit_pct": 32.69
+    },
+    {
+      "timestamp": 1774960190,
+      "profit_pct": 42.0,
+      "net_profit_pct": 32.69
+    }
+  ],
+  "auto-6363e72c8897": [
+    {
+      "timestamp": 1774646825,
+      "profit_pct": 22.0,
+      "net_profit_pct": 12.71
+    },
+    {
+      "timestamp": 1774646959,
+      "profit_pct": 22.0,
+      "net_profit_pct": 12.71
+    },
+    {
+      "timestamp": 1774649621,
+      "profit_pct": 22.0,
+      "net_profit_pct": 12.71
+    },
+    {
+      "timestamp": 1774818309,
+      "profit_pct": 21.0,
+      "net_profit_pct": 11.8
+    },
+    {
+      "timestamp": 1774828799,
+      "profit_pct": 21.0,
+      "net_profit_pct": 11.8
+    },
+    {
+      "timestamp": 1774832537,
+      "profit_pct": 20.0,
+      "net_profit_pct": 10.79
+    },
+    {
+      "timestamp": 1774860889,
+      "profit_pct": 19.0,
+      "net_profit_pct": 9.88
+    },
+    {
+      "timestamp": 1774874442,
+      "profit_pct": 19.0,
+      "net_profit_pct": 9.88
+    },
+    {
+      "timestamp": 1774889797,
+      "profit_pct": 19.0,
+      "net_profit_pct": 9.88
+    },
+    {
+      "timestamp": 1774940515,
+      "profit_pct": 22.0,
+      "net_profit_pct": 12.6
+    },
+    {
+      "timestamp": 1774943169,
+      "profit_pct": 19.0,
+      "net_profit_pct": 9.88
+    },
+    {
+      "timestamp": 1774944900,
+      "profit_pct": 19.0,
+      "net_profit_pct": 9.88
+    },
+    {
+      "timestamp": 1774945938,
+      "profit_pct": 19.0,
+      "net_profit_pct": 9.88
+    },
+    {
+      "timestamp": 1774948222,
+      "profit_pct": 19.0,
+      "net_profit_pct": 9.88
+    },
+    {
+      "timestamp": 1774959436,
+      "profit_pct": 19.0,
+      "net_profit_pct": 9.88
+    }
+  ],
+  "auto-afe45ecabe9f": [
+    {
+      "timestamp": 1774648194,
+      "profit_pct": 28.0,
+      "net_profit_pct": 12.89
+    },
+    {
+      "timestamp": 1774856619,
+      "profit_pct": 29.0,
+      "net_profit_pct": 13.9
+    },
+    {
+      "timestamp": 1774868006,
+      "profit_pct": 29.0,
+      "net_profit_pct": 13.9
+    },
+    {
+      "timestamp": 1774946243,
+      "profit_pct": 27.0,
+      "net_profit_pct": 11.88
+    },
+    {
+      "timestamp": 1774946744,
+      "profit_pct": 27.0,
+      "net_profit_pct": 11.88
+    }
+  ],
+  "auto-dd40175d5414": [
+    {
+      "timestamp": 1774649812,
+      "profit_pct": 16.0,
+      "net_profit_pct": 2.55
+    },
+    {
+      "timestamp": 1774781866,
+      "profit_pct": 14.0,
+      "net_profit_pct": 0.53
+    },
+    {
+      "timestamp": 1774819092,
+      "profit_pct": 14.0,
+      "net_profit_pct": 0.53
+    },
+    {
+      "timestamp": 1774946410,
+      "profit_pct": 16.0,
+      "net_profit_pct": 2.34
+    }
+  ],
+  "auto-5e511d4c000b": [
+    {
+      "timestamp": 1774730164,
+      "profit_pct": 9.35,
+      "net_profit_pct": 8.45
+    }
+  ],
+  "auto-ae6470a953b1": [
+    {
+      "timestamp": 1774730584,
+      "profit_pct": 41.95,
+      "net_profit_pct": 32.87
+    },
+    {
+      "timestamp": 1774731008,
+      "profit_pct": 41.9,
+      "net_profit_pct": 32.81
+    },
+    {
+      "timestamp": 1774731393,
+      "profit_pct": 41.9,
+      "net_profit_pct": 32.81
+    },
+    {
+      "timestamp": 1774731814,
+      "profit_pct": 41.9,
+      "net_profit_pct": 32.81
+    },
+    {
+      "timestamp": 1774732456,
+      "profit_pct": 41.9,
+      "net_profit_pct": 32.81
+    },
+    {
+      "timestamp": 1774733057,
+      "profit_pct": 41.9,
+      "net_profit_pct": 32.81
+    },
+    {
+      "timestamp": 1774733502,
+      "profit_pct": 41.95,
+      "net_profit_pct": 32.87
+    },
+    {
+      "timestamp": 1774733958,
+      "profit_pct": 41.9,
+      "net_profit_pct": 32.81
+    },
+    {
+      "timestamp": 1774734434,
+      "profit_pct": 41.95,
+      "net_profit_pct": 32.87
+    },
+    {
+      "timestamp": 1774734899,
+      "profit_pct": 41.95,
+      "net_profit_pct": 32.87
+    },
+    {
+      "timestamp": 1774735381,
+      "profit_pct": 42.0,
+      "net_profit_pct": 32.91
+    },
+    {
+      "timestamp": 1774735838,
+      "profit_pct": 42.0,
+      "net_profit_pct": 32.91
+    },
+    {
+      "timestamp": 1774736338,
+      "profit_pct": 42.0,
+      "net_profit_pct": 32.91
+    },
+    {
+      "timestamp": 1774736887,
+      "profit_pct": 42.0,
+      "net_profit_pct": 32.91
+    },
+    {
+      "timestamp": 1774737452,
+      "profit_pct": 42.0,
+      "net_profit_pct": 32.91
+    },
+    {
+      "timestamp": 1774738467,
+      "profit_pct": 42.0,
+      "net_profit_pct": 32.91
+    },
+    {
+      "timestamp": 1774739926,
+      "profit_pct": 42.0,
+      "net_profit_pct": 32.91
+    },
+    {
+      "timestamp": 1774740512,
+      "profit_pct": 42.0,
+      "net_profit_pct": 32.91
+    },
+    {
+      "timestamp": 1774741062,
+      "profit_pct": 42.0,
+      "net_profit_pct": 32.91
+    },
+    {
+      "timestamp": 1774741615,
+      "profit_pct": 42.0,
+      "net_profit_pct": 32.91
+    },
+    {
+      "timestamp": 1774742182,
+      "profit_pct": 42.0,
+      "net_profit_pct": 32.91
+    },
+    {
+      "timestamp": 1774742991,
+      "profit_pct": 42.0,
+      "net_profit_pct": 32.91
+    },
+    {
+      "timestamp": 1774743469,
+      "profit_pct": 42.0,
+      "net_profit_pct": 32.91
+    },
+    {
+      "timestamp": 1774743725,
+      "profit_pct": 42.0,
+      "net_profit_pct": 32.91
+    },
+    {
+      "timestamp": 1774743998,
+      "profit_pct": 42.0,
+      "net_profit_pct": 32.91
+    },
+    {
+      "timestamp": 1774744306,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774744625,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774744914,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774745476,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774746030,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774746479,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774747458,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774748765,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774749821,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774750233,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774750676,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774751520,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774753180,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774753569,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774754073,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774754570,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774754928,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774755549,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774756396,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774757400,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774758369,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774759332,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774760261,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774761308,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774762430,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774763371,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774764512,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774765688,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774766705,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774767672,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774768723,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774769895,
+      "profit_pct": 41.0,
+      "net_profit_pct": 32.01
+    },
+    {
+      "timestamp": 1774770397,
+      "profit_pct": 41.05,
+      "net_profit_pct": 32.06
+    },
+    {
+      "timestamp": 1774770896,
+      "profit_pct": 41.05,
+      "net_profit_pct": 32.06
+    },
+    {
+      "timestamp": 1774771926,
+      "profit_pct": 41.05,
+      "net_profit_pct": 32.06
+    },
+    {
+      "timestamp": 1774773976,
+      "profit_pct": 41.1,
+      "net_profit_pct": 32.11
+    },
+    {
+      "timestamp": 1774775437,
+      "profit_pct": 41.1,
+      "net_profit_pct": 32.11
+    },
+    {
+      "timestamp": 1774779454,
+      "profit_pct": 41.05,
+      "net_profit_pct": 32.06
+    },
+    {
+      "timestamp": 1774779929,
+      "profit_pct": 41.05,
+      "net_profit_pct": 32.06
+    },
+    {
+      "timestamp": 1774780384,
+      "profit_pct": 41.05,
+      "net_profit_pct": 32.06
+    },
+    {
+      "timestamp": 1774780919,
+      "profit_pct": 41.05,
+      "net_profit_pct": 32.06
+    },
+    {
+      "timestamp": 1774781378,
+      "profit_pct": 41.05,
+      "net_profit_pct": 32.06
+    },
+    {
+      "timestamp": 1774781866,
+      "profit_pct": 41.05,
+      "net_profit_pct": 32.06
+    },
+    {
+      "timestamp": 1774782333,
+      "profit_pct": 41.05,
+      "net_profit_pct": 32.06
+    },
+    {
+      "timestamp": 1774782802,
+      "profit_pct": 41.05,
+      "net_profit_pct": 32.06
+    }
+  ],
+  "auto-c412dde1991d": [
+    {
+      "timestamp": 1774730584,
+      "profit_pct": 34.0,
+      "net_profit_pct": 19.36
+    },
+    {
+      "timestamp": 1774731008,
+      "profit_pct": 34.0,
+      "net_profit_pct": 19.36
+    },
+    {
+      "timestamp": 1774731393,
+      "profit_pct": 34.0,
+      "net_profit_pct": 19.36
+    },
+    {
+      "timestamp": 1774731814,
+      "profit_pct": 34.0,
+      "net_profit_pct": 19.36
+    }
+  ],
+  "auto-d6a299ea4645": [
+    {
+      "timestamp": 1774731393,
+      "profit_pct": 13.0,
+      "net_profit_pct": 6.35
+    },
+    {
+      "timestamp": 1774815806,
+      "profit_pct": 13.0,
+      "net_profit_pct": 6.35
+    },
+    {
+      "timestamp": 1774822626,
+      "profit_pct": 13.0,
+      "net_profit_pct": 6.35
+    },
+    {
+      "timestamp": 1774832152,
+      "profit_pct": 13.0,
+      "net_profit_pct": 6.35
+    },
+    {
+      "timestamp": 1774940347,
+      "profit_pct": 13.0,
+      "net_profit_pct": 6.35
+    },
+    {
+      "timestamp": 1774943553,
+      "profit_pct": 13.0,
+      "net_profit_pct": 6.35
+    },
+    {
+      "timestamp": 1774944339,
+      "profit_pct": 13.0,
+      "net_profit_pct": 6.35
+    },
+    {
+      "timestamp": 1774944994,
+      "profit_pct": 13.0,
+      "net_profit_pct": 6.35
+    },
+    {
+      "timestamp": 1774955363,
+      "profit_pct": 13.0,
+      "net_profit_pct": 6.35
+    }
+  ],
+  "auto-2d417609d869": [
+    {
+      "timestamp": 1774732456,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774753569,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774754073,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774754570,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774824261,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774824957,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774833785,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774866972,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774893788,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    }
+  ],
+  "auto-148163b39dc9": [
+    {
+      "timestamp": 1774732456,
+      "profit_pct": 38.85,
+      "net_profit_pct": 38.24
+    },
+    {
+      "timestamp": 1774733057,
+      "profit_pct": 38.85,
+      "net_profit_pct": 38.24
+    },
+    {
+      "timestamp": 1774733502,
+      "profit_pct": 38.85,
+      "net_profit_pct": 38.24
+    },
+    {
+      "timestamp": 1774733958,
+      "profit_pct": 38.85,
+      "net_profit_pct": 38.24
+    },
+    {
+      "timestamp": 1774734434,
+      "profit_pct": 38.85,
+      "net_profit_pct": 38.24
+    },
+    {
+      "timestamp": 1774735838,
+      "profit_pct": 14.85,
+      "net_profit_pct": 14.0
+    },
+    {
+      "timestamp": 1774736338,
+      "profit_pct": 14.85,
+      "net_profit_pct": 14.0
+    }
+  ],
+  "auto-b1901433c830": [
+    {
+      "timestamp": 1774734434,
+      "profit_pct": 30.0,
+      "net_profit_pct": 15.64
+    },
+    {
+      "timestamp": 1774735381,
+      "profit_pct": 30.0,
+      "net_profit_pct": 15.64
+    },
+    {
+      "timestamp": 1774781866,
+      "profit_pct": 30.0,
+      "net_profit_pct": 15.64
+    },
+    {
+      "timestamp": 1774813579,
+      "profit_pct": 30.0,
+      "net_profit_pct": 15.64
+    },
+    {
+      "timestamp": 1774819092,
+      "profit_pct": 30.0,
+      "net_profit_pct": 15.64
+    },
+    {
+      "timestamp": 1774873992,
+      "profit_pct": 31.0,
+      "net_profit_pct": 16.65
+    },
+    {
+      "timestamp": 1774926745,
+      "profit_pct": 30.0,
+      "net_profit_pct": 15.64
+    },
+    {
+      "timestamp": 1774940876,
+      "profit_pct": 30.0,
+      "net_profit_pct": 15.64
+    }
+  ],
+  "auto-744c8460c6d1": [
+    {
+      "timestamp": 1774735838,
+      "profit_pct": 19.0,
+      "net_profit_pct": 11.98
+    },
+    {
+      "timestamp": 1774761308,
+      "profit_pct": 19.0,
+      "net_profit_pct": 11.98
+    },
+    {
+      "timestamp": 1774763371,
+      "profit_pct": 19.0,
+      "net_profit_pct": 11.98
+    },
+    {
+      "timestamp": 1774854238,
+      "profit_pct": 19.0,
+      "net_profit_pct": 11.98
+    },
+    {
+      "timestamp": 1774874908,
+      "profit_pct": 19.0,
+      "net_profit_pct": 11.98
+    },
+    {
+      "timestamp": 1774877365,
+      "profit_pct": 19.0,
+      "net_profit_pct": 11.98
+    },
+    {
+      "timestamp": 1774940603,
+      "profit_pct": 16.0,
+      "net_profit_pct": 9.06
+    },
+    {
+      "timestamp": 1774943293,
+      "profit_pct": 16.0,
+      "net_profit_pct": 9.06
+    }
+  ],
+  "auto-434070dc2919": [
+    {
+      "timestamp": 1774735838,
+      "profit_pct": 8.0,
+      "net_profit_pct": 2.03
+    },
+    {
+      "timestamp": 1774757400,
+      "profit_pct": 8.0,
+      "net_profit_pct": 2.03
+    },
+    {
+      "timestamp": 1774761308,
+      "profit_pct": 8.0,
+      "net_profit_pct": 2.03
+    },
+    {
+      "timestamp": 1774827934,
+      "profit_pct": 8.0,
+      "net_profit_pct": 2.03
+    },
+    {
+      "timestamp": 1774833363,
+      "profit_pct": 8.0,
+      "net_profit_pct": 2.03
+    },
+    {
+      "timestamp": 1774857277,
+      "profit_pct": 8.0,
+      "net_profit_pct": 2.03
+    },
+    {
+      "timestamp": 1774940603,
+      "profit_pct": 9.0,
+      "net_profit_pct": 2.93
+    },
+    {
+      "timestamp": 1774945499,
+      "profit_pct": 9.0,
+      "net_profit_pct": 2.93
+    }
+  ],
+  "auto-13573f6fccef": [
+    {
+      "timestamp": 1774739353,
+      "profit_pct": 26.0,
+      "net_profit_pct": 11.69
+    },
+    {
+      "timestamp": 1774813579,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774814395,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774815016,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774817182,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774817759,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774819092,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774933734,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774940431,
+      "profit_pct": 42.1,
+      "net_profit_pct": 32.92
+    },
+    {
+      "timestamp": 1774941270,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774941741,
+      "profit_pct": 42.25,
+      "net_profit_pct": 33.07
+    },
+    {
+      "timestamp": 1774943484,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774943953,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774944994,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774947828,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774949096,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774950776,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774952918,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774955056,
+      "profit_pct": 43.25,
+      "net_profit_pct": 34.07
+    },
+    {
+      "timestamp": 1774955363,
+      "profit_pct": 43.35,
+      "net_profit_pct": 34.17
+    },
+    {
+      "timestamp": 1774957993,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774958346,
+      "profit_pct": 39.5,
+      "net_profit_pct": 30.32
+    }
+  ],
+  "auto-3d45afaf1d6c": [
+    {
+      "timestamp": 1774740512,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774781378,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774782333,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774815924,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774934001,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774941379,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774941981,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    },
+    {
+      "timestamp": 1774953196,
+      "profit_pct": 30.0,
+      "net_profit_pct": 20.68
+    },
+    {
+      "timestamp": 1774962684,
+      "profit_pct": 43.0,
+      "net_profit_pct": 33.81
+    }
+  ],
+  "auto-29562d28a4de": [
+    {
+      "timestamp": 1774744306,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774744625,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774744914,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774745476,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774746030,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774746480,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774747458,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774748765,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774749821,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774750233,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774750677,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774751520,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774753180,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774753569,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774754073,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774754570,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774754928,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774755549,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774756396,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774757400,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774758369,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774759332,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774760261,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774761308,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774762430,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774763371,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774764512,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774765688,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774766705,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774767672,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774768723,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774769895,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774770397,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774770896,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774771926,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774773976,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774775437,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774779454,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774779929,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774780384,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774780919,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774781378,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774781866,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774782333,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774782802,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774813579,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774813801,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774813991,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774814081,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774814182,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774814279,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774814396,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774814510,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774814616,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774814829,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774815016,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774815386,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774815543,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774815676,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774815806,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774815924,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774816051,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774816187,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774816323,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774816579,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774816835,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774817005,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774817182,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774817361,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774817556,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774817759,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774818004,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774818309,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774818761,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774819092,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774819275,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774819465,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774819775,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774820025,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774820423,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774820778,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774821081,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774821417,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774821860,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774822257,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774822626,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774822915,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774823445,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774824261,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774824957,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774825398,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774825752,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774826196,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774826792,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774827342,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774827934,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774828417,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774828799,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774829158,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774829505,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774829859,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774830216,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774830581,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774830976,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774831371,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774831770,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774832152,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774832537,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774832940,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774833363,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774833785,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774834207,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774834644,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774835259,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774854238,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774854635,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774855425,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774856619,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774857277,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774858188,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774859394,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774859953,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774860468,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774860889,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774861318,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774861733,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774862125,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774862644,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774863192,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774863665,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774864004,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774864349,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774864655,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774864974,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774865301,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774865625,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774865955,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774866288,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774866628,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774866972,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774867311,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774867652,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774868006,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774868389,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774868735,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774869091,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774869452,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774869821,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774870202,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774870590,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774870973,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774871356,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774871787,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774872218,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774872654,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774873093,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774873542,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774873992,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774874442,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774874908,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774875376,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774875844,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774876354,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774876854,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774877365,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774877882,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774878364,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774878840,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774879344,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774879876,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774880404,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774880909,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774881413,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774889797,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774891343,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774893266,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774893788,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774894322,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774894837,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774895464,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774896123,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774921285,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774924139,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774926745,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774928587,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774929572,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774933734,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774933785,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774933849,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774933925,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774934001,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774934094,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774934198,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774934308,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774934414,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774940165,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774940270,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774940347,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774940431,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774940515,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774940603,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774940691,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774940782,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774940876,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774941270,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774941379,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774941499,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774941623,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774941741,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774941860,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774941981,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774942109,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774942240,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774942373,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774942509,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774942650,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774942794,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774942971,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774943035,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774943104,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774943169,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774943229,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774943293,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774943355,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774943421,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774943484,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774943553,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774943624,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774943702,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774943781,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774943864,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774943953,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774944043,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774944141,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774944236,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774944339,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774944449,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774944557,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774944668,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774944790,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774944900,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774944994,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774945099,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774945227,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774945354,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774945499,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774945645,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774945792,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774945938,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774946087,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774946243,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774946410,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774946577,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774946744,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774946916,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774947092,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774947278,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774947457,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774947642,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774947828,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774948023,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774948222,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774948455,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774948661,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774948872,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774949096,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774949314,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774949560,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774949791,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774950024,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774950260,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774950505,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774950776,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774951045,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774951302,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774951560,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774951830,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774952092,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774952344,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774952621,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774952918,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774953196,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774953515,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774953820,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774954124,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774954435,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774954738,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774955056,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774955363,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774955669,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774955987,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774956310,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774956641,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774956974,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774957313,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774957645,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774957993,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774958346,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774958700,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774959063,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774959436,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774959813,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774960190,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774960635,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774961061,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774961443,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774961830,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774962241,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    },
+    {
+      "timestamp": 1774962684,
+      "profit_pct": 36.95,
+      "net_profit_pct": 28.43
+    }
+  ],
+  "auto-83296f189c42": [
+    {
+      "timestamp": 1774756396,
+      "profit_pct": 32.0,
+      "net_profit_pct": 18.82
+    },
+    {
+      "timestamp": 1774769895,
+      "profit_pct": 32.0,
+      "net_profit_pct": 18.82
+    },
+    {
+      "timestamp": 1774815924,
+      "profit_pct": 32.0,
+      "net_profit_pct": 18.82
+    },
+    {
+      "timestamp": 1774830216,
+      "profit_pct": 32.0,
+      "net_profit_pct": 18.82
+    },
+    {
+      "timestamp": 1774873992,
+      "profit_pct": 33.0,
+      "net_profit_pct": 19.83
+    },
+    {
+      "timestamp": 1774891343,
+      "profit_pct": 33.0,
+      "net_profit_pct": 19.83
+    },
+    {
+      "timestamp": 1774893266,
+      "profit_pct": 33.0,
+      "net_profit_pct": 19.83
+    },
+    {
+      "timestamp": 1774934001,
+      "profit_pct": 33.0,
+      "net_profit_pct": 19.83
+    },
+    {
+      "timestamp": 1774941741,
+      "profit_pct": 33.0,
+      "net_profit_pct": 19.83
+    },
+    {
+      "timestamp": 1774942109,
+      "profit_pct": 33.0,
+      "net_profit_pct": 19.83
+    },
+    {
+      "timestamp": 1774950505,
+      "profit_pct": 33.0,
+      "net_profit_pct": 19.83
+    },
+    {
+      "timestamp": 1774953196,
+      "profit_pct": 33.0,
+      "net_profit_pct": 19.83
+    },
+    {
+      "timestamp": 1774957313,
+      "profit_pct": 33.0,
+      "net_profit_pct": 19.83
+    },
+    {
+      "timestamp": 1774960635,
+      "profit_pct": 33.0,
+      "net_profit_pct": 19.83
+    },
+    {
+      "timestamp": 1774962684,
+      "profit_pct": 33.0,
+      "net_profit_pct": 19.83
+    }
+  ],
+  "auto-c49cdf9b5e3e": [
+    {
+      "timestamp": 1774757400,
+      "profit_pct": 29.0,
+      "net_profit_pct": 19.98
+    },
+    {
+      "timestamp": 1774779454,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774779929,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774780384,
+      "profit_pct": 39.95,
+      "net_profit_pct": 31.05
+    },
+    {
+      "timestamp": 1774780919,
+      "profit_pct": 39.95,
+      "net_profit_pct": 31.05
+    },
+    {
+      "timestamp": 1774781378,
+      "profit_pct": 40.25,
+      "net_profit_pct": 31.36
+    },
+    {
+      "timestamp": 1774781866,
+      "profit_pct": 39.95,
+      "net_profit_pct": 31.05
+    },
+    {
+      "timestamp": 1774782333,
+      "profit_pct": 40.15,
+      "net_profit_pct": 31.25
+    },
+    {
+      "timestamp": 1774782802,
+      "profit_pct": 40.15,
+      "net_profit_pct": 31.25
+    },
+    {
+      "timestamp": 1774813579,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774813801,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774813991,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774814081,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774814182,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774814278,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774814395,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774814510,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774814616,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774814829,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774815016,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774815386,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774815543,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774815676,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774815806,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774815924,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774816051,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774816187,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774816323,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774816579,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774816835,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774817005,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774817182,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774817361,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774817556,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774817759,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774818004,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774818309,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774818760,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774819092,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774819275,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774819464,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774819775,
+      "profit_pct": 40.2,
+      "net_profit_pct": 31.3
+    },
+    {
+      "timestamp": 1774827934,
+      "profit_pct": 25.0,
+      "net_profit_pct": 15.94
+    },
+    {
+      "timestamp": 1774831770,
+      "profit_pct": 25.0,
+      "net_profit_pct": 15.94
+    },
+    {
+      "timestamp": 1774855425,
+      "profit_pct": 27.0,
+      "net_profit_pct": 17.96
+    },
+    {
+      "timestamp": 1774874908,
+      "profit_pct": 27.0,
+      "net_profit_pct": 17.96
+    }
+  ],
+  "auto-f5dac406ab6f": [
+    {
+      "timestamp": 1774758369,
+      "profit_pct": 25.85,
+      "net_profit_pct": 33.87
+    },
+    {
+      "timestamp": 1774759332,
+      "profit_pct": 25.35,
+      "net_profit_pct": 32.98
+    },
+    {
+      "timestamp": 1774760261,
+      "profit_pct": 26.35,
+      "net_profit_pct": 34.77
+    },
+    {
+      "timestamp": 1774761308,
+      "profit_pct": 26.35,
+      "net_profit_pct": 34.77
+    },
+    {
+      "timestamp": 1774762430,
+      "profit_pct": 26.35,
+      "net_profit_pct": 34.77
+    },
+    {
+      "timestamp": 1774763371,
+      "profit_pct": 26.35,
+      "net_profit_pct": 34.77
+    },
+    {
+      "timestamp": 1774764512,
+      "profit_pct": 26.35,
+      "net_profit_pct": 34.77
+    },
+    {
+      "timestamp": 1774765688,
+      "profit_pct": 26.35,
+      "net_profit_pct": 34.77
+    },
+    {
+      "timestamp": 1774766705,
+      "profit_pct": 26.35,
+      "net_profit_pct": 34.77
+    },
+    {
+      "timestamp": 1774767672,
+      "profit_pct": 26.35,
+      "net_profit_pct": 34.77
+    },
+    {
+      "timestamp": 1774768723,
+      "profit_pct": 26.35,
+      "net_profit_pct": 34.77
+    },
+    {
+      "timestamp": 1774769895,
+      "profit_pct": 26.35,
+      "net_profit_pct": 34.77
+    },
+    {
+      "timestamp": 1774770397,
+      "profit_pct": 26.35,
+      "net_profit_pct": 34.77
+    },
+    {
+      "timestamp": 1774770896,
+      "profit_pct": 26.35,
+      "net_profit_pct": 34.77
+    },
+    {
+      "timestamp": 1774771926,
+      "profit_pct": 26.35,
+      "net_profit_pct": 34.77
+    },
+    {
+      "timestamp": 1774773976,
+      "profit_pct": 26.35,
+      "net_profit_pct": 34.77
+    },
+    {
+      "timestamp": 1774775437,
+      "profit_pct": 26.35,
+      "net_profit_pct": 34.77
+    },
+    {
+      "timestamp": 1774779454,
+      "profit_pct": 26.35,
+      "net_profit_pct": 34.77
+    },
+    {
+      "timestamp": 1774779929,
+      "profit_pct": 26.35,
+      "net_profit_pct": 34.77
+    },
+    {
+      "timestamp": 1774780384,
+      "profit_pct": 26.35,
+      "net_profit_pct": 34.77
+    },
+    {
+      "timestamp": 1774780919,
+      "profit_pct": 26.35,
+      "net_profit_pct": 34.77
+    },
+    {
+      "timestamp": 1774781378,
+      "profit_pct": 26.35,
+      "net_profit_pct": 34.77
+    },
+    {
+      "timestamp": 1774781866,
+      "profit_pct": 26.35,
+      "net_profit_pct": 34.77
+    },
+    {
+      "timestamp": 1774782333,
+      "profit_pct": 26.35,
+      "net_profit_pct": 34.77
+    },
+    {
+      "timestamp": 1774782802,
+      "profit_pct": 26.35,
+      "net_profit_pct": 34.77
+    }
+  ],
+  "auto-9755183b6415": [
+    {
+      "timestamp": 1774761308,
+      "profit_pct": 27.0,
+      "net_profit_pct": 19.33
+    },
+    {
+      "timestamp": 1774816835,
+      "profit_pct": 26.0,
+      "net_profit_pct": 18.42
+    },
+    {
+      "timestamp": 1774857277,
+      "profit_pct": 26.0,
+      "net_profit_pct": 18.42
+    },
+    {
+      "timestamp": 1774944043,
+      "profit_pct": 26.0,
+      "net_profit_pct": 18.42
+    },
+    {
+      "timestamp": 1774944994,
+      "profit_pct": 26.0,
+      "net_profit_pct": 18.42
+    }
+  ],
+  "auto-1dbb741e2b7b": [
+    {
+      "timestamp": 1774763371,
+      "profit_pct": 22.74,
+      "net_profit_pct": 14.3
+    }
+  ],
+  "auto-803154fea7d7": [
+    {
+      "timestamp": 1774768723,
+      "profit_pct": 8.85,
+      "net_profit_pct": 7.95
+    },
+    {
+      "timestamp": 1774769895,
+      "profit_pct": 8.8,
+      "net_profit_pct": 7.9
+    },
+    {
+      "timestamp": 1774770397,
+      "profit_pct": 8.85,
+      "net_profit_pct": 7.95
+    }
+  ],
+  "auto-fbd749473663": [
+    {
+      "timestamp": 1774768723,
+      "profit_pct": 8.65,
+      "net_profit_pct": 2.79
+    },
+    {
+      "timestamp": 1774769895,
+      "profit_pct": 8.65,
+      "net_profit_pct": 2.79
+    },
+    {
+      "timestamp": 1774770397,
+      "profit_pct": 8.65,
+      "net_profit_pct": 2.79
+    },
+    {
+      "timestamp": 1774770896,
+      "profit_pct": 8.65,
+      "net_profit_pct": 2.79
+    },
+    {
+      "timestamp": 1774771926,
+      "profit_pct": 8.65,
+      "net_profit_pct": 2.79
+    },
+    {
+      "timestamp": 1774773976,
+      "profit_pct": 8.65,
+      "net_profit_pct": 2.79
+    },
+    {
+      "timestamp": 1774775437,
+      "profit_pct": 8.65,
+      "net_profit_pct": 2.79
+    },
+    {
+      "timestamp": 1774779454,
+      "profit_pct": 8.65,
+      "net_profit_pct": 2.79
+    },
+    {
+      "timestamp": 1774779929,
+      "profit_pct": 8.65,
+      "net_profit_pct": 2.79
+    },
+    {
+      "timestamp": 1774780384,
+      "profit_pct": 8.65,
+      "net_profit_pct": 2.79
+    },
+    {
+      "timestamp": 1774780919,
+      "profit_pct": 8.65,
+      "net_profit_pct": 2.79
+    },
+    {
+      "timestamp": 1774781378,
+      "profit_pct": 8.65,
+      "net_profit_pct": 2.79
+    },
+    {
+      "timestamp": 1774781866,
+      "profit_pct": 8.65,
+      "net_profit_pct": 2.79
+    },
+    {
+      "timestamp": 1774782333,
+      "profit_pct": 8.65,
+      "net_profit_pct": 2.79
+    },
+    {
+      "timestamp": 1774782802,
+      "profit_pct": 8.65,
+      "net_profit_pct": 2.79
+    }
+  ],
+  "auto-49f2c056e689": [
+    {
+      "timestamp": 1774780919,
+      "profit_pct": 50.0,
+      "net_profit_pct": 37.84
+    },
+    {
+      "timestamp": 1774817556,
+      "profit_pct": 18.0,
+      "net_profit_pct": 10.76
+    },
+    {
+      "timestamp": 1774822626,
+      "profit_pct": 50.0,
+      "net_profit_pct": 37.84
+    },
+    {
+      "timestamp": 1774824957,
+      "profit_pct": 17.0,
+      "net_profit_pct": 9.75
+    },
+    {
+      "timestamp": 1774872654,
+      "profit_pct": 17.0,
+      "net_profit_pct": 9.75
+    },
+    {
+      "timestamp": 1774875844,
+      "profit_pct": 50.0,
+      "net_profit_pct": 37.84
+    },
+    {
+      "timestamp": 1774879876,
+      "profit_pct": 17.0,
+      "net_profit_pct": 9.75
+    },
+    {
+      "timestamp": 1774894837,
+      "profit_pct": 17.0,
+      "net_profit_pct": 9.75
+    }
+  ],
+  "auto-49654d0aabe2": [
+    {
+      "timestamp": 1774814081,
+      "profit_pct": 22.0,
+      "net_profit_pct": 14.8
+    },
+    {
+      "timestamp": 1774816187,
+      "profit_pct": 13.0,
+      "net_profit_pct": 5.71
+    },
+    {
+      "timestamp": 1774820423,
+      "profit_pct": 22.0,
+      "net_profit_pct": 14.8
+    },
+    {
+      "timestamp": 1774869091,
+      "profit_pct": 22.0,
+      "net_profit_pct": 14.8
+    },
+    {
+      "timestamp": 1774933734,
+      "profit_pct": 22.0,
+      "net_profit_pct": 14.8
+    },
+    {
+      "timestamp": 1774944557,
+      "profit_pct": 22.0,
+      "net_profit_pct": 14.8
+    },
+    {
+      "timestamp": 1774950776,
+      "profit_pct": 22.0,
+      "net_profit_pct": 14.8
+    }
+  ],
+  "auto-caa62eeed10d": [
+    {
+      "timestamp": 1774814616,
+      "profit_pct": 45.5,
+      "net_profit_pct": 45.0
+    },
+    {
+      "timestamp": 1774814829,
+      "profit_pct": 45.5,
+      "net_profit_pct": 45.0
+    },
+    {
+      "timestamp": 1774818309,
+      "profit_pct": 45.5,
+      "net_profit_pct": 45.0
+    }
+  ],
+  "auto-2df3b54be341": [
+    {
+      "timestamp": 1774816835,
+      "profit_pct": 40.0,
+      "net_profit_pct": 30.99
+    },
+    {
+      "timestamp": 1774874908,
+      "profit_pct": 19.0,
+      "net_profit_pct": 9.88
+    },
+    {
+      "timestamp": 1774875376,
+      "profit_pct": 40.0,
+      "net_profit_pct": 31.09
+    },
+    {
+      "timestamp": 1774943293,
+      "profit_pct": 19.0,
+      "net_profit_pct": 9.88
+    },
+    {
+      "timestamp": 1774945499,
+      "profit_pct": 19.0,
+      "net_profit_pct": 9.88
+    }
+  ],
+  "auto-718def250980": [
+    {
+      "timestamp": 1774821081,
+      "profit_pct": 8.45,
+      "net_profit_pct": 7.57
+    },
+    {
+      "timestamp": 1774822626,
+      "profit_pct": 7.45,
+      "net_profit_pct": 6.56
+    },
+    {
+      "timestamp": 1774823445,
+      "profit_pct": 7.45,
+      "net_profit_pct": 6.56
+    }
+  ],
+  "auto-f3cf8848116a": [
+    {
+      "timestamp": 1774824957,
+      "profit_pct": 7.45,
+      "net_profit_pct": 6.56
+    },
+    {
+      "timestamp": 1774825398,
+      "profit_pct": 7.45,
+      "net_profit_pct": 6.56
+    },
+    {
+      "timestamp": 1774825752,
+      "profit_pct": 7.45,
+      "net_profit_pct": 6.56
+    },
+    {
+      "timestamp": 1774828417,
+      "profit_pct": 6.45,
+      "net_profit_pct": 5.55
+    },
+    {
+      "timestamp": 1774828799,
+      "profit_pct": 6.45,
+      "net_profit_pct": 5.55
+    },
+    {
+      "timestamp": 1774829158,
+      "profit_pct": 6.45,
+      "net_profit_pct": 5.55
+    },
+    {
+      "timestamp": 1774829505,
+      "profit_pct": 6.45,
+      "net_profit_pct": 5.55
+    }
+  ],
+  "auto-2493baf8efc3": [
+    {
+      "timestamp": 1774826196,
+      "profit_pct": 7.5,
+      "net_profit_pct": 0.12
+    },
+    {
+      "timestamp": 1774826793,
+      "profit_pct": 7.4,
+      "net_profit_pct": 0.02
+    },
+    {
+      "timestamp": 1774827934,
+      "profit_pct": 7.5,
+      "net_profit_pct": 0.12
+    }
+  ],
+  "auto-eebee2eaa4fb": [
+    {
+      "timestamp": 1774826793,
+      "profit_pct": 7.45,
+      "net_profit_pct": 6.56
+    }
+  ],
+  "auto-6eb40f928581": [
+    {
+      "timestamp": 1774830581,
+      "profit_pct": 6.45,
+      "net_profit_pct": 5.55
+    }
+  ],
+  "auto-b9ca24c7fd57": [
+    {
+      "timestamp": 1774854238,
+      "profit_pct": 48.0,
+      "net_profit_pct": 34.24
+    }
+  ],
+  "auto-a74315b584d1": [
+    {
+      "timestamp": 1774862125,
+      "profit_pct": 29.5,
+      "net_profit_pct": 41.8
+    },
+    {
+      "timestamp": 1774862644,
+      "profit_pct": 30.0,
+      "net_profit_pct": 42.82
+    }
+  ],
+  "auto-9ac989d11ad9": [
+    {
+      "timestamp": 1774865625,
+      "profit_pct": 9.15,
+      "net_profit_pct": 8.25
+    },
+    {
+      "timestamp": 1774865955,
+      "profit_pct": 9.15,
+      "net_profit_pct": 8.25
+    },
+    {
+      "timestamp": 1774866628,
+      "profit_pct": 9.15,
+      "net_profit_pct": 8.25
+    },
+    {
+      "timestamp": 1774866972,
+      "profit_pct": 9.15,
+      "net_profit_pct": 8.25
+    },
+    {
+      "timestamp": 1774867311,
+      "profit_pct": 9.15,
+      "net_profit_pct": 8.25
+    }
+  ],
+  "auto-21a25c1998d2": [
+    {
+      "timestamp": 1774868006,
+      "profit_pct": 6.95,
+      "net_profit_pct": 6.05
+    }
+  ],
+  "auto-341c5416cc07": [
+    {
+      "timestamp": 1774891343,
+      "profit_pct": 7.7,
+      "net_profit_pct": 1.18
+    },
+    {
+      "timestamp": 1774893266,
+      "profit_pct": 7.4,
+      "net_profit_pct": 0.88
+    },
+    {
+      "timestamp": 1774894837,
+      "profit_pct": 7.9,
+      "net_profit_pct": 1.57
+    },
+    {
+      "timestamp": 1774895464,
+      "profit_pct": 7.8,
+      "net_profit_pct": 1.47
+    },
+    {
+      "timestamp": 1774896123,
+      "profit_pct": 7.9,
+      "net_profit_pct": 1.57
+    }
+  ],
+  "auto-476a9692b252": [
+    {
+      "timestamp": 1774926745,
+      "profit_pct": 50.0,
+      "net_profit_pct": 37.84
+    },
+    {
+      "timestamp": 1774934308,
+      "profit_pct": 20.0,
+      "net_profit_pct": 12.78
+    },
+    {
+      "timestamp": 1774940270,
+      "profit_pct": 20.0,
+      "net_profit_pct": 12.78
+    },
+    {
+      "timestamp": 1774940347,
+      "profit_pct": 20.0,
+      "net_profit_pct": 12.78
+    },
+    {
+      "timestamp": 1774943169,
+      "profit_pct": 20.0,
+      "net_profit_pct": 12.78
+    },
+    {
+      "timestamp": 1774943781,
+      "profit_pct": 20.0,
+      "net_profit_pct": 12.78
+    },
+    {
+      "timestamp": 1774956974,
+      "profit_pct": 21.0,
+      "net_profit_pct": 13.79
+    },
+    {
+      "timestamp": 1774957313,
+      "profit_pct": 21.0,
+      "net_profit_pct": 13.79
+    },
+    {
+      "timestamp": 1774958700,
+      "profit_pct": 21.0,
+      "net_profit_pct": 13.79
+    }
+  ],
+  "auto-7364ec6de866": [
+    {
+      "timestamp": 1774940347,
+      "profit_pct": 8.65,
+      "net_profit_pct": 7.74
+    },
+    {
+      "timestamp": 1774940515,
+      "profit_pct": 8.7,
+      "net_profit_pct": 7.79
+    },
+    {
+      "timestamp": 1774940603,
+      "profit_pct": 8.7,
+      "net_profit_pct": 7.79
+    },
+    {
+      "timestamp": 1774940691,
+      "profit_pct": 8.7,
+      "net_profit_pct": 7.79
+    },
+    {
+      "timestamp": 1774940782,
+      "profit_pct": 8.7,
+      "net_profit_pct": 7.79
+    }
+  ],
+  "auto-6e6c3d30c284": [
+    {
+      "timestamp": 1774942373,
+      "profit_pct": 5.05,
+      "net_profit_pct": 4.14
+    },
+    {
+      "timestamp": 1774942650,
+      "profit_pct": 5.05,
+      "net_profit_pct": 4.14
+    },
+    {
+      "timestamp": 1774942794,
+      "profit_pct": 5.0,
+      "net_profit_pct": 4.09
+    },
+    {
+      "timestamp": 1774942971,
+      "profit_pct": 5.0,
+      "net_profit_pct": 4.09
+    },
+    {
+      "timestamp": 1774943035,
+      "profit_pct": 5.0,
+      "net_profit_pct": 4.09
+    },
+    {
+      "timestamp": 1774943104,
+      "profit_pct": 5.0,
+      "net_profit_pct": 4.09
+    },
+    {
+      "timestamp": 1774943169,
+      "profit_pct": 5.0,
+      "net_profit_pct": 4.09
+    },
+    {
+      "timestamp": 1774943293,
+      "profit_pct": 5.0,
+      "net_profit_pct": 4.09
+    },
+    {
+      "timestamp": 1774943355,
+      "profit_pct": 5.0,
+      "net_profit_pct": 4.09
+    },
+    {
+      "timestamp": 1774943421,
+      "profit_pct": 5.0,
+      "net_profit_pct": 4.09
+    },
+    {
+      "timestamp": 1774943484,
+      "profit_pct": 5.0,
+      "net_profit_pct": 4.09
+    },
+    {
+      "timestamp": 1774943553,
+      "profit_pct": 5.0,
+      "net_profit_pct": 4.09
+    },
+    {
+      "timestamp": 1774943624,
+      "profit_pct": 5.0,
+      "net_profit_pct": 4.09
+    },
+    {
+      "timestamp": 1774943702,
+      "profit_pct": 5.0,
+      "net_profit_pct": 4.09
+    },
+    {
+      "timestamp": 1774943781,
+      "profit_pct": 5.0,
+      "net_profit_pct": 4.09
+    },
+    {
+      "timestamp": 1774943864,
+      "profit_pct": 5.0,
+      "net_profit_pct": 4.09
+    },
+    {
+      "timestamp": 1774943954,
+      "profit_pct": 5.0,
+      "net_profit_pct": 4.09
+    },
+    {
+      "timestamp": 1774944043,
+      "profit_pct": 5.0,
+      "net_profit_pct": 4.09
+    },
+    {
+      "timestamp": 1774944141,
+      "profit_pct": 5.0,
+      "net_profit_pct": 4.09
+    }
+  ],
+  "auto-ba332948f31d": [
+    {
+      "timestamp": 1774945227,
+      "profit_pct": 8.15,
+      "net_profit_pct": 7.24
+    },
+    {
+      "timestamp": 1774945355,
+      "profit_pct": 8.15,
+      "net_profit_pct": 7.24
+    },
+    {
+      "timestamp": 1774945499,
+      "profit_pct": 8.2,
+      "net_profit_pct": 7.29
+    },
+    {
+      "timestamp": 1774945645,
+      "profit_pct": 8.2,
+      "net_profit_pct": 7.29
+    },
+    {
+      "timestamp": 1774946916,
+      "profit_pct": 7.95,
+      "net_profit_pct": 7.04
+    },
+    {
+      "timestamp": 1774947092,
+      "profit_pct": 7.9,
+      "net_profit_pct": 6.99
+    },
+    {
+      "timestamp": 1774947278,
+      "profit_pct": 7.95,
+      "net_profit_pct": 7.04
+    },
+    {
+      "timestamp": 1774947457,
+      "profit_pct": 7.95,
+      "net_profit_pct": 7.04
+    },
+    {
+      "timestamp": 1774947642,
+      "profit_pct": 7.95,
+      "net_profit_pct": 7.04
+    },
+    {
+      "timestamp": 1774947828,
+      "profit_pct": 7.95,
+      "net_profit_pct": 7.04
+    },
+    {
+      "timestamp": 1774948023,
+      "profit_pct": 7.95,
+      "net_profit_pct": 7.04
+    },
+    {
+      "timestamp": 1774948222,
+      "profit_pct": 7.95,
+      "net_profit_pct": 7.04
+    },
+    {
+      "timestamp": 1774948455,
+      "profit_pct": 7.95,
+      "net_profit_pct": 7.04
+    },
+    {
+      "timestamp": 1774948661,
+      "profit_pct": 7.95,
+      "net_profit_pct": 7.04
+    },
+    {
+      "timestamp": 1774948872,
+      "profit_pct": 7.95,
+      "net_profit_pct": 7.04
+    },
+    {
+      "timestamp": 1774949096,
+      "profit_pct": 7.95,
+      "net_profit_pct": 7.04
+    },
+    {
+      "timestamp": 1774949560,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774949791,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774950024,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774950261,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774950505,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    }
+  ],
+  "auto-dd3f65a093ac": [
+    {
+      "timestamp": 1774946577,
+      "profit_pct": 8.0,
+      "net_profit_pct": 7.09
+    }
+  ],
+  "auto-9927c1781817": [
+    {
+      "timestamp": 1774950776,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774951045,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774951302,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774951560,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774951830,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774952092,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774952344,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    }
+  ],
+  "auto-625473040b8e": [
+    {
+      "timestamp": 1774952092,
+      "profit_pct": 49.5,
+      "net_profit_pct": 36.04
+    },
+    {
+      "timestamp": 1774952344,
+      "profit_pct": 49.5,
+      "net_profit_pct": 36.04
+    },
+    {
+      "timestamp": 1774952621,
+      "profit_pct": 48.5,
+      "net_profit_pct": 35.04
+    },
+    {
+      "timestamp": 1774952918,
+      "profit_pct": 47.0,
+      "net_profit_pct": 33.54
+    },
+    {
+      "timestamp": 1774953196,
+      "profit_pct": 48.0,
+      "net_profit_pct": 34.54
+    },
+    {
+      "timestamp": 1774953515,
+      "profit_pct": 48.5,
+      "net_profit_pct": 35.04
+    },
+    {
+      "timestamp": 1774953820,
+      "profit_pct": 49.5,
+      "net_profit_pct": 36.04
+    },
+    {
+      "timestamp": 1774954124,
+      "profit_pct": 49.5,
+      "net_profit_pct": 36.04
+    }
+  ],
+  "auto-44ff1670b313": [
+    {
+      "timestamp": 1774952621,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774953515,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774953820,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774954124,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774954435,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774954738,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774955056,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774955363,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774955987,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774956641,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774956974,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774957645,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774958700,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774959063,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774959436,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774961061,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    }
+  ],
+  "auto-64e2cacb5738": [
+    {
+      "timestamp": 1774952918,
+      "profit_pct": 26.6,
+      "net_profit_pct": 12.57
+    },
+    {
+      "timestamp": 1774953196,
+      "profit_pct": 27.1,
+      "net_profit_pct": 13.07
+    }
+  ],
+  "auto-5b24b638e72f": [
+    {
+      "timestamp": 1774959813,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774960190,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774960635,
+      "profit_pct": 8.75,
+      "net_profit_pct": 7.84
+    },
+    {
+      "timestamp": 1774962241,
+      "profit_pct": 5.75,
+      "net_profit_pct": 4.84
+    },
+    {
+      "timestamp": 1774962684,
+      "profit_pct": 5.85,
+      "net_profit_pct": 4.94
+    }
+  ],
+  "auto-07feb1184741": [
+    {
+      "timestamp": 1774990777,
+      "profit_pct": 20.5,
+      "net_profit_pct": 24.95
+    },
+    {
+      "timestamp": 1774991188,
+      "profit_pct": 42.6,
+      "net_profit_pct": 73.29
+    }
+  ],
+  "auto-2ac884648315": [
+    {
+      "timestamp": 1774993071,
+      "profit_pct": 0.9,
+      "net_profit_pct": 0.16
+    },
+    {
+      "timestamp": 1774993418,
+      "profit_pct": 0.9,
+      "net_profit_pct": 0.16
+    },
+    {
+      "timestamp": 1774993833,
+      "profit_pct": 0.9,
+      "net_profit_pct": 0.16
+    },
+    {
+      "timestamp": 1774994198,
+      "profit_pct": 0.9,
+      "net_profit_pct": 0.16
+    },
+    {
+      "timestamp": 1774994758,
+      "profit_pct": 0.9,
+      "net_profit_pct": 0.16
+    }
+  ],
+  "auto-e919380736d5": [
+    {
+      "timestamp": 1775016356,
+      "profit_pct": 0.9,
+      "net_profit_pct": 0.16
+    },
+    {
+      "timestamp": 1775016946,
+      "profit_pct": 0.9,
+      "net_profit_pct": 0.16
+    },
+    {
+      "timestamp": 1775017433,
+      "profit_pct": 0.9,
+      "net_profit_pct": 0.16
+    },
+    {
+      "timestamp": 1775018101,
+      "profit_pct": 0.9,
+      "net_profit_pct": 0.16
+    },
+    {
+      "timestamp": 1775018561,
+      "profit_pct": 0.9,
+      "net_profit_pct": 0.16
+    },
+    {
+      "timestamp": 1775019160,
+      "profit_pct": 0.9,
+      "net_profit_pct": 0.16
+    },
+    {
+      "timestamp": 1775020315,
+      "profit_pct": 1.4,
+      "net_profit_pct": 0.66
+    }
+  ],
+  "auto-c5195fa4059e": [
+    {
+      "timestamp": 1775036055,
+      "profit_pct": 17.25,
+      "net_profit_pct": 20.46
+    },
+    {
+      "timestamp": 1775038053,
+      "profit_pct": 18.8,
+      "net_profit_pct": 22.74
+    }
+  ]
+}

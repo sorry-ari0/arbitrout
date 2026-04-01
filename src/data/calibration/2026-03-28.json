@@ -1,0 +1,92 @@
+{
+  "generated_at": "2026-03-28T20:56:35.504037+00:00",
+  "trade_count": 32,
+  "entry_calibration": {},
+  "exit_calibration": {
+    "manual_full_exit": {
+      "trades": 11,
+      "win_rate": 0.18,
+      "total_pnl": 0.58,
+      "suggestion": "MONITOR \u2014 18% win rate, $1 P&L."
+    },
+    "auto:trailing_stop": {
+      "trades": 1,
+      "win_rate": 0.0,
+      "total_pnl": -4.0,
+      "suggestion": "INSUFFICIENT DATA \u2014 only 1 trades."
+    },
+    "ai_approved:time_decay": {
+      "trades": 3,
+      "win_rate": 0.0,
+      "total_pnl": -12.0,
+      "suggestion": "INSUFFICIENT DATA \u2014 only 3 trades."
+    },
+    "ai_approved:negative_drift": {
+      "trades": 1,
+      "win_rate": 0.0,
+      "total_pnl": -9.6,
+      "suggestion": "INSUFFICIENT DATA \u2014 only 1 trades."
+    },
+    "market_resolved": {
+      "trades": 12,
+      "win_rate": 0.67,
+      "total_pnl": 5.76,
+      "suggestion": "MONITOR \u2014 67% win rate, $6 P&L."
+    },
+    "bracket_target": {
+      "trades": 3,
+      "win_rate": 1.0,
+      "total_pnl": 15.54,
+      "suggestion": "INSUFFICIENT DATA \u2014 only 3 trades."
+    },
+    "ai_approved:stop_loss": {
+      "trades": 1,
+      "win_rate": 0.0,
+      "total_pnl": -33.22,
+      "suggestion": "INSUFFICIENT DATA \u2014 only 1 trades."
+    }
+  },
+  "hold_duration_analysis": {
+    "0-6h": {
+      "trades": 13,
+      "wins": 3,
+      "pnl": -20.44,
+      "avg_pnl": -1.57,
+      "win_rate": 0.23
+    },
+    "6-24h": {
+      "trades": 11,
+      "wins": 3,
+      "pnl": 5.84,
+      "avg_pnl": 0.53,
+      "win_rate": 0.27
+    },
+    "24h-3d": {
+      "trades": 5,
+      "wins": 4,
+      "pnl": -25.79,
+      "avg_pnl": -5.16,
+      "win_rate": 0.8
+    },
+    "3d-7d": {
+      "trades": 3,
+      "wins": 3,
+      "pnl": 3.46,
+      "avg_pnl": 1.15,
+      "win_rate": 1.0
+    },
+    "7d+": {
+      "trades": 0,
+      "wins": 0,
+      "pnl": 0.0,
+      "avg_pnl": 0.0,
+      "win_rate": 0.0
+    }
+  },
+  "fee_analysis": {
+    "total_fees": 57.44,
+    "fee_drag_pct": 1.58,
+    "limit_fill_rate": 1.0,
+    "suggestion": "GOOD \u2014 100% limit fill rate."
+  }
+}
