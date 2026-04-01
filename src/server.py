@@ -435,6 +435,11 @@ async def lifespan(app: FastAPI):
                     "kalshi": KalshiExecutor,
                     "predictit": PredictItExecutor,
                     "limitless": LimitlessExecutor,
+                    "coinbase_spot": CoinbaseSpotExecutor,
+                    "coinbase": CoinbaseSpotExecutor,
+                    "opinion_labs": OpinionLabsExecutor,
+                    "robinhood": RobinhoodExecutor,
+                    "crypto_spot": CryptoSpotExecutor,
                 }
                 for pname, ExecCls in _paper_fallbacks.items():
                     if pname not in paper_executors:
