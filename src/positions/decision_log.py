@@ -7,7 +7,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger("positions.decision_log")
 
@@ -22,13 +22,196 @@ class DecisionLogger:
         self._path = path
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
+    @staticmethod
+    def _normalize_timestamp(ts=None) -> str:
+        """Return an ISO-8601 UTC timestamp for persisted log entries."""
+        if ts is None:
+            return datetime.utcnow().isoformat() + "Z"
+        if isinstance(ts, (int, float)):
+            return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+        if isinstance(ts, str):
+            return ts
+        return str(ts)
+
     def _write(self, entry: dict):
-        entry["timestamp"] = datetime.utcnow().isoformat() + "Z"
+        entry["timestamp"] = self._normalize_timestamp(entry.get("timestamp"))
         try:
             with open(self._path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, default=str) + "\n")
         except Exception as e:
             logger.error("Failed to write decision log: %s", e)
+
+    def _load_entries(self) -> list[dict]:
+        """Load existing log entries for reconciliation/indexing."""
+        if not os.path.exists(self._path):
+            return []
+        entries = []
+        try:
+            with open(self._path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entries.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        logger.warning("Skipping invalid decision-log line during reconciliation")
+        except OSError as e:
+            logger.warning("Failed to read decision log for reconciliation: %s", e)
+        return entries
+
+    @staticmethod
+    def _infer_side(pkg: dict) -> str:
+        side = pkg.get("_bet_side")
+        if side in ("YES", "NO"):
+            return side
+        first_leg = next((l for l in pkg.get("legs", []) if l.get("status") != "advisory"), {})
+        leg_type = first_leg.get("type", "")
+        if leg_type.endswith("_no"):
+            return "NO"
+        return "YES"
+
+    @staticmethod
+    def _infer_entry_price(pkg: dict) -> float:
+        legs = [l for l in pkg.get("legs", []) if l.get("status") != "advisory"]
+        if not legs:
+            return 0.0
+        total_cost = sum(l.get("cost", 0) for l in legs)
+        if total_cost <= 0:
+            return round(sum(l.get("entry_price", 0) for l in legs) / len(legs), 4)
+        weighted = sum(l.get("entry_price", 0) * l.get("cost", 0) for l in legs) / total_cost
+        return round(weighted, 4)
+
+    @staticmethod
+    def _infer_days_to_expiry(pkg: dict) -> int:
+        legs = [l for l in pkg.get("legs", []) if l.get("expiry")]
+        if not legs:
+            return 0
+        expiries = []
+        for leg in legs:
+            try:
+                exp = datetime.fromisoformat(leg["expiry"].replace("Z", "+00:00"))
+                if exp.tzinfo is None:
+                    exp = exp.replace(tzinfo=timezone.utc)
+                expiries.append(exp)
+            except (ValueError, TypeError):
+                continue
+        if not expiries:
+            return 0
+        created_at = pkg.get("created_at")
+        if isinstance(created_at, (int, float)):
+            created_dt = datetime.fromtimestamp(created_at, tz=timezone.utc)
+        else:
+            created_dt = datetime.now(timezone.utc)
+        return max(0, int((min(expiries) - created_dt).total_seconds() // 86400))
+
+    @staticmethod
+    def _infer_exit_trigger(pkg: dict, journal_entry: dict | None = None) -> str:
+        if journal_entry and journal_entry.get("exit_trigger"):
+            return journal_entry["exit_trigger"]
+        for action in reversed(pkg.get("execution_log", [])):
+            if action.get("action") in ("sell", "partial_sell") and action.get("trigger"):
+                return action["trigger"]
+        for leg in pkg.get("legs", []):
+            if leg.get("exit_trigger"):
+                return leg["exit_trigger"]
+        return "reconciled_close"
+
+    def reconcile_packages(self, packages: list[dict], journal_entries: list[dict] | None = None) -> dict:
+        """Backfill missing durable package events into the append-only decision log.
+
+        This prevents restarts or past logger outages from leaving permanent holes in the
+        historical record used for audits.
+        """
+        existing = self._load_entries()
+        seen = set()
+        for entry in existing:
+            pkg_id = entry.get("pkg_id")
+            etype = entry.get("type")
+            if pkg_id and etype:
+                seen.add((pkg_id, etype))
+
+        journal_by_pkg = {
+            e.get("package_id"): e for e in (journal_entries or []) if e.get("package_id")
+        }
+        counts = {"trade_opened": 0, "news_trade": 0, "exit_complete": 0}
+
+        for pkg in packages:
+            pkg_id = pkg.get("id")
+            if not pkg_id:
+                continue
+            created_ts = pkg.get("created_at") or time.time()
+            strategy = pkg.get("strategy_type", "unknown")
+            side = self._infer_side(pkg)
+            entry_price = self._infer_entry_price(pkg)
+            size = round(pkg.get("total_cost", 0), 2)
+            conviction = round(pkg.get("_entry_conviction", entry_price), 3)
+            opened_title = pkg.get("name", "")[:100]
+
+            if (pkg_id, "trade_opened") not in seen:
+                self.log_trade_opened(
+                    pkg_id=pkg_id,
+                    title=opened_title,
+                    strategy=strategy,
+                    side=side,
+                    price=entry_price,
+                    size=size,
+                    score=0.0,
+                    spread_pct=0.0,
+                    conviction=conviction,
+                    days_to_expiry=self._infer_days_to_expiry(pkg),
+                    volume=0,
+                    score_metadata={"reconciled": True},
+                    timestamp=created_ts,
+                )
+                seen.add((pkg_id, "trade_opened"))
+                counts["trade_opened"] += 1
+
+            if strategy == "news_driven" and (pkg_id, "news_trade") not in seen:
+                market = ""
+                if pkg.get("legs"):
+                    market = pkg["legs"][0].get("asset_label", "")
+                self.log_news_trade(
+                    pkg_id=pkg_id,
+                    title=pkg.get("name", ""),
+                    market=market,
+                    side=side,
+                    confidence=int(pkg.get("_news_confidence", 0) or 0),
+                    urgency=pkg.get("_news_urgency", "unknown"),
+                    size=size,
+                    reasoning=pkg.get("_news_reasoning", "reconciled from positions/journal state"),
+                    timestamp=created_ts,
+                    reconciled=True,
+                )
+                seen.add((pkg_id, "news_trade"))
+                counts["news_trade"] += 1
+
+            if pkg.get("status") == "closed" and (pkg_id, "exit_complete") not in seen:
+                journal_entry = journal_by_pkg.get(pkg_id)
+                exit_ts = None
+                pnl = 0.0
+                exit_value = pkg.get("current_value", 0)
+                if journal_entry:
+                    exit_ts = journal_entry.get("closed_at")
+                    pnl = journal_entry.get("pnl", 0.0)
+                    exit_value = journal_entry.get("exit_value", exit_value)
+                else:
+                    exit_ts = pkg.get("closed_at") or pkg.get("updated_at") or time.time()
+                    pnl = exit_value - pkg.get("total_cost", 0)
+                self.log_exit_complete(
+                    pkg_id=pkg_id,
+                    pkg_name=pkg.get("name", ""),
+                    trigger=self._infer_exit_trigger(pkg, journal_entry),
+                    total_cost=pkg.get("total_cost", 0),
+                    exit_value=exit_value,
+                    pnl=pnl,
+                    timestamp=exit_ts,
+                    reconciled=True,
+                )
+                seen.add((pkg_id, "exit_complete"))
+                counts["exit_complete"] += 1
+
+        return counts
 
     # ── Auto Trader decisions ──────────────────────────────────────────
 
@@ -59,7 +242,8 @@ class DecisionLogger:
                          score: float, spread_pct: float, conviction: float,
                          days_to_expiry: int, volume: float,
                          insider_signal: dict | None = None,
-                         score_metadata: dict | None = None):
+                         score_metadata: dict | None = None,
+                         timestamp=None):
         entry = {
             "type": "trade_opened",
             "pkg_id": pkg_id,
@@ -74,6 +258,7 @@ class DecisionLogger:
             "days_to_expiry": days_to_expiry,
             "volume": round(volume, 0),
             "insider_signal": bool(insider_signal),
+            "timestamp": timestamp,
         }
         if score_metadata is not None:
             entry["score_metadata"] = score_metadata
@@ -137,7 +322,8 @@ class DecisionLogger:
         })
 
     def log_exit_complete(self, pkg_id: str, pkg_name: str, trigger: str,
-                          total_cost: float, exit_value: float, pnl: float):
+                          total_cost: float, exit_value: float, pnl: float,
+                          timestamp=None, reconciled: bool = False):
         self._write({
             "type": "exit_complete",
             "pkg_id": pkg_id,
@@ -146,6 +332,8 @@ class DecisionLogger:
             "total_cost": round(total_cost, 2),
             "exit_value": round(exit_value, 2),
             "pnl": round(pnl, 2),
+            "reconciled": reconciled,
+            "timestamp": timestamp,
         })
 
     # ── News Scanner decisions ─────────────────────────────────────────
@@ -218,7 +406,8 @@ class DecisionLogger:
 
     def log_news_trade(self, pkg_id: str, title: str, market: str,
                        side: str, confidence: int, urgency: str,
-                       size: float, reasoning: str):
+                       size: float, reasoning: str,
+                       timestamp=None, reconciled: bool = False):
         self._write({
             "type": "news_trade",
             "pkg_id": pkg_id,
@@ -229,6 +418,8 @@ class DecisionLogger:
             "urgency": urgency,
             "size_usd": round(size, 2),
             "reasoning": reasoning[:200],
+            "reconciled": reconciled,
+            "timestamp": timestamp,
         })
 
     # ── Political Analyzer decisions ──────────────────────────────────────
@@ -270,4 +461,12 @@ class DecisionLogger:
             "platform": platform,
             "error": error[:200],
             "consecutive_errors": consecutive_count,
+        })
+
+    def log_reconciliation_summary(self, component: str, counts: dict, details: dict | None = None):
+        self._write({
+            "type": "reconciliation_summary",
+            "component": component,
+            "counts": counts,
+            "details": details or {},
         })

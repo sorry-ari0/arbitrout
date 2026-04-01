@@ -79,6 +79,8 @@ class TradeJournal:
             logger.debug("Package %s already journaled, skipping duplicate", pkg_id)
             return None
 
+        closed_at = pkg.get("closed_at") or pkg.get("updated_at") or time.time()
+
         legs_detail = []
         total_buy_fees = 0.0
         total_sell_fees = 0.0
@@ -139,13 +141,13 @@ class TradeJournal:
             "legs": legs_detail,
             "exit_rules": pkg.get("exit_rules", []),
             "execution_log": pkg.get("execution_log", []),
-            "hold_duration_hours": round((time.time() - pkg.get("created_at", time.time())) / 3600, 1),
+            "hold_duration_hours": round((closed_at - pkg.get("created_at", closed_at)) / 3600, 1),
             "peak_value": pkg.get("peak_value", 0),
             "max_drawdown_from_peak": round(
                 (pkg.get("peak_value", 0) - current_value) / pkg.get("peak_value", 1) * 100, 2
             ) if pkg.get("peak_value", 0) > 0 else 0,
             "created_at": pkg.get("created_at"),
-            "closed_at": time.time(),
+            "closed_at": closed_at,
             "_code_version": "v2-fee-fix",
         }
 
@@ -154,6 +156,51 @@ class TradeJournal:
         logger.info("Journal: %s %s — P&L: $%.2f (%.1f%%) via %s",
                      entry["outcome"].upper(), entry["name"], pnl, entry["pnl_pct"], exit_trigger)
         return entry
+
+    def reconcile_closed_packages(self, packages: list[dict]) -> list[dict]:
+        """Backfill journal entries for closed packages missing from the journal.
+
+        This protects analytics from stale-state overwrites or historical closes that
+        were persisted to positions.json but never made it into trade_journal_{mode}.json.
+        """
+        known_ids = {e.get("package_id") for e in self.entries if e.get("package_id")}
+        added = []
+
+        for pkg in packages:
+            if pkg.get("status") != "closed":
+                continue
+            pkg_id = pkg.get("id")
+            if not pkg_id or pkg_id in known_ids:
+                continue
+
+            trigger = self._infer_exit_trigger(pkg)
+            entry = self.record_close(pkg, exit_trigger=trigger)
+            if entry is None:
+                continue
+
+            pkg["_journal_recorded"] = True
+            pkg["journal_entry_id"] = entry["id"]
+            added.append(entry)
+            known_ids.add(pkg_id)
+
+        return added
+
+    @staticmethod
+    def _infer_exit_trigger(pkg: dict) -> str:
+        """Infer a close trigger from persisted package state for backfills."""
+        exec_log = pkg.get("execution_log", [])
+        for action in reversed(exec_log):
+            if action.get("action") in ("sell", "partial_sell"):
+                trigger = action.get("trigger")
+                if trigger:
+                    return trigger
+
+        for leg in pkg.get("legs", []):
+            trigger = leg.get("exit_trigger")
+            if trigger:
+                return trigger
+
+        return "reconciled_close"
 
     def get_performance(self, mode: str = None, strategy: str = None) -> dict:
         """Aggregate performance stats, optionally filtered by mode or strategy."""

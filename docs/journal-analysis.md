@@ -4,6 +4,58 @@
 
 ---
 
+## Snapshot: 2026-04-01 (journal + decision-log reconciliation)
+
+### Evidence Review Window
+- Reviewed persisted paper state in `src/data/positions/positions.json`, `src/data/positions/trade_journal_paper.json`, and `src/data/positions/decision_log.jsonl`.
+- Focus of this pass was data integrity, not new strategy logic.
+
+### What This Pass Found
+
+1. **The paper journal had drifted from persisted package state.**
+   - Closed packages existed in `positions.json` but were missing from `trade_journal_paper.json`.
+   - This understated realized trade count and hid `news_driven` outcomes from the analysis file.
+
+2. **The decision log had the same class of gap.**
+   - Historical package state showed closed `news_driven` trades, but `decision_log.jsonl` did not consistently contain the expected `news_trade`, `trade_opened`, or `exit_complete` events for those package IDs.
+   - That made strategy reviews depend too heavily on whichever runtime session happened to still be on disk.
+
+3. **The root problem was durability, not trade selection.**
+   - Package state and journal state were authoritative enough to reconstruct the missing history.
+   - The missing protection was a startup reconciliation pass that could repair append-only artifacts after restarts or partial logger outages.
+
+### Changes Applied On 2026-04-01
+
+- `src/positions/trade_journal.py`
+  - Added reconciliation for closed packages missing from the journal.
+  - Preserved historical close time by using package `closed_at`/`updated_at` instead of reconciliation time.
+
+- `src/positions/decision_log.py`
+  - Added timestamp-preserving writes so backfilled entries keep original event time.
+  - Added package-state reconciliation to backfill missing `trade_opened`, `news_trade`, and `exit_complete` events.
+  - Added a `reconciliation_summary` event for audit visibility.
+
+- `src/server.py`
+  - Runs both journal and decision-log reconciliation during startup, then emits a reconciliation summary when anything is repaired.
+
+### Current State After Reconciliation
+
+- `trade_journal_paper.json` now reflects **23** closed paper trades.
+- The journal now includes the previously missing **5 `news_driven` closes** and **2 `pure_prediction` closes**.
+- `decision_log.jsonl` was backfilled with missing package events for the current persisted state:
+  - `trade_opened`: **15**
+  - `news_trade`: **5**
+  - `exit_complete`: **7**
+- Future restarts should no longer leave permanent holes in the paper audit trail, because both the journal and the decision log can reconstruct missing package-level events from persisted state.
+
+### Remaining Validation Gap
+
+- This pass fixed analytics durability, not trading edge.
+- The next runtime review should check that:
+  - live `news_trade` events now appear at execution time rather than only via reconciliation,
+  - `exit_complete` remains continuous across restarts,
+  - and reconciliation counts stay near zero during normal operation.
+
 ## Snapshot: 2026-03-31 (optimization pass, no new closed trades)
 
 ### Evidence Review Window
@@ -189,8 +241,8 @@ When reviewing the journal again:
 
 ## Cross-Reference Data Sources
 
-### 1. Trade Journal (`src/data/positions/trade_journal.json`)
-- **Primary source for P&L.** 39 entries as of 2026-03-21.
+### 1. Trade Journal (`src/data/positions/trade_journal_paper.json`)
+- **Primary source for P&L.** Use `src/data/positions/trade_journal_paper.json` in paper mode.
 - Fields: pnl (USD), pnl_pct, total_cost, exit_value, total_fees, exit_trigger, legs, hold_duration_hours
 - New: `pnl_usd` field added for explicit USD tracking, `get_equity_curve()` for cumulative P&L
 
@@ -265,7 +317,7 @@ Use `TradeJournal.get_equity_curve()` for the authoritative curve. Summary:
 
 When reviewing the journal again:
 1. Read this file first for baseline context
-2. Pull fresh data from `src/data/positions/trade_journal.json`
+2. Pull fresh data from `src/data/positions/trade_journal_paper.json`
 3. Cross-reference with decision log for skip patterns: `src/data/positions/decision_log.jsonl`
 4. Add a new snapshot section with the date and trade count
 5. Compare phase metrics to previous snapshot
