@@ -48,6 +48,24 @@
   - `exit_complete`: **7**
 - Future restarts should no longer leave permanent holes in the paper audit trail, because both the journal and the decision log can reconstruct missing package-level events from persisted state.
 
+### Audit Read After Reconciliation
+
+1. **The realized picture is better than the pre-reconciliation journal suggested.**
+   - Paper journal P&L is now **+$42.75** across **23** closed trades with **$57.40** in fees.
+   - Win/loss mix is **9 wins / 13 losses / 1 flat**.
+
+2. **`news_driven` and `bracket_target` are the best-performing measured slice right now.**
+   - `news_driven`: **5 trades, 5 wins, +$59.37**
+   - `bracket_target`: **7 exits, 7 wins, +$67.76**
+
+3. **Core directional trading is still the weak area.**
+   - `pure_prediction`: **17 trades, 4 wins, -$14.62**
+   - The remaining open `synthetic_derivative` package is materially underwater, so synthetic performance is still unresolved rather than validated.
+
+4. **The audit tooling itself needed repair.**
+   - `src/analyze_performance.py` was still reading legacy filenames and legacy decision-log fields.
+   - The script now uses `trade_journal_paper.json`, `positions.json`, `decision_log.jsonl`, and current `type` fields so future audits match the actual persisted system.
+
 ### Remaining Validation Gap
 
 - This pass fixed analytics durability, not trading edge.
