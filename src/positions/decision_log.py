@@ -26,7 +26,7 @@ class DecisionLogger:
     def _normalize_timestamp(ts=None) -> str:
         """Return an ISO-8601 UTC timestamp for persisted log entries."""
         if ts is None:
-            return datetime.utcnow().isoformat() + "Z"
+            return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         if isinstance(ts, (int, float)):
             return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace("+00:00", "Z")
         if isinstance(ts, str):
@@ -34,6 +34,7 @@ class DecisionLogger:
         return str(ts)
 
     def _write(self, entry: dict):
+        entry["recorded_at"] = self._normalize_timestamp(entry.get("recorded_at"))
         entry["timestamp"] = self._normalize_timestamp(entry.get("timestamp"))
         try:
             with open(self._path, "a", encoding="utf-8") as f:
@@ -163,6 +164,7 @@ class DecisionLogger:
                     volume=0,
                     score_metadata={"reconciled": True},
                     timestamp=created_ts,
+                    reconciled=True,
                 )
                 seen.add((pkg_id, "trade_opened"))
                 counts["trade_opened"] += 1
@@ -243,7 +245,7 @@ class DecisionLogger:
                          days_to_expiry: int, volume: float,
                          insider_signal: dict | None = None,
                          score_metadata: dict | None = None,
-                         timestamp=None):
+                         timestamp=None, reconciled: bool = False):
         entry = {
             "type": "trade_opened",
             "pkg_id": pkg_id,
@@ -258,6 +260,7 @@ class DecisionLogger:
             "days_to_expiry": days_to_expiry,
             "volume": round(volume, 0),
             "insider_signal": bool(insider_signal),
+            "reconciled": reconciled,
             "timestamp": timestamp,
         }
         if score_metadata is not None:
