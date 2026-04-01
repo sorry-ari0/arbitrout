@@ -161,7 +161,7 @@ class NewsAI:
             "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.3},
         }
 
-        r = await http.post(f"{url}?key={api_key}", json=body)
+        r = await http.post(url, headers={"x-goog-api-key": api_key}, json=body)
         r.raise_for_status()
         data = r.json()
         return data["candidates"][0]["content"]["parts"][0]["text"]
