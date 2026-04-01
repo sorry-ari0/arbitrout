@@ -451,6 +451,30 @@ async def lifespan(app: FastAPI):
             journal = TradeJournal(data_dir=DATA_DIR / "positions", mode=_journal_mode)
             pm = PositionManager(data_dir=DATA_DIR / "positions", executors=executors, trade_journal=journal, bracket_manager=bracket_manager, mode=_journal_mode)
 
+            reconciled_entries = journal.reconcile_closed_packages(pm.list_packages("closed"))
+            if reconciled_entries:
+                pm.save()
+                logger.warning(
+                    "Journal reconciliation backfilled %d closed packages missing from journal",
+                    len(reconciled_entries),
+                )
+                if decision_log:
+                    decision_log.log_reconciliation_summary(
+                        component="trade_journal",
+                        counts={"closed_packages_backfilled": len(reconciled_entries)},
+                        details={"mode": _journal_mode},
+                    )
+
+            if decision_log:
+                log_counts = decision_log.reconcile_packages(pm.list_packages(), journal.entries)
+                if any(log_counts.values()):
+                    logger.warning("Decision-log reconciliation backfilled package events: %s", log_counts)
+                    decision_log.log_reconciliation_summary(
+                        component="decision_log",
+                        counts=log_counts,
+                        details={"mode": _journal_mode},
+                    )
+
             # Wire journal into paper executors for persistent PnL tracking
             if is_paper_mode():
                 for pe in executors.values():

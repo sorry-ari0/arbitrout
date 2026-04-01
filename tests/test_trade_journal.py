@@ -117,6 +117,18 @@ class TestJournal:
             assert j2.entries[0]["pnl"] == 10.0
             assert j2.entries[0]["outcome"] == "win"
 
+    def test_record_close_uses_package_update_time_for_closed_at(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = TradeJournal(Path(tmp))
+            pkg = _make_closed_package("Timed Trade", "pure_prediction", 100.0, 120.0)
+            pkg["created_at"] = 1_700_000_000
+            pkg["updated_at"] = 1_700_007_200
+
+            entry = journal.record_close(pkg, exit_trigger="manual")
+
+            assert entry["closed_at"] == 1_700_007_200
+            assert entry["hold_duration_hours"] == 2.0
+
     def test_get_recent(self):
         """get_recent returns entries sorted by closed_at descending."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -216,3 +228,25 @@ class TestJournal:
             assert "equity_summary" in diagnostics
             assert "robustness" in diagnostics
             assert diagnostics["robustness"]["total_trades"] == 10
+
+    def test_reconcile_closed_packages_backfills_missing_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = TradeJournal(Path(tmp))
+            already_journaled = _make_closed_package("Known Trade", "pure_prediction", 100.0, 110.0)
+            journal.record_close(already_journaled, exit_trigger="target_hit")
+
+            missing = _make_closed_package("Missing Trade", "news_driven", 100.0, 130.0)
+            missing["updated_at"] = 1_700_008_000
+            missing["execution_log"] = [
+                {"action": "buy", "timestamp": 1_700_007_000},
+                {"action": "sell", "trigger": "target_profit", "timestamp": 1_700_008_000},
+            ]
+
+            added = journal.reconcile_closed_packages([already_journaled, missing])
+
+            assert len(added) == 1
+            assert added[0]["package_id"] == missing["id"]
+            assert added[0]["strategy_type"] == "news_driven"
+            assert added[0]["exit_trigger"] == "target_profit"
+            assert added[0]["closed_at"] == 1_700_008_000
+            assert len(journal.entries) == 2
