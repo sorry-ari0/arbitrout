@@ -60,16 +60,16 @@ class TestHeuristics:
         triggers = evaluate_heuristics(pkg)
         assert not any(t["name"] == "trailing_stop" for t in triggers)
 
-    def test_min_hold_allows_stop_loss(self):
-        """During hold period, stop_loss should still fire."""
+    def test_stop_loss_heuristic_disabled(self):
+        """stop_loss heuristic is off — no trigger even with large drawdown."""
         import time
         pkg = _make_pkg()
-        pkg["_min_hold_until"] = time.time() + 86400
+        pkg["_min_hold_until"] = time.time() - 1  # hold expired
         pkg["exit_rules"].append(create_exit_rule("stop_loss", {"stop_pct": -40}))
         pkg["total_cost"] = 10.0
         pkg["current_value"] = 3.0  # -70% loss
         triggers = evaluate_heuristics(pkg)
-        assert any(t["name"] == "stop_loss" for t in triggers)
+        assert not any(t["name"] == "stop_loss" for t in triggers)
 
     def test_min_hold_allows_safety_override(self):
         """During hold period, spread_inversion (safety) should still fire."""
@@ -92,18 +92,31 @@ class TestHeuristics:
         triggers = evaluate_heuristics(pkg)
         assert any(t["name"] == "target_hit" for t in triggers)
 
-    def test_expired_hold_allows_all_triggers(self):
-        """After hold period expires, all triggers fire normally."""
+    def test_expired_hold_negative_drift_strict_gate(self):
+        """After hold, negative_drift fires only with deep loss + long neg streak."""
         import time
         pkg = _make_pkg(strategy="pure_prediction")
-        pkg["_min_hold_until"] = time.time() - 1  # already expired
-        # Set entry prices >= 0.60 so trailing stop is eligible (entries < 0.60 skip it)
-        for leg in pkg["legs"]:
-            leg["entry_price"] = 0.70
-        pkg["peak_value"] = 20.0
-        pkg["current_value"] = 5.0
+        pkg["_min_hold_until"] = time.time() - 1
+        pkg["total_cost"] = 100.0
+        pkg["current_value"] = 85.0  # -15% P&L
+        pkg["_neg_streak"] = 10
+        # Soft exits require meaningful mid move vs entry (not fee-only flat book).
+        pkg["legs"][0]["current_price"] = 0.55  # was 0.60 → >1.5% move
+        pkg["legs"][1]["current_price"] = 0.32  # was 0.35 → >1.5% move
         triggers = evaluate_heuristics(pkg)
-        assert any(t["name"] == "trailing_stop" for t in triggers)
+        assert any(t["name"] == "negative_drift" for t in triggers)
+
+    def test_negative_drift_suppressed_when_price_flat(self):
+        """With P&L loss on paper but flat mids vs entry, skip negative_drift → AI."""
+        import time
+        pkg = _make_pkg(strategy="pure_prediction")
+        pkg["_min_hold_until"] = time.time() - 1
+        pkg["total_cost"] = 100.0
+        pkg["current_value"] = 85.0
+        pkg["_neg_streak"] = 10
+        # Legs still at entry — no real price discovery, likely fee/markup noise.
+        triggers = evaluate_heuristics(pkg)
+        assert not any(t["name"] == "negative_drift" for t in triggers)
 
 
 import asyncio

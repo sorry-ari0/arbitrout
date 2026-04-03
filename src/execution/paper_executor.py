@@ -1,4 +1,9 @@
-"""Paper executor — wraps real executor for simulated trading. Real prices, fake money."""
+"""Paper executor — wraps real executor for simulated trading. Real prices, fake money.
+
+When use_limit_orders=True (normal paper mode), buy and sell fees are forced to **0%**
+system-wide so the sim matches the intended **maker-only / no-fee** Polymarket GTC policy.
+Use use_limit_orders=False only to stress-test taker-fee economics.
+"""
 import logging, time, uuid
 from .base_executor import BaseExecutor, ExecutionResult, BalanceResult, PositionInfo
 
@@ -82,20 +87,22 @@ class PaperExecutor:
         self.total_fees_paid = 0.0
         self.use_limit_orders = use_limit_orders
         self._resting_orders: dict = {}  # order_id → resting order info
-        # Determine fee rates: maker for entry (limit orders), taker for exit (market orders)
         platform = getattr(real_executor, '__class__', type(real_executor)).__name__.lower()
-        self.buy_fee_rate = DEFAULT_FEE_RATE
-        self.sell_fee_rate = DEFAULT_FEE_RATE
-        for name, rate in MAKER_FEE_RATES.items():
-            # Strip underscores so "coinbase_spot" matches "coinbasespotexecutor"
-            if name.replace("_", "") in platform:
-                self.buy_fee_rate = rate if use_limit_orders else TAKER_FEE_RATES.get(name, DEFAULT_FEE_RATE)
-                break
-        for name, rate in MAKER_FEE_RATES.items():
-            if name.replace("_", "") in platform:
-                self.sell_fee_rate = rate if use_limit_orders else TAKER_FEE_RATES.get(name, DEFAULT_FEE_RATE)
-                break
-        # Keep fee_rate for backwards compat (average of buy/sell)
+
+        if use_limit_orders:
+            # Maker-only paper trading: no simulated fees (Polymarket GTC maker = 0%).
+            self.buy_fee_rate = 0.0
+            self.sell_fee_rate = 0.0
+        else:
+            # Taker / market-style sim — per-platform taker curve
+            self.buy_fee_rate = DEFAULT_FEE_RATE
+            self.sell_fee_rate = DEFAULT_FEE_RATE
+            for name, rate in MAKER_FEE_RATES.items():
+                if name.replace("_", "") in platform:
+                    taker = TAKER_FEE_RATES.get(name, DEFAULT_FEE_RATE)
+                    self.buy_fee_rate = taker
+                    self.sell_fee_rate = taker
+                    break
         self.fee_rate = self.buy_fee_rate
         self.order_type = "maker" if use_limit_orders else "taker"
         self.fee_rates = {"maker": self.buy_fee_rate}
@@ -156,26 +163,14 @@ class PaperExecutor:
         return ExecutionResult(True, tx_id, price, quantity, fee, None, execution_ms=int((time.time() - _t0) * 1000))
 
     async def buy_limit(self, asset_id: str, amount_usd: float, price: float) -> ExecutionResult:
-        """Simulate a limit buy using maker fee rate (0% for Polymarket).
-
-        Uses the provided limit price instead of fetching current price.
-        Computes fee inline using MAKER_FEE_RATES — does NOT mutate self.buy_fee_rate.
-        """
+        """Simulate a limit buy at maker fee (0% when use_limit_orders=True)."""
         _t0 = time.time()
         if amount_usd > self.balance:
             return ExecutionResult(False, None, 0, 0, 0, f"Insufficient paper balance: {self.balance:.2f} < {amount_usd:.2f}")
         if price <= 0:
             return ExecutionResult(False, None, 0, 0, 0, f"Invalid limit price for {asset_id}")
 
-        # Look up maker fee rate for this platform
-        platform = getattr(self.real, '__class__', type(self.real)).__name__.lower()
-        maker_rate = DEFAULT_FEE_RATE
-        for name, rate in MAKER_FEE_RATES.items():
-            if name in platform:
-                maker_rate = rate
-                break
-
-        fee = round(amount_usd * maker_rate, 4)
+        fee = round(amount_usd * self.buy_fee_rate, 4)
         total_cost = amount_usd + fee
         if total_cost > self.balance:
             return ExecutionResult(False, None, 0, 0, 0, f"Insufficient paper balance after fees: {self.balance:.2f} < {total_cost:.2f}")
