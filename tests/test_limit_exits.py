@@ -72,13 +72,30 @@ def test_sell_market_charges_maker_fee():
     assert result.fees == 0.0, "Polymarket sell should charge 0% maker fee"
 
 
-def test_check_order_status_returns_filled():
-    """Paper executor check_order_status() should return filled immediately."""
+def test_check_order_status_unknown_order_is_cancelled():
+    """Unknown order_id must not phantom-fill (matches lost-on-restart safety)."""
     pe = make_paper_executor()
-    result = asyncio.run(
-        pe.check_order_status("paper_abc123")
-    )
-    assert result["status"] == "filled"
+    result = asyncio.run(pe.check_order_status("paper_nonexistent"))
+    assert result["status"] == "cancelled"
+
+
+def test_check_order_status_filled_when_price_crosses_limit():
+    """Resting sell fills when market price >= limit (0% maker fee)."""
+    pe = make_paper_executor()
+    pe.positions["test:YES"] = {"quantity": 100.0, "avg_entry_price": 0.50}
+    r = asyncio.run(pe.sell_limit("test:YES", 100.0, 0.60))
+    assert r.success and r.tx_id
+    # Stub returns mid 0.50 — still open
+    st = asyncio.run(pe.check_order_status(r.tx_id))
+    assert st["status"] == "open"
+
+    async def high_price(_aid):
+        return 0.65
+
+    pe.real.get_current_price = high_price
+    st2 = asyncio.run(pe.check_order_status(r.tx_id))
+    assert st2["status"] == "filled"
+    assert st2["fee"] == 0.0
 
 
 def test_cancel_order_returns_true():

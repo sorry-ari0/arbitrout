@@ -4,12 +4,23 @@ from datetime import date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 
+def _stub_paper_executor(balance: float = 2000.0):
+    """Minimal executor so AutoTrader._get_current_bankroll() returns a real float."""
+    ex = MagicMock()
+    ex.balance = balance
+    ex.starting_balance = balance
+    return ex
+
+
 def _make_mock_pm():
     """Create a MagicMock position_manager with journal that returns 0.0 PnL."""
     pm = MagicMock()
     pm.trade_journal = MagicMock()
     pm.trade_journal.get_cumulative_pnl = MagicMock(return_value=0.0)
     pm.list_packages = MagicMock(return_value=[])
+    # Empty so bankroll = initial + journal PnL. If non-empty, each value must be stub executors
+    # with numeric .balance — otherwise _get_current_bankroll() returns MagicMock.
+    pm.executors = {}
     return pm
 
 
@@ -19,33 +30,32 @@ class TestChurnReduction:
         from positions.auto_trader import MIN_SPREAD_PCT
         assert MIN_SPREAD_PCT == 8.0
 
-    def test_max_trades_per_day_is_3(self):
+    def test_max_trades_per_day_matches_constant(self):
         from positions.auto_trader import MAX_NEW_TRADES_PER_DAY
-        assert MAX_NEW_TRADES_PER_DAY == 3
+        assert MAX_NEW_TRADES_PER_DAY == 12
 
     def test_cooldown_is_48h(self):
         from positions.auto_trader import MARKET_COOLDOWN_SECONDS
         assert MARKET_COOLDOWN_SECONDS == 172800
 
-    def test_daily_limit_blocks_after_3(self):
-        """_check_daily_limit should return False after 3 trades."""
-        from positions.auto_trader import AutoTrader
+    def test_daily_limit_blocks_at_cap(self):
+        """_check_daily_limit should return False after MAX_NEW_TRADES_PER_DAY trades."""
+        from positions.auto_trader import AutoTrader, MAX_NEW_TRADES_PER_DAY
         pm = _make_mock_pm()
         trader = AutoTrader(pm)
+        cap = MAX_NEW_TRADES_PER_DAY
         assert trader._check_daily_limit() is True
-        trader._daily_trade_count = 1
+        trader._daily_trade_count = cap - 1
         assert trader._check_daily_limit() is True
-        trader._daily_trade_count = 2
-        assert trader._check_daily_limit() is True
-        trader._daily_trade_count = 3
+        trader._daily_trade_count = cap
         assert trader._check_daily_limit() is False
 
     def test_daily_limit_resets_on_new_day(self):
         """Counter should reset when the date changes."""
-        from positions.auto_trader import AutoTrader
+        from positions.auto_trader import AutoTrader, MAX_NEW_TRADES_PER_DAY
         pm = _make_mock_pm()
         trader = AutoTrader(pm)
-        trader._daily_trade_count = 3
+        trader._daily_trade_count = MAX_NEW_TRADES_PER_DAY
         trader._daily_trade_date = "2020-01-01"
         assert trader._check_daily_limit() is True
         assert trader._daily_trade_count == 0
@@ -133,7 +143,7 @@ class TestTradeablePlatformFilter:
         """PredictIt arb should return None when PredictIt executor is absent."""
         from positions.auto_trader import AutoTrader
         pm = _make_mock_pm()
-        pm.executors = {"polymarket": MagicMock(), "kalshi": MagicMock()}
+        pm.executors = {"polymarket": _stub_paper_executor(), "kalshi": _stub_paper_executor()}
         trader = AutoTrader(pm)
 
         arb = self._make_arb(yes_platform="predictit", no_platform="polymarket")
@@ -146,9 +156,9 @@ class TestTradeablePlatformFilter:
         from positions.auto_trader import AutoTrader
         pm = _make_mock_pm()
         pm.executors = {
-            "polymarket": MagicMock(),
-            "kalshi": MagicMock(),
-            "predictit": MagicMock(),
+            "polymarket": _stub_paper_executor(),
+            "kalshi": _stub_paper_executor(),
+            "predictit": _stub_paper_executor(),
         }
         trader = AutoTrader(pm)
 
@@ -163,7 +173,7 @@ class TestTradeablePlatformFilter:
         import logging
         from positions.auto_trader import AutoTrader
         pm = _make_mock_pm()
-        pm.executors = {"polymarket": MagicMock(), "kalshi": MagicMock()}
+        pm.executors = {"polymarket": _stub_paper_executor(), "kalshi": _stub_paper_executor()}
         trader = AutoTrader(pm)
 
         arb = self._make_arb(yes_platform="polymarket", no_platform="kalshi")
@@ -177,7 +187,7 @@ class TestReferenceScanners:
     def test_theta_opportunity_converts_to_directional_trade(self):
         from positions.auto_trader import AutoTrader
         pm = _make_mock_pm()
-        pm.executors = {"polymarket": MagicMock()}
+        pm.executors = {"polymarket": _stub_paper_executor()}
         trader = AutoTrader(pm)
 
         opp = trader._theta_to_opportunity({
@@ -203,7 +213,7 @@ class TestReferenceScanners:
     def test_cross_asset_opportunity_converts_to_prediction_only_trade(self):
         from positions.auto_trader import AutoTrader
         pm = _make_mock_pm()
-        pm.executors = {"kalshi": MagicMock()}
+        pm.executors = {"kalshi": _stub_paper_executor()}
         trader = AutoTrader(pm)
 
         opp = trader._cross_asset_to_opportunity({
@@ -228,7 +238,7 @@ class TestReferenceScanners:
     def test_cross_asset_requires_tradeable_prediction_platform(self):
         from positions.auto_trader import AutoTrader
         pm = _make_mock_pm()
-        pm.executors = {"polymarket": MagicMock()}
+        pm.executors = {"polymarket": _stub_paper_executor()}
         trader = AutoTrader(pm)
 
         opp = trader._cross_asset_to_opportunity({
@@ -253,7 +263,7 @@ class TestLiquidityGates:
         from positions.auto_trader import AutoTrader
 
         pm = _make_mock_pm()
-        pm.executors = {"polymarket": MagicMock()}
+        pm.executors = {"polymarket": _stub_paper_executor()}
         pm.execute_package = AsyncMock(return_value={"success": True})
 
         trader = AutoTrader(pm, scanner=None)
@@ -282,7 +292,7 @@ class TestLiquidityGates:
         from positions.auto_trader import AutoTrader
 
         pm = _make_mock_pm()
-        pm.executors = {"polymarket": MagicMock()}
+        pm.executors = {"polymarket": _stub_paper_executor()}
         pm.execute_package = AsyncMock(return_value={"success": True})
 
         model = MagicMock()
@@ -358,11 +368,10 @@ class TestMarketCategoryFilter:
         assert _RATIO_MAX_EXPOSURE == 0.50
 
 
-class TestTrailingStopCalibration:
-    """Journal-driven: 0/8 trailing stop wins, NCAA lost -13.5% avg."""
+class TestTrailingStopDisabled:
+    """Trailing stop heuristic removed — journal showed 0% win rate on auto exits."""
 
-    def test_minimum_trail_floor(self):
-        """Trail should never go below 25%, even for favorites."""
+    def test_trailing_stop_never_fires(self):
         from positions.exit_engine import evaluate_heuristics
         pkg = {
             "strategy_type": "pure_prediction",
@@ -371,67 +380,10 @@ class TestTrailingStopCalibration:
             "exit_rules": [{"type": "trailing_stop", "active": True, "params": {"current": 35}}],
             "total_cost": 80,
             "peak_value": 100,
-            "current_value": 70,  # 30% drawdown from peak
+            "current_value": 20,
         }
         triggers = evaluate_heuristics(pkg)
-        trailing = [t for t in triggers if t["name"] == "trailing_stop"]
-        # 35 * 0.7 (favorite) = 24.5, but floor is 25%. Drawdown is 30% >= 25%
-        assert len(trailing) == 1
-        assert "25.0" in trailing[0]["details"]
-
-    def test_binary_event_wider_trail(self):
-        """Sports events with favorite entry should get 1.5x wider trail."""
-        from positions.exit_engine import evaluate_heuristics
-        pkg = {
-            "name": "Auto: NCAA Basketball Final",
-            "strategy_type": "pure_prediction",
-            "legs": [{"entry_price": 0.70, "status": "open", "current_price": 0.70,
-                       "quantity": 100, "cost": 70}],
-            "exit_rules": [{"type": "trailing_stop", "active": True, "params": {"current": 35}}],
-            "total_cost": 70,
-            "peak_value": 80,
-            "current_value": 30,  # 62.5% drawdown
-        }
-        triggers = evaluate_heuristics(pkg)
-        trailing = [t for t in triggers if t["name"] == "trailing_stop"]
-        # 35 * 0.7 (favorite) * 1.5 (sports) = 36.75%, floored to 36.75%. Drawdown 62.5% >= 36.75%
-        assert len(trailing) == 1
-
-    def test_non_sports_normal_trail(self):
-        """Non-sports favorite positions should use normal trail without widening."""
-        from positions.exit_engine import evaluate_heuristics
-        pkg = {
-            "name": "Auto: Will Bitcoin reach $100k",
-            "strategy_type": "pure_prediction",
-            "legs": [{"entry_price": 0.70, "status": "open", "current_price": 0.70,
-                       "quantity": 100, "cost": 70}],
-            "exit_rules": [{"type": "trailing_stop", "active": True, "params": {"current": 35}}],
-            "total_cost": 70,
-            "peak_value": 80,
-            "current_value": 55,  # 31.25% drawdown
-        }
-        triggers = evaluate_heuristics(pkg)
-        trailing = [t for t in triggers if t["name"] == "trailing_stop"]
-        # 35 * 0.7 (favorite) = 24.5%, floored to 25%. Drawdown 31.25% >= 25%
-        assert len(trailing) == 1
-
-    def test_non_favorite_trailing_stop_skipped(self):
-        """Mid-range entries (< 0.60) should NOT trigger trailing stop."""
-        from positions.exit_engine import evaluate_heuristics
-        pkg = {
-            "name": "Auto: Will BTC reach $120k",
-            "strategy_type": "pure_prediction",
-            "legs": [{"entry_price": 0.50, "status": "open", "current_price": 0.50,
-                       "quantity": 100, "cost": 50}],
-            "exit_rules": [{"type": "trailing_stop", "active": True, "params": {"current": 35}}],
-            "total_cost": 50,
-            "peak_value": 60,
-            "current_value": 25,  # 58% drawdown — would fire, but entry < 0.60
-        }
-        triggers = evaluate_heuristics(pkg)
-        trailing = [t for t in triggers if t["name"] == "trailing_stop"]
-        # Entry 0.50 < 0.60 threshold → trailing stop skipped entirely
-        assert len(trailing) == 0
+        assert not any(t["name"] == "trailing_stop" for t in triggers)
 
 
 class TestEquityCurve:
@@ -990,7 +942,8 @@ class TestNewsThresholds:
 
     def test_news_daily_cap_exists(self):
         from positions.news_scanner import DAILY_TRADE_CAP
-        assert DAILY_TRADE_CAP == 5
+        from positions.auto_trader import MAX_NEW_TRADES_PER_DAY
+        assert DAILY_TRADE_CAP == MAX_NEW_TRADES_PER_DAY == 12
 
 
 class TestMultiOutcomeArbHoldToResolution:

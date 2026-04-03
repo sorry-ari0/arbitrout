@@ -10,21 +10,25 @@ from datetime import datetime, date, timedelta
 
 logger = logging.getLogger("positions.exit_engine")
 
-# ── Feature flag: AI-recommended exits ────────────────────────────────────────
-# Trade journal analysis (35 trades, 88.6% loss rate) shows AI-approved exits
-# have 0% win rate across 23 trades. auto:trailing_stop averages -$13.86/trade.
-# Mechanical auto-exits allowed: target_hit, stale_position, partial_profit only.
-# Set to True to re-enable AI exit approvals after win rate improves.
-AI_EXITS_ENABLED = False
+# ── AI exit policy ───────────────────────────────────────────────────────────
+# Banned: trailing_stop + stop_loss heuristics are OFF and never AI-approved (journal EV).
+# Soft review: time_decay + negative_drift go to the LLM only when gates below fire.
+AI_SOFT_EXITS_ENABLED = True
 
-# !! DO NOT REMOVE entries from this set !!
-# Every trigger here was added because journal data proved it destroys EV:
-#   time_decay     — 0% win rate across 23 AI-approved exits
-#   negative_drift — 0% win rate, premature exits on normal market noise
-#   trailing_stop  — 0/8 wins, avg -$13.86/trade (prediction markets resolve $0/$1)
-#   stop_loss      — caused -$33.22 single-trade loss on ETH synthetic (2026-03-25)
-# Blocked at THREE layers: _tick filter (L635), _auto_execute (L731), _apply_verdicts (L817)
-_AI_EXIT_TRIGGERS = frozenset({"time_decay", "negative_drift", "trailing_stop", "stop_loss"})
+# Deprecated alias (dashboard / imports)
+AI_EXITS_ENABLED = AI_SOFT_EXITS_ENABLED
+
+# Never batch to AI, never honor APPROVE, never auto-exit from heuristic (heuristics disabled).
+_BANNED_EXIT_TRIGGERS = frozenset({"trailing_stop", "stop_loss"})
+
+# LLM review only — tightened heuristics + nuanced prompt (see ai_advisor).
+_AI_SOFT_REVIEW_TRIGGERS = frozenset({"time_decay", "negative_drift"})
+
+# Skip soft AI exits when mids are flat vs entry (avoids paying exit fees for noise).
+FLAT_MOVE_THRESHOLD_AI_SOFT = 0.015  # 1.5% max |Δp|/entry on open legs → "flat"
+
+# Back-compat for code that still imports _AI_EXIT_TRIGGERS
+_AI_EXIT_TRIGGERS = _BANNED_EXIT_TRIGGERS | _AI_SOFT_REVIEW_TRIGGERS
 
 # ── Trigger IDs ─────────────────────────────────────────────────────────────
 # Category: Profit Taking (1-3)
@@ -84,6 +88,20 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
 
     peak_value = pkg.get("peak_value", total_cost)
 
+    # Largest relative move from entry among open legs (for soft-exit gating).
+    max_open_leg_move_frac = 0.0
+    for leg in legs:
+        if leg.get("status") != "open":
+            continue
+        try:
+            e = float(leg.get("entry_price") or 0)
+            c = float(leg.get("current_price") or 0)
+        except (TypeError, ValueError):
+            continue
+        if e > 0.01:
+            max_open_leg_move_frac = max(max_open_leg_move_frac, abs(c - e) / e)
+    soft_exit_price_flat = max_open_leg_move_frac < FLAT_MOVE_THRESHOLD_AI_SOFT
+
     # ── 1: Target Hit ───────────────────────────────────────────────────────
     # Hold-to-resolution positions resolve at $0/$1, so a 50% target would
     # cut arbs early. Override to 90% (near-resolution) UNLESS the package
@@ -99,59 +117,8 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
                     "details": f"P&L {pnl_pct:.1f}% >= target {target}%",
                     "action": "full_exit", "safety_override": False})
 
-    # ── 2: Trailing Stop (adaptive, price-level-aware) ───────────────────────
-    # Skip trailing stop entirely for hold-to-resolution positions (arb, synthetics,
-    # high-probability predictions). These resolve at $0 or $1 — trailing stops
-    # just cut winners early on normal prediction market noise.
-    # Also skip for non-favorites (entry < 0.60): journal shows 0/8 trailing stop
-    # wins. Mid-range and longshot positions rely on bracket target + stop loss.
-    if not pkg.get("_hold_to_resolution"):
-        for rule in rules:
-            if rule.get("type") == "trailing_stop" and rule.get("active"):
-                trail_pct = rule["params"].get("current", 35)
-                # Adapt trail by average entry price across legs
-                avg_entry = 0.5
-                open_legs = [l for l in legs if l.get("status") == "open"]
-                if open_legs:
-                    entries = [l.get("entry_price", 0.5) for l in open_legs]
-                    avg_entry = sum(entries) / len(entries)
-
-                # Skip trailing stop for non-favorites — 0/8 wins in journal.
-                # These positions should ride to resolution or hit bracket target.
-                if avg_entry < 0.60:
-                    continue
-
-                if avg_entry <= 0.30:
-                    trail_pct *= 2.0  # Longshots: very wide trail
-                # Favorites in standard mode: tighter trail to protect gains
-                elif avg_entry >= 0.60:
-                    trail_pct *= 0.7
-
-                # Binary-outcome markets (sports) need wider trails
-                # Journal: 8 trailing_stop exits, 0 wins. NCAA lost -13.5% avg.
-                # These markets resolve at $0 or $1 — noise is extreme.
-                # Uses SPORTS_KEYWORDS from auto_trader for consistency.
-                pkg_name = (pkg.get("name") or "").lower()
-                try:
-                    from .auto_trader import SPORTS_KEYWORDS
-                except ImportError:
-                    SPORTS_KEYWORDS = ["ncaa", "nba", "nfl", "score", "match", "vs."]
-                is_binary_event = any(kw in pkg_name for kw in SPORTS_KEYWORDS)
-                if is_binary_event:
-                    trail_pct *= 1.5  # 50% wider for binary events
-                    # Note: longshot (2.0x) + sports (1.5x) = 105% trail — effectively
-                    # disables trailing stop for longshot sports. This is intentional:
-                    # binary-outcome longshots should ride to resolution, not be scalped.
-
-                # Enforce minimum trail of 25% — anything tighter just catches noise
-                trail_pct = max(trail_pct, 25.0)
-
-                if peak_value > 0:
-                    drawdown = (peak_value - current_value) / peak_value * 100
-                    if drawdown >= trail_pct:
-                        triggers.append({"trigger_id": T_TRAILING_STOP, "name": "trailing_stop",
-                            "details": f"Drawdown {drawdown:.1f}% >= adaptive trail {trail_pct:.1f}% (entry={avg_entry:.2f})",
-                            "action": "full_exit", "safety_override": False})
+    # ── 2: Trailing Stop — DISABLED (journal: auto/LLM trailing exits 0% win rate)
+    # Exit rules may still exist for UI/brackets; heuristic never fires here.
 
     # ── 3: Partial Profit ───────────────────────────────────────────────────
     for rule in rules:
@@ -162,18 +129,8 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
                     "details": f"P&L {pnl_pct:.1f}% >= partial threshold {threshold}%",
                     "action": "partial_exit", "safety_override": False})
 
-    # ── 4: Stop Loss ───────────────────────────────────────────────────────
-    # Skip for hold-to-resolution: these positions resolve at $0 or $1.
-    # A temporary drawdown is not a reason to exit — stop_loss destroyed EV
-    # on the ETH synthetic (-$33.22) by exiting a winning position early.
-    if not pkg.get("_hold_to_resolution"):
-        for rule in rules:
-            if rule.get("type") == "stop_loss" and rule.get("active"):
-                stop = rule["params"].get("stop_pct", -15)
-                if pnl_pct <= stop:
-                    triggers.append({"trigger_id": T_STOP_LOSS, "name": "stop_loss",
-                        "details": f"P&L {pnl_pct:.1f}% <= stop {stop}%",
-                        "action": "full_exit", "safety_override": False})
+    # ── 4: Stop Loss — DISABLED (journal: ai_approved:stop_loss destroyed EV)
+    # Kill switch / manual exits still available via dashboard; no heuristic fire.
 
     # ── 5: New ATH (trailing adjustment) ────────────────────────────────────
     if current_value > peak_value and peak_value > 0:
@@ -229,18 +186,28 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
     # ── 10: Time <24h (SAFETY) ──────────────────────────────────────────────
     _check_expiry_triggers(legs, triggers)
 
-    # ── 12: Time Decay (general) ────────────────────────────────────────────
-    for leg in legs:
-        if leg.get("expiry"):
-            try:
-                exp = datetime.strptime(leg["expiry"], "%Y-%m-%d").date()
-                days_left = (exp - date.today()).days
-                if 1 <= days_left <= 3:
-                    triggers.append({"trigger_id": T_TIME_DECAY, "name": "time_decay",
-                        "details": f"Leg {leg['leg_id']} expires in {days_left} days",
-                        "action": "review", "safety_override": False})
-            except (ValueError, TypeError):
-                pass
+    # ── 12: Time Decay — strict gate (package-level): only near expiry AND extreme P&L
+    # Old rule (1–3d for every leg) caused AI to exit too often with negative P&L.
+    # Now: <=2d to soonest expiry AND (deep loss <=-18% OR lock big winner >=+28%).
+    if not pkg.get("_hold_to_resolution"):
+        min_days: int | None = None
+        for leg in legs:
+            if leg.get("expiry"):
+                try:
+                    exp = datetime.strptime(leg["expiry"], "%Y-%m-%d").date()
+                    dleft = (exp - date.today()).days
+                    if dleft >= 0 and (min_days is None or dleft < min_days):
+                        min_days = dleft
+                except (ValueError, TypeError):
+                    pass
+        if min_days is not None and min_days <= 2:
+            deep_loss = pnl_pct <= -18.0
+            big_winner = pnl_pct >= 28.0
+            if (deep_loss or big_winner) and not soft_exit_price_flat:
+                tag = "deep_loss_near_expiry" if deep_loss else "big_winner_near_expiry"
+                triggers.append({"trigger_id": T_TIME_DECAY, "name": "time_decay",
+                    "details": f"Soonest expiry in {min_days}d, P&L {pnl_pct:+.1f}% ({tag})",
+                    "action": "review", "safety_override": False})
 
     # ── 13: Volatility Spike ────────────────────────────────────────────────
     # Requires price history — check if any leg moved >10% in last tick
@@ -256,16 +223,12 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
     # Placeholder — requires historical vol tracking
     pass
 
-    # ── 15: Negative Drift ──────────────────────────────────────────────────
-    # Hardened: was -2% + 3 ticks (normal noise). Data showed 4 AI-approved
-    # negative_drift exits, 0 wins, -$55. Now requires genuine deterioration.
-    # Skip for hold-to-resolution: arbs/synthetics/high-prob resolve at $0 or $1,
-    # cumulative negative drift is just noise until resolution.
+    # ── 15: Negative Drift — stricter sustained loss (noise filter)
     if not pkg.get("_hold_to_resolution"):
         neg_streak = pkg.get("_neg_streak", 0)
-        if pnl_pct < -8 and neg_streak >= 5:
+        if pnl_pct < -12.0 and neg_streak >= 8 and not soft_exit_price_flat:
             triggers.append({"trigger_id": T_NEGATIVE_DRIFT, "name": "negative_drift",
-                "details": f"Sustained negative P&L ({pnl_pct:.1f}%) for {neg_streak} ticks",
+                "details": f"Sustained loss P&L {pnl_pct:.1f}% across {neg_streak} consecutive negative ticks",
                 "action": "review", "safety_override": False})
 
     # ── 16: Platform Error ──────────────────────────────────────────────────
@@ -349,13 +312,12 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
 
     # ── Minimum hold period enforcement ────────────────────────────────────
     # Suppress non-safety, non-mechanical triggers during the hold period.
-    # Safety overrides and mechanical exits (target_hit, stop_loss) still fire —
-    # we don't suppress profitable exits or risk management.
+    # Safety overrides and target_hit still fire during min-hold.
     min_hold_until = pkg.get("_min_hold_until", 0)
     if min_hold_until and time.time() < min_hold_until:
         triggers = [t for t in triggers if (
             t.get("safety_override") or
-            t["name"] in ("target_hit", "stop_loss", "political_event_resolved")
+            t["name"] in ("target_hit", "political_event_resolved")
         )]
 
     return triggers
@@ -477,7 +439,7 @@ class ExitEngine:
         "stale_position": 86400, # 24 hours — daily check is enough
         "longshot_decay": 43200, # 12 hours — check twice daily
     }
-    # No cooldown: target_hit, stop_loss, trailing_stop, safety overrides
+    # No cooldown: target_hit, safety overrides
 
     def __init__(self, position_manager, ai_advisor=None, interval: float = 60.0, decision_logger=None, news_scanner=None, bracket_manager=None):
         self.pm = position_manager
@@ -722,17 +684,24 @@ class ExitEngine:
             if pkg.get("_brackets"):
                 continue
 
-            # Filter out AI exit triggers when AI exits are disabled
-            if not AI_EXITS_ENABLED and ai_triggers:
-                blocked = [t for t in ai_triggers if t["name"] in _AI_EXIT_TRIGGERS]
-                ai_triggers = [t for t in ai_triggers if t["name"] not in _AI_EXIT_TRIGGERS]
+            # Strip banned triggers from AI batch (belt — heuristics already off)
+            if ai_triggers:
+                banned_hits = [t for t in ai_triggers if t["name"] in _BANNED_EXIT_TRIGGERS]
+                ai_triggers = [t for t in ai_triggers if t["name"] not in _BANNED_EXIT_TRIGGERS]
+                for t in banned_hits:
+                    if self.dlog:
+                        self.dlog.log_trigger_suppressed(pkg["id"], t["name"], "banned_exit_trigger")
+
+            if not AI_SOFT_EXITS_ENABLED and ai_triggers:
+                blocked = [t for t in ai_triggers if t["name"] in _AI_SOFT_REVIEW_TRIGGERS]
+                ai_triggers = [t for t in ai_triggers if t["name"] not in _AI_SOFT_REVIEW_TRIGGERS]
                 for t in blocked:
-                    logger.info("AI exit SKIPPED (AI_EXITS_ENABLED=False) [%s] on %s: %s",
+                    logger.info("AI soft exit SKIPPED (AI_SOFT_EXITS_ENABLED=False) [%s] on %s: %s",
                                 t["name"], pkg["id"], t["details"])
                     if self.dlog:
                         self.dlog.log_trigger_suppressed(
                             pkg["id"], t["name"],
-                            f"ai_exits_disabled: {t['details']}")
+                            f"ai_soft_exits_disabled: {t['details']}")
 
             # Collect AI triggers for batched review
             if ai_triggers and not pkg.get("_exiting"):
@@ -820,11 +789,14 @@ class ExitEngine:
     async def _auto_execute_triggers(self, pkg: dict, triggers: list[dict]):
         """Auto-execute mechanical triggers when AI is unavailable."""
         for trigger in triggers:
-            # Layer 3: block suppressed triggers even if they leaked past _tick filter
-            if not AI_EXITS_ENABLED and trigger["name"] in _AI_EXIT_TRIGGERS:
+            if trigger["name"] in _BANNED_EXIT_TRIGGERS:
+                if self.dlog:
+                    self.dlog.log_trigger_suppressed(pkg["id"], trigger["name"], "banned_exit_trigger_auto")
+                continue
+            if not AI_SOFT_EXITS_ENABLED and trigger["name"] in _AI_SOFT_REVIEW_TRIGGERS:
                 if self.dlog:
                     self.dlog.log_trigger_suppressed(
-                        pkg["id"], trigger["name"], "ai_exits_disabled_auto_execute")
+                        pkg["id"], trigger["name"], "ai_soft_exits_disabled_auto_execute")
                 continue
             if trigger["name"] in ("target_hit", "stale_position"):
                 logger.info("Auto-executing %s on %s: %s",
@@ -916,10 +888,9 @@ class ExitEngine:
     async def _apply_verdicts(self, pkg: dict, triggers: list[dict], verdicts: dict):
         """Apply AI verdicts — APPROVE=execute, MODIFY=adjust, REJECT=skip."""
         for trigger in triggers:
-            # Safety net: block AI exits even if they bypassed the _tick filter
-            if not AI_EXITS_ENABLED and trigger["name"] in _AI_EXIT_TRIGGERS:
-                logger.info("AI exit BLOCKED in _apply_verdicts [%s] on %s (AI_EXITS_ENABLED=False)",
-                            trigger["name"], pkg["id"])
+            if trigger["name"] in _BANNED_EXIT_TRIGGERS:
+                logger.warning("AI verdict ignored for banned trigger [%s] on %s",
+                               trigger["name"], pkg["id"])
                 continue
 
             verdict = self._find_verdict(trigger, verdicts)

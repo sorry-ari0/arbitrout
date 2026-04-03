@@ -167,36 +167,27 @@ trigger_name: REJECT <short reason>
 trigger_name: MODIFY <new_value>
 trigger_name: APPROVE
 
-EXAMPLE OUTPUT (for triggers named trailing_stop and time_decay):
-time_decay: REJECT position has 5 days left and P&L is only -1%
-trailing_stop: REJECT drawdown is only 8%, normal volatility
+EXAMPLE OUTPUT (for time_decay and negative_drift):
+time_decay: REJECT no adverse headlines; P&L not clearly doomed
+negative_drift: APPROVE headlines confirm thesis broken and loss is structural
 
 VERDICT RULES:
 - REJECT = the trigger fired but the position should stay open. THIS IS YOUR DEFAULT. Most triggers should be rejected.
 - MODIFY = adjust parameter (within bounds). Use sparingly.
 - APPROVE = execute the exit. USE THIS ONLY when the trigger condition is genuinely met AND the position should close.
-- MODIFY = adjust parameter (within bounds). Use sparingly.
-- REJECT = the trigger fired but the position should stay open.
 
-CRITICAL CONTEXT — PAPER TRADING PERFORMANCE DATA:
-Out of 31 closed trades, every single automated exit lost money:
-- trailing_stop: 5 exits, 0 wins, -$59 total
-- AI-approved time_decay: 7 exits, 0 wins, -$29 total
-- AI-approved negative_drift: 4 exits, 0 wins, -$55 total
-- manual exits (human held positions): 13 exits, 3 wins, -$2 total (near break-even)
-The #1 cause of losses is PREMATURE EXITS. Your default should be REJECT.
+CRITICAL CONTEXT — JOURNAL (prediction markets):
+Premature exits on mild noise destroyed EV. Heuristic gates now only fire time_decay / negative_drift on deep loss, big winners near expiry, or sustained negative ticks.
 
 GUIDELINES:
-- DEFAULT ACTION IS REJECT. Prediction markets resolve to $0 or $1 — patience wins, panic selling loses. Only approve exits when there is overwhelming evidence the position is wrong.
-- target_hit: APPROVE. These are mechanical — the threshold was set for a reason.
-- trailing_stop: ALWAYS REJECT. 0/8 wins in journal. Prediction markets resolve at $0/$1 — drawdowns are noise, not signal.
-- time_decay: ALWAYS REJECT. Exiting early forfeits the thesis. Markets move most in final hours.
-- negative_drift: ALWAYS REJECT. Temporary dips are normal volatility, not reasons to exit.
-- stop_loss: ALWAYS REJECT. Prediction markets are binary — a drawdown is not a reason to exit. Stop-losses destroyed -$33.22 on a single trade.
+- DEFAULT ACTION IS REJECT.
+- target_hit: APPROVE (mechanical profit take).
+- time_decay: The system only proposes this when (a) <=2 days to expiry AND P&L <= -18% (deep loser), OR (b) <=2 days AND P&L >= +28% (large winner). APPROVE (a) only if RECENT NEWS (below) supports that the thesis is broken (poll moved, candidate dropped, factual resolution). REJECT (a) if news is absent or benign — likely noise. APPROVE (b) only if headline risk could erase the gain before settlement; otherwise REJECT and let brackets/targets handle it.
+- negative_drift: Only fires after many consecutive losing ticks and P&L worse than -12%. APPROVE only if RECENT NEWS explains the move (scandal, ruling, data release). If news is empty or unrelated, REJECT — drift is often mean-reversion before resolution.
 - stale_position: REJECT if P&L is between -10% and +10% — the position may still be developing. APPROVE only if truly stagnant (>10 days, <2% absolute move).
 - longshot_decay: APPROVE only if the position has lost >30% of its entry value.
-- new_ath, vol_spike, spread_compression: REJECT — these are informational, not actionable.
-- ANY trigger within 6 hours of expiry: REJECT. Prediction markets exhibit maximum gamma near settlement — the final hours contain 50%+ of total price movement. Exiting during this period forfeits the highest-value window. The ONLY exception is spread_inversion (safety override, handled automatically).
+- new_ath, vol_spike, spread_compression: REJECT — informational, not actionable.
+- Within 6h of expiry: still default REJECT unless news clearly invalidates the position (same as time_decay).
 Do NOT include trigger numbers, parentheses, reasoning lines, or any text other than the verdict lines."""
 
     # Pattern to detect a valid verdict line: the part after the colon must
@@ -390,9 +381,16 @@ Do NOT include trigger numbers, parentheses, reasoning lines, or any text other 
                         f"(confidence: {h.get('confidence', '?')}/10, {h.get('sentiment', 'neutral')})"
                         for h in headlines[:5]  # Cap at 5 headlines
                     )
-                    news_text = f"\nRECENT NEWS (last 24h):\n{items}\nIf no NEGATIVE news exists, default to REJECT for trailing_stop, negative_drift, time_decay."
+                    news_text = (
+                        f"\nRECENT NEWS (last 24h):\n{items}\n"
+                        "For time_decay (deep loss) or negative_drift: APPROVE only if a headline "
+                        "directly undermines the trade thesis. If none do, REJECT."
+                    )
                 else:
-                    news_text = "\nRECENT NEWS: (none found) — no fundamental reason for price movement. Default to REJECT."
+                    news_text = (
+                        "\nRECENT NEWS: (none found). For time_decay (loss) or negative_drift, "
+                        "default REJECT unless package details alone prove the thesis is dead."
+                    )
             sections.append(f"[PKG:{pkg_id}]\n{context}{news_text}\nTRIGGERS:\n{proposal_text}")
 
         combined = "\n\n---\n\n".join(sections)
@@ -417,19 +415,16 @@ VERDICT RULES:
 - MODIFY <new_value> = adjust parameter within bounds.
 - APPROVE = execute the exit ONLY when genuinely warranted.
 
-CRITICAL — PERFORMANCE DATA: Every automated exit lost money (17 exits, 0 wins, -$143). Default is REJECT.
+CRITICAL: Default REJECT. Only APPROVE time_decay / negative_drift when news or facts clearly warrant exit (see below).
 
 GUIDELINES:
-- DEFAULT IS REJECT. Prediction markets resolve to $0 or $1 — patience wins, panic selling loses.
-- target_hit: APPROVE. Mechanical triggers.
-- trailing_stop: ALWAYS REJECT. 0/8 wins. Drawdowns are noise on binary markets.
-- time_decay: ALWAYS REJECT. Markets move most near settlement — exiting early forfeits the thesis.
-- negative_drift: ALWAYS REJECT. Temporary dips are normal volatility.
-- stop_loss: ALWAYS REJECT. Binary resolution means drawdowns are not terminal.
+- target_hit: APPROVE (mechanical).
+- time_decay: Heuristic only fires for <=2d to expiry AND (P&L<=-18% OR P&L>=+28%). For deep loss: APPROVE only with adverse news matching the thesis. For large gain: APPROVE only if imminent headline risk; else REJECT.
+- negative_drift: Heuristic only after sustained negative ticks and P&L<-12%. APPROVE only if news explains structural loss; else REJECT.
 - stale_position: REJECT if P&L between -10% and +10%. APPROVE only if >10 days and <2% move.
 - longshot_decay: APPROVE only if position lost >30% of entry value.
 - new_ath, vol_spike, spread_compression: REJECT — informational only.
-- ANY trigger within 6 hours of expiry: REJECT (max gamma near settlement, exiting forfeits highest-value window).
+- If RECENT NEWS section is empty or benign: REJECT time_decay and negative_drift.
 Do NOT include reasoning, just verdict lines grouped by package."""
 
     def _parse_batched_response(self, text: str, pkg_ids: list[str]) -> dict[str, dict]:

@@ -23,7 +23,7 @@ class TestPaperBuy:
         r = _run(paper.buy("tok:YES", 100.0))
         assert r.success and r.filled_price == 0.65 and r.tx_id.startswith("paper_")
         b = _run(paper.get_balance())
-        # $100 buy + 2% taker fee ($2) = $102 deducted from $1000
+        # Default paper uses maker mode: $100 buy, 0% fee
         expected = 1000.0 - 100.0 - (100.0 * paper.fee_rate)
         assert b.available == pytest.approx(expected)
     def test_insufficient(self, paper):

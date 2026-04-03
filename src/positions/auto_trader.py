@@ -9,6 +9,7 @@ Respects position limits and only trades in paper mode.
 """
 import asyncio
 import logging
+import os
 import re
 import time
 from datetime import datetime, date, timedelta
@@ -21,9 +22,11 @@ except ImportError:
 logger = logging.getLogger("positions.auto_trader")
 
 # Position limits — derived from bankroll at runtime
-MAX_CONCURRENT = 20          # Max 20 open packages (raised from 10 — was triggering insider_only_mode too early)
-INSIDER_EXTRA_SLOTS = 3      # Extra slots beyond MAX_CONCURRENT for insider-signaled trades
-NEWS_EXTRA_SLOTS = 2         # Extra slots beyond MAX_CONCURRENT for news-driven trades
+MAX_CONCURRENT = 35          # Base open packages before insider+news-only overflow mode
+INSIDER_EXTRA_SLOTS = 6    # Extra slots beyond MAX_CONCURRENT for insider-signaled trades
+NEWS_EXTRA_SLOTS = 6         # Extra slots beyond MAX_CONCURRENT for news-driven trades
+# Hard ceiling (base + overflow zone). Keep news_scanner.MAX_CONCURRENT in sync.
+HARD_MAX_OPEN_PACKAGES = MAX_CONCURRENT + max(INSIDER_EXTRA_SLOTS, NEWS_EXTRA_SLOTS)
 PORTFOLIO_EXPOSURE_CAP = 0.40  # Kelly portfolio rule: never exceed 40% of total bankroll
 
 # Bankroll -> dollar limit ratios
@@ -32,14 +35,13 @@ _RATIO_MIN_TRADE = 0.005       # $10 / $2000, with $1.00 floor for Polymarket pr
 _RATIO_MAX_EXPOSURE = 0.50     # 50% of bankroll ($10 at $20, $1000 at $2000)
 _MIN_TRADE_FLOOR = 1.0         # Polymarket practical minimum
 SCAN_INTERVAL = 300          # 5 minutes between self-initiated scans (safety net)
-MIN_SPREAD_PCT = 8.0         # Minimum 8% spread (reduced: 0% maker fees both sides)
-# Polymarket: 0% maker fee on GTC limit orders for BOTH entry and exit.
-# All orders (buy + sell) now use GTC limit at spread edge = 0% round-trip.
-# With 8% min spread - 0% fees = 8% net margin minimum.
-# Lowered from 12%: with 0% fees we can capture more opportunities.
+# Directional minimum spread: signal-backed (news/insider/reference) vs scanner-only.
+MIN_SPREAD_PCT_SIGNAL = 8.0
+MIN_SPREAD_PCT_DIRECTIONAL = 12.0
+MIN_SPREAD_PCT = MIN_SPREAD_PCT_SIGNAL  # backward compat alias
 ROUND_TRIP_FEE_PCT = 0.0     # 0% round-trip fees (maker orders both sides)
 MAX_LOSSES_PER_MARKET = 2    # Block market after 2 losses (prevents BTC-top-performer pattern: 6 entries, $24 lost)
-MAX_NEW_TRADES_PER_DAY = 3          # Max new positions per calendar day
+MAX_NEW_TRADES_PER_DAY = 12         # Max new Auto: packages per calendar day (paper-friendly)
 MARKET_COOLDOWN_SECONDS = 172800    # 48h cooldown per market (was 86400)
 MIN_HOURS_TO_EXPIRY = 1.0  # Skip markets expiring within 1 hour (dynamic fees, bot dominance)
 
@@ -47,6 +49,22 @@ MIN_HOURS_TO_EXPIRY = 1.0  # Skip markets expiring within 1 hour (dynamic fees, 
 # Directional bets can only consume the remaining 60%. This prevents arb starvation
 # that the decision log showed: 30-43% spread arbs repeatedly blocked.
 ARB_BUDGET_RESERVE_PCT = 0.40
+# Reserve slice of max exposure for news-driven packages (proven sleeve in journal).
+NEWS_BUDGET_RESERVE_PCT = 0.15
+
+# Cross-platform arb: execution-time re-quote + Kelly gate until journal shows wins.
+CROSS_ARB_MAX_QUOTE_AGE_SEC = 90.0
+CROSS_ARB_MIN_EDGE_REQUOTE_PCT = 2.5   # (1 - yes - no) * 100 after fresh mids
+CROSS_PLATFORM_KELLY_GATE_MIN_CLOSES = 4
+CROSS_PLATFORM_KELLY_CAP_UNTIL_WIN = 0.12  # max Kelly fraction when 0 wins in sample
+
+# Cap concurrent directional packages (scanner pure_prediction path).
+MAX_CONCURRENT_PURE_PREDICTION = 14
+
+# Optional: set SYNTHETIC_DERIVATIVE_EXPERIMENT=true to allow tiny synthetic experiment.
+SYNTHETIC_DERIVATIVE_EXPERIMENT = os.environ.get("SYNTHETIC_DERIVATIVE_EXPERIMENT", "").lower() in (
+    "1", "true", "yes",
+)
 
 # Hold to resolution for short-expiry prediction markets (<= this many days).
 # Research: trailing stops (-$98) and time exits (-$39) destroyed value.
@@ -129,6 +147,13 @@ COMMODITIES_KEYWORDS = [
 ]
 
 # Portfolio correlation category detection (uses SPORTS_KEYWORDS defined above)
+# Opportunity types where volume is often missing on reconstructed dicts but legs have liquidity.
+_VOLUME_FLOOR_TYPES = frozenset({
+    "political_synthetic", "crypto_synthetic", "synthetic_derivative",
+    "multi_outcome_arb", "portfolio_no", "weather_forecast",
+    "theta_consensus", "cross_asset_reference",
+})
+
 CATEGORY_KEYWORDS = {
     "crypto": ["btc", "bitcoin", "eth", "ethereum", "crypto", "solana", "sol", "xrp",
                "cardano", "dogecoin", "doge", "bnb", "ripple", "avalanche", "polygon"],
@@ -206,6 +231,65 @@ class AutoTrader:
         self._min_trade_size = round(max(_MIN_TRADE_FLOOR, bankroll * _RATIO_MIN_TRADE), 2)
         self._max_total_exposure = round(bankroll * _RATIO_MAX_EXPOSURE, 2)
         self._total_bankroll = bankroll
+
+    @staticmethod
+    def _matched_cluster_ids(matched: dict) -> set[str]:
+        ids: set[str] = set()
+        for m in matched.get("markets", []) or []:
+            cid = (
+                m.get("conditionId") or m.get("condition_id") or m.get("market_id")
+                or m.get("id") or m.get("event_id") or ""
+            )
+            if cid:
+                ids.add(str(cid).lower())
+        return ids
+
+    def _arb_legs_in_matched_cluster(self, opp: dict) -> bool:
+        matched = opp.get("matched_event") or {}
+        cluster = self._matched_cluster_ids(matched)
+        if not cluster:
+            return False
+        yid = (opp.get("buy_yes_market_id") or "").lower()
+        nid = (opp.get("buy_no_market_id") or "").lower()
+        return bool(yid and nid and yid in cluster and nid in cluster)
+
+    async def _precheck_cross_platform_arb(self, opp: dict) -> tuple[bool, str]:
+        """Re-quote both legs; enforce scan freshness and post-requote edge."""
+        if not self._arb_legs_in_matched_cluster(opp):
+            return False, "cross_arb_cluster_mismatch"
+        if self.scanner:
+            last_scan = float(getattr(self.scanner, "_last_scan_time", 0) or 0)
+            if last_scan > 0 and (time.time() - last_scan) > CROSS_ARB_MAX_QUOTE_AGE_SEC:
+                return False, "cross_arb_stale_scan"
+
+        buy_yes_platform = opp.get("buy_yes_platform", "")
+        buy_no_platform = opp.get("buy_no_platform", "")
+        yes_id = opp.get("buy_yes_market_id", "")
+        no_id = opp.get("buy_no_market_id", "")
+        yes_ex = self.pm.executors.get(buy_yes_platform) if self.pm else None
+        no_ex = self.pm.executors.get(buy_no_platform) if self.pm else None
+        if not yes_ex or not no_ex:
+            return False, "cross_arb_no_executor"
+
+        aid_yes = f"{yes_id}:YES"
+        aid_no = f"{no_id}:NO"
+        try:
+            py = float(await yes_ex.get_current_price(aid_yes))
+            pn = float(await no_ex.get_current_price(aid_no))
+        except Exception as e:
+            logger.warning("Cross-arb re-quote failed: %s", e)
+            return False, "cross_arb_requote_failed"
+        if py < 0.01 or pn < 0.01:
+            return False, "cross_arb_requote_zero"
+        edge_pct = (1.0 - py - pn) * 100.0
+        if edge_pct < CROSS_ARB_MIN_EDGE_REQUOTE_PCT:
+            return False, "cross_arb_requote_edge_gone"
+
+        opp["buy_yes_price"] = round(py, 4)
+        opp["buy_no_price"] = round(pn, 4)
+        opp["profit_pct"] = round(edge_pct, 2)
+        opp["net_profit_pct"] = round(edge_pct, 2)
+        return True, ""
 
     def set_political_analyzer(self, analyzer):
         """Set the political analyzer reference for opportunity consumption."""
@@ -323,6 +407,15 @@ class AutoTrader:
         """
         edge = KELLY_EDGE_BY_STRATEGY.get(strategy, 0.02)
         frac = KELLY_FRACTION_BY_STRATEGY.get(strategy, 0.25)
+        if strategy == "cross_platform_arb" and self.pm.trade_journal:
+            xs = [
+                e for e in self.pm.trade_journal.entries
+                if e.get("strategy_type") == "cross_platform_arb"
+            ]
+            if len(xs) >= CROSS_PLATFORM_KELLY_GATE_MIN_CLOSES:
+                wins = sum(1 for e in xs if e.get("outcome") == "win")
+                if wins == 0:
+                    frac = min(frac, CROSS_PLATFORM_KELLY_CAP_UNTIL_WIN)
 
         # For strategies with known spread, use actual spread as edge estimate
         if spread_pct > 0:
@@ -436,7 +529,7 @@ class AutoTrader:
         open_pkgs = self.pm.list_packages("open")
         insider_only_mode = False
         news_only_mode = False
-        _hard_max = MAX_CONCURRENT + max(INSIDER_EXTRA_SLOTS, NEWS_EXTRA_SLOTS)
+        _hard_max = HARD_MAX_OPEN_PACKAGES
         if len(open_pkgs) >= MAX_CONCURRENT:
             if len(open_pkgs) >= _hard_max:
                 logger.info("Auto trader: at hard max (%d/%d), skipping",
@@ -491,6 +584,15 @@ class AutoTrader:
         directional_budget = max(0, remaining_budget - arb_remaining_reserve)
         # Arb budget = full remaining (arbs can use both their reserve AND any leftover)
         arb_budget = remaining_budget
+
+        # News sleeve: reserve exposure for _news_driven packages (mirror arb reserve).
+        news_reserve = self._max_total_exposure * NEWS_BUDGET_RESERVE_PCT
+        news_exposure = sum(
+            p.get("total_cost", 0) for p in open_pkgs
+            if p.get("_news_driven") or p.get("strategy_type") == "news_driven"
+        )
+        news_headroom = max(0, news_reserve - news_exposure)
+        directional_non_news_budget = max(0, directional_budget - news_headroom)
 
         open_market_ids = self._get_open_market_ids(open_pkgs)
 
@@ -635,11 +737,24 @@ class AutoTrader:
         trades_this_cycle = 0
         insider_mode_passed_filter_count = 0
         insider_mode_skipped_filter_count = 0
+        directional_non_news_remaining = directional_non_news_budget
+        pure_pred_open = sum(1 for p in open_pkgs if p.get("strategy_type") == "pure_prediction")
+        pure_prediction_opens_cycle = 0
         opportunities.sort(key=lambda o: o.get("_score", 0), reverse=True)
         for opp in opportunities:
             opp_title = (opp.get("title") or opp.get("canonical_title") or "?")[:100]
-            opp_volume = opp.get("volume", 0) or 0  # Market volume — logged on all skips for analysis
             opp_strategy = opp.get("opportunity_type", "")
+            try:
+                raw_vol = int(float(opp.get("volume", 0) or 0))
+            except (TypeError, ValueError):
+                raw_vol = 0
+            # Structural / synthetic pipelines often omit volume; use floor so paper sim can proceed
+            if raw_vol <= 0 and (
+                opp.get("is_synthetic") or opp_strategy in _VOLUME_FLOOR_TYPES
+            ):
+                opp_volume = 1
+            else:
+                opp_volume = raw_vol
             if trades_this_cycle >= remaining_slots:
                 break
             if directional_budget < self._min_trade_size and arb_budget < self._min_trade_size:
@@ -662,17 +777,23 @@ class AutoTrader:
                                                    volume=opp_volume, strategy=opp_strategy)
                 continue
 
-            # Filter: require minimum spread (use net profit after fees when available)
+            has_signal = bool(opp.get("insider_signal") or opp.get("_news_driven") or opp.get("_insider_driven"))
+            reference_backed = bool(opp.get("_reference_backed"))
+            guaranteed_profit = opp_strategy in ("multi_outcome_arb", "portfolio_no")
+            skip_spread_floor = guaranteed_profit or opp_strategy == "cross_platform_arb"
+
+            # Filter: minimum spread — higher bar for scanner-only directional flow.
             spread_pct = opp.get("net_profit_pct") or opp.get("profit_pct", 0)
-            if spread_pct < MIN_SPREAD_PCT:
+            min_spread_req = MIN_SPREAD_PCT_SIGNAL if (has_signal or reference_backed) else MIN_SPREAD_PCT_DIRECTIONAL
+            if not skip_spread_floor and spread_pct < min_spread_req:
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "low_spread", spread_pct=spread_pct,
+                                                   min_required=min_spread_req,
                                                    volume=opp_volume, strategy=opp_strategy)
                 continue
 
             # Skip markets we already have positions on (check BOTH sides, case-insensitive)
             # EXCEPTION: allow re-entry when news or insider signals provide new information
-            has_signal = bool(opp.get("insider_signal") or opp.get("_news_driven") or opp.get("_insider_driven"))
             yes_mid = opp.get("buy_yes_market_id", "").lower()
             no_mid = opp.get("buy_no_market_id", "").lower()
             if not has_signal and ((yes_mid and yes_mid in open_market_ids) or (no_mid and no_mid in open_market_ids)):
@@ -715,8 +836,7 @@ class AutoTrader:
 
             # Guaranteed-profit strategies (multi_outcome_arb, portfolio_no) resolve
             # at exactly $1.00 regardless of timing — skip duration filters entirely.
-            opp_type = opp.get("opportunity_type", "")
-            guaranteed_profit = opp_type in ("multi_outcome_arb", "portfolio_no")
+            opp_type = opp_strategy
 
             # Skip short-duration markets (15-min, 1-hour crypto)
             # Research: dynamic fees up to 3.15%, 73% of arb captured by sub-100ms bots
@@ -740,6 +860,14 @@ class AutoTrader:
 
             # Score: crypto near-expiry > crypto > near-expiry > other
             score = spread_pct
+            gross_pct = float(opp.get("profit_pct") or 0)
+            net_pct = opp.get("net_profit_pct")
+            if gross_pct > 0 and net_pct is not None:
+                try:
+                    ng = max(0.25, min(1.0, float(net_pct) / gross_pct))
+                    score *= ng
+                except (TypeError, ValueError, ZeroDivisionError):
+                    pass
             crypto_mult = 2.0 if is_crypto else 1.0
             score *= crypto_mult
             expiry_mult = 1.5 if is_near_expiry else 1.0
@@ -985,6 +1113,20 @@ class AutoTrader:
             if insider_only_mode or news_only_mode:
                 insider_mode_passed_filter_count += 1
 
+            # Directional sleeve: news can use full pool; scanner-only uses remainder after news reserve.
+            _uses_directional_sleeve = opp_strategy not in (
+                "multi_outcome_arb", "portfolio_no", "cross_platform_arb",
+            )
+            _dir_cap = directional_budget if is_news else min(directional_budget, directional_non_news_remaining)
+            if _uses_directional_sleeve and _dir_cap < self._min_trade_size:
+                reason = "directional_depleted" if is_news else "non_news_directional_cap"
+                self._record_skip(reason)
+                if self.dlog:
+                    self.dlog.log_opportunity_skip(
+                        opp_title, reason, volume=opp_volume, strategy=opp_strategy,
+                    )
+                continue
+
             # Skip low-score opportunities
             if score < MIN_SPREAD_PCT:
                 self._record_skip("low_score")
@@ -1018,7 +1160,7 @@ class AutoTrader:
                 continue
 
             # Size the trade — Kelly for arb/synthetic, pure_prediction uses its own Kelly below
-            trade_size = min(self._max_trade_size, directional_budget / 2, directional_budget)
+            trade_size = min(self._max_trade_size, _dir_cap / 2, _dir_cap)
             trade_size = max(self._min_trade_size, trade_size)
 
             # Extract market details from opportunity
@@ -1343,7 +1485,7 @@ class AutoTrader:
                     continue
 
                 # Kelly-sized trade (Quarter Kelly — NWS data edge)
-                trade_size = self._kelly_size("weather_forecast", directional_budget,
+                trade_size = self._kelly_size("weather_forecast", _dir_cap,
                                               implied_prob=entry_price,
                                               spread_pct=opp.get("edge", 0) * 100)
                 if trade_size <= 0:
@@ -1376,6 +1518,8 @@ class AutoTrader:
                         self._trades_opened += 1
                         self._daily_trade_count += 1
                         directional_budget -= trade_size
+                        if not is_news:
+                            directional_non_news_remaining = max(0.0, directional_non_news_remaining - trade_size)
                         total_exposure += trade_size
                         _cat = self._detect_category(opp_title)
                         category_exposure[_cat] = category_exposure.get(_cat, 0) + trade_size
@@ -1410,7 +1554,7 @@ class AutoTrader:
                     continue
 
                 # Kelly-sized trade (1/5 Kelly — LLM-derived edge)
-                trade_size = self._kelly_size("political_synthetic", directional_budget,
+                trade_size = self._kelly_size("political_synthetic", _dir_cap,
                                               spread_pct=spread_pct)
                 if trade_size <= 0:
                     continue
@@ -1454,6 +1598,8 @@ class AutoTrader:
                         self._trades_opened += 1
                         self._daily_trade_count += 1
                         directional_budget -= trade_size
+                        if not is_news:
+                            directional_non_news_remaining = max(0.0, directional_non_news_remaining - trade_size)
                         total_exposure += trade_size
                         _cat = self._detect_category(opp_title)
                         category_exposure[_cat] = category_exposure.get(_cat, 0) + trade_size
@@ -1490,7 +1636,7 @@ class AutoTrader:
                     continue
 
                 # Kelly-sized trade (1/5 Kelly — LLM-derived edge)
-                trade_size = self._kelly_size("crypto_synthetic", directional_budget,
+                trade_size = self._kelly_size("crypto_synthetic", _dir_cap,
                                               spread_pct=spread_pct)
                 if trade_size <= 0:
                     continue
@@ -1531,6 +1677,8 @@ class AutoTrader:
                         self._trades_opened += 1
                         self._daily_trade_count += 1
                         directional_budget -= trade_size
+                        if not is_news:
+                            directional_non_news_remaining = max(0.0, directional_non_news_remaining - trade_size)
                         total_exposure += trade_size
                         _cat = self._detect_category(opp_title)
                         category_exposure[_cat] = category_exposure.get(_cat, 0) + trade_size
@@ -1563,19 +1711,38 @@ class AutoTrader:
             is_cross_platform = buy_yes_platform != buy_no_platform and yes_market_id and no_market_id
             is_synthetic = opp.get("is_synthetic", False)
 
-            if is_synthetic:
-                # Synthetics DISABLED — 0W/1L in Phase 2, -$33.22. Not production-ready.
-                # The EV calculation and loss_prob gates work but the underlying
-                # scenario pricing is too noisy for reliable entries.
+            if is_synthetic and not SYNTHETIC_DERIVATIVE_EXPERIMENT:
+                # Synthetics off by default — enable with SYNTHETIC_DERIVATIVE_EXPERIMENT for small tests.
                 self._record_skip("synthetic_disabled")
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "synthetic_disabled",
                                                    volume=opp_volume, strategy="synthetic_derivative")
                 continue
-            elif is_cross_platform:
+
+            if is_cross_platform:
+                ok, pre_reason = await self._precheck_cross_platform_arb(opp)
+                if not ok:
+                    self._record_skip(pre_reason)
+                    if self.dlog:
+                        self.dlog.log_opportunity_skip(
+                            opp_title, pre_reason, volume=opp_volume, strategy=opp_strategy,
+                        )
+                    continue
                 strategy = "cross_platform_arb"
+            elif is_synthetic:
+                strategy = "synthetic_derivative"
             else:
                 strategy = "pure_prediction"
+
+            if strategy == "pure_prediction" and not is_news and not opp.get("insider_signal"):
+                if pure_pred_open + pure_prediction_opens_cycle >= MAX_CONCURRENT_PURE_PREDICTION:
+                    self._record_skip("pure_prediction_concurrent_cap")
+                    if self.dlog:
+                        self.dlog.log_opportunity_skip(
+                            opp_title, "pure_prediction_concurrent_cap",
+                            volume=opp_volume, strategy=opp_strategy,
+                        )
+                    continue
 
             try:
                 pkg = create_package(f"Auto: {trade_title[:60]}", strategy)
@@ -1591,7 +1758,7 @@ class AutoTrader:
             if is_cross_platform or is_synthetic:
                 # Kelly size for arb/synthetic strategies
                 # Cross-platform arb uses reserved arb budget; synthetics use directional budget
-                _strategy_budget = arb_budget if is_cross_platform else directional_budget
+                _strategy_budget = arb_budget if is_cross_platform else _dir_cap
                 trade_size = self._kelly_size(strategy, _strategy_budget,
                                               spread_pct=spread_pct,
                                               bypass_regime=is_cross_platform)
@@ -1774,7 +1941,7 @@ class AutoTrader:
                     continue
 
                 # Apply Kelly fraction to directional budget, capped at _max_trade_size
-                sized_trade = round(min(self._max_trade_size, directional_budget * kelly_quarter), 2)
+                sized_trade = round(min(self._max_trade_size, _dir_cap * kelly_quarter), 2)
                 sized_trade = max(self._min_trade_size, min(sized_trade, trade_size))
 
                 # NO-bet wipeout cap: high-probability NO bets (>= 0.85) risk 100%
@@ -1889,6 +2056,10 @@ class AutoTrader:
                         arb_budget -= trade_size
                     else:
                         directional_budget -= trade_size
+                        if not is_news:
+                            directional_non_news_remaining = max(0.0, directional_non_news_remaining - trade_size)
+                    if strategy == "pure_prediction" and not is_news and not opp.get("insider_signal"):
+                        pure_prediction_opens_cycle += 1
                     total_exposure += trade_size
                     # Hard stop if exposure cap reached mid-cycle
                     if total_exposure >= self._max_total_exposure:

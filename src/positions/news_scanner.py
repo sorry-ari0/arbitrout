@@ -38,11 +38,12 @@ _NEWS_RATIO_MAX_TRADE = 0.10      # $200 / $2000
 _NEWS_RATIO_MIN_TRADE = 0.0025    # $5 / $2000
 _NEWS_MIN_TRADE_FLOOR = 0.50
 _NEWS_RATIO_MAX_EXPOSURE = 1.0    # Global cap = full bankroll
-MAX_CONCURRENT = 10               # Global max (auto_trader capped at 7)
+# Must stay >= auto_trader.HARD_MAX_OPEN_PACKAGES so news trades are not blocked first
+MAX_CONCURRENT = 41
 
 # ── Timing ───────────────────────────────────────────────────────────────────
 COOLDOWN_SECONDS = 15 * 60      # 15 min per-market cooldown
-DAILY_TRADE_CAP = 5
+DAILY_TRADE_CAP = 12
 MARKET_CACHE_TTL = 10 * 60      # Refresh market cache every 10 min
 FUZZY_DEDUP_WINDOW = 30 * 60    # 30 min fuzzy dedup window
 HASH_DEDUP_WINDOW = 24 * 3600   # 24h hash dedup window
