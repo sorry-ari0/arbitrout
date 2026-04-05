@@ -84,6 +84,10 @@ MAX_CATEGORY_CONCENTRATION = 0.50  # No more than 50% of total exposure in one c
 LOSS_STREAK_THRESHOLD = 5    # Consecutive losses before regime reduction
 REGIME_SIZE_REDUCTION = 0.50 # Multiply position sizes by this during bad regime
 
+# Shrink assumed edge toward the market-implied probability (Baker–McHale style).
+# 1.0 = full legacy edge bonus; 0.0 = no assumed edge (Kelly → 0 for directional).
+KELLY_EDGE_SHRINK = float(os.environ.get("KELLY_EDGE_SHRINK", "0.35"))
+
 # ── Kelly sizing defaults for non-prediction trade types ──────────────────────
 # Research: Half Kelly = 75% of full Kelly growth with 50% less drawdown
 # Quarter Kelly retains 56% of max growth with ~3% chance of halving bankroll
@@ -427,7 +431,8 @@ class AutoTrader:
         # Kelly: f* = edge / odds, simplified for binary: f* = 2*p - 1 where p = 0.5 + edge/2
         # More precisely: f* = (b*p - q) / b where b = net odds
         if implied_prob > 0:
-            p_true = min(0.95, implied_prob + edge)
+            p_cap = min(0.95, implied_prob + edge)
+            p_true = implied_prob + KELLY_EDGE_SHRINK * (p_cap - implied_prob)
             b = (1.0 - implied_prob) / implied_prob if implied_prob > 0 else 1.0
             kelly_full = (b * p_true - (1.0 - p_true)) / b if b > 0 else 0
         else:
@@ -1935,16 +1940,17 @@ class AutoTrader:
                 #
                 # Kelly f* = (b * p_true - (1 - p_true)) / b
                 # where b = net odds = (1 - market_price) / market_price
-                #       p_true = our edge estimate = market_price + edge_bonus
+                #       p_true = shrunk toward side_price from (side_price + edge_bonus)
                 #
-                # Edge bonus: +5% for favorites (>0.70), +2% base edge assumption
+                # Edge bonus (theoretical max tilt): +5% favorites, +2% mid, +1% longshots;
+                # KELLY_EDGE_SHRINK scales it toward the market (reduces phantom edge).
                 edge_bonus = 0.02  # Base 2% edge assumption (we select favorable markets)
                 if side_price >= 0.70:
                     edge_bonus = 0.05  # Favorite-longshot bias gives us more edge
                 elif side_price <= 0.30:
                     edge_bonus = 0.01  # Less confident on longshots
 
-                p_true = min(0.95, side_price + edge_bonus)
+                p_true = min(0.95, side_price + edge_bonus * KELLY_EDGE_SHRINK)
                 net_odds = (1.0 - side_price) / side_price if side_price > 0 else 1.0
                 kelly_full = (net_odds * p_true - (1.0 - p_true)) / net_odds if net_odds > 0 else 0
                 # Variable Kelly fraction: conservative on longshots, standard on favorites
@@ -1955,6 +1961,16 @@ class AutoTrader:
                 else:
                     kelly_frac = 0.20   # 1/5 Kelly for mid-range
                 kelly_quarter = max(0.0, kelly_full * kelly_frac)
+
+                if kelly_quarter <= 0.0:
+                    self._record_skip("kelly_no_edge_after_shrink")
+                    if self.dlog:
+                        self.dlog.log_opportunity_skip(
+                            opp_title, "kelly_no_edge_after_shrink",
+                            side=side, price=round(side_price, 4),
+                            volume=opp_volume, strategy=opp_strategy,
+                        )
+                    continue
 
                 # Bad regime: skip speculative directional bets entirely
                 if self._regime_penalty < 1.0:
