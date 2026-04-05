@@ -154,12 +154,21 @@ class TradeJournal:
             "created_at": pkg.get("created_at"),
             "closed_at": closed_at,
             "_code_version": "v2-fee-fix",
+            "news_sleeve": bool(
+                pkg.get("_news_driven") or pkg.get("strategy_type") == "news_driven"
+            ),
         }
 
         self.entries.append(entry)
         self.save()
         logger.info("Journal: %s %s — P&L: $%.2f (%.1f%%) via %s",
                      entry["outcome"].upper(), entry["name"], pnl, entry["pnl_pct"], exit_trigger)
+        if self.mode == "paper":
+            try:
+                from positions.journal_vertical_health import invalidate_paused_verticals_cache
+                invalidate_paused_verticals_cache()
+            except Exception:
+                pass
         return entry
 
     def reconcile_closed_packages(self, packages: list[dict]) -> list[dict]:

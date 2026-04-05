@@ -7,6 +7,7 @@ import time
 import uuid
 from pathlib import Path
 
+from positions.journal_vertical_health import live_journal_allows_package_open
 from positions.wallet_config import live_package_open_allowed
 
 logger = logging.getLogger("positions.manager")
@@ -286,6 +287,11 @@ class PositionManager:
         if not ok:
             logger.warning("execute_package blocked (live news-only policy): %s", live_err)
             return {"success": False, "error": live_err, "blocked": "live_news_only"}
+
+        ok_v, v_err = live_journal_allows_package_open(pkg)
+        if not ok_v:
+            logger.warning("execute_package blocked (paper journal vertical health): %s", v_err)
+            return {"success": False, "error": v_err, "blocked": "journal_vertical_pause"}
 
         # Dedup guard: reject packages with condition IDs already open
         # EXCEPTION: allow re-entry when news or insider signals warrant it

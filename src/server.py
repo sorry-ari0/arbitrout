@@ -533,6 +533,14 @@ async def lifespan(app: FastAPI):
                             "Arb, sniper, and other auto-trader paths are skipped in live until you set "
                             "LIVE_TRADE_ALL_STRATEGIES=true (not recommended)."
                         )
+                    from positions.journal_vertical_health import get_paused_non_news_verticals
+                    paused = get_paused_non_news_verticals()
+                    if paused:
+                        logger.warning(
+                            "LIVE TRADING: paper journal health paused these non-news verticals: %s "
+                            "(negative PnL in recent paper closes — see JOURNAL_HEALTH_* env vars).",
+                            sorted(paused),
+                        )
                 except Exception:
                     pass
 

@@ -18,6 +18,13 @@ Optional:
 Live policy (real money):
   By default, only news-based packages may open (strategy_type=news_driven or _news_driven).
   Set LIVE_TRADE_ALL_STRATEGIES=true to allow every strategy to open live (not recommended).
+
+Paper journal → live vertical pause:
+  Non-news strategy verticals with negative aggregate PnL in trade_journal_paper.json over the
+  lookback window are blocked for live opens. News sleeve closes are excluded from that rollup.
+  JOURNAL_HEALTH_LOOKBACK_DAYS (default 2), JOURNAL_HEALTH_MIN_CLOSES (default 1),
+  JOURNAL_HEALTH_CACHE_SEC (default 60), JOURNAL_HEALTH_DISABLE=true to turn off,
+  TRADE_JOURNAL_PAPER_PATH to override journal file path.
 """
 import logging
 import os
@@ -149,7 +156,7 @@ def get_safe_config() -> dict:
             "configured": all(os.environ.get(k, "") for k in keys),
             "keys": {k: "***set***" if os.environ.get(k, "") else "missing" for k in keys},
         }
-    return {
+    out = {
         "paper_mode": is_paper_mode(),
         "paper_balance": get_paper_balance() if is_paper_mode() else None,
         "platforms": platforms,
@@ -157,3 +164,9 @@ def get_safe_config() -> dict:
         "live_issues": validate_live_config() if not is_paper_mode() else {},
         "live_news_only_opens": live_news_only_execution_active() if not is_paper_mode() else None,
     }
+    try:
+        from positions.journal_vertical_health import journal_health_status
+        out["journal_vertical_health"] = journal_health_status()
+    except Exception:
+        out["journal_vertical_health"] = {"error": "unavailable"}
+    return out

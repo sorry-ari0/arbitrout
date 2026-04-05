@@ -19,6 +19,7 @@ try:
 except ImportError:
     httpx = None
 
+from positions.journal_vertical_health import live_non_news_opportunity_should_pause
 from positions.wallet_config import live_news_only_execution_active
 
 logger = logging.getLogger("positions.auto_trader")
@@ -776,6 +777,18 @@ class AutoTrader:
                     self.dlog.log_opportunity_skip(opp_title, "live_news_only",
                                                    volume=opp_volume, strategy=opp_strategy)
                 continue
+
+            if not self._paper_mode:
+                pause_opp, pause_key = live_non_news_opportunity_should_pause(opp)
+                if pause_opp:
+                    self._record_skip("journal_vertical_pause")
+                    if self.dlog:
+                        self.dlog.log_opportunity_skip(
+                            opp_title, "journal_vertical_pause",
+                            volume=opp_volume, strategy=opp_strategy,
+                            paused_vertical=pause_key,
+                        )
+                    continue
 
             # Filter: skip zero-price markets (no liquidity, phantom opportunities)
             buy_yes_price = opp.get("buy_yes_price", 0)
