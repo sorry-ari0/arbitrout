@@ -524,6 +524,17 @@ async def lifespan(app: FastAPI):
             _detect_orphaned_packages(pm)
             if not is_paper_mode():
                 await _verify_pending_orders(pm, executors)
+                try:
+                    from positions.wallet_config import live_news_only_execution_active
+                    if live_news_only_execution_active():
+                        logger.warning(
+                            "LIVE TRADING: new position opens are restricted to news-based packages only "
+                            "(strategy_type=news_driven or _news_driven). "
+                            "Arb, sniper, and other auto-trader paths are skipped in live until you set "
+                            "LIVE_TRADE_ALL_STRATEGIES=true (not recommended)."
+                        )
+                except Exception:
+                    pass
 
             # AI advisor always created — checks for API keys dynamically
             # Live: Anthropic → Groq → Gemini → OpenRouter

@@ -7,6 +7,8 @@ import time
 import uuid
 from pathlib import Path
 
+from positions.wallet_config import live_package_open_allowed
+
 logger = logging.getLogger("positions.manager")
 
 STATUS_OPEN = "open"
@@ -280,6 +282,11 @@ class PositionManager:
             return await self._execute_package_locked(pkg)
 
     async def _execute_package_locked(self, pkg: dict) -> dict:
+        ok, live_err = live_package_open_allowed(pkg)
+        if not ok:
+            logger.warning("execute_package blocked (live news-only policy): %s", live_err)
+            return {"success": False, "error": live_err, "blocked": "live_news_only"}
+
         # Dedup guard: reject packages with condition IDs already open
         # EXCEPTION: allow re-entry when news or insider signals warrant it
         # (the new position is linked to the existing one, not independent)

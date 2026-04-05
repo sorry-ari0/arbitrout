@@ -19,6 +19,8 @@ try:
 except ImportError:
     httpx = None
 
+from positions.wallet_config import live_news_only_execution_active
+
 logger = logging.getLogger("positions.auto_trader")
 
 # Position limits — derived from bankroll at runtime
@@ -764,6 +766,14 @@ class AutoTrader:
                 self._record_skip("zero_volume")
                 if self.dlog:
                     self.dlog.log_opportunity_skip(opp_title, "zero_volume",
+                                                   volume=opp_volume, strategy=opp_strategy)
+                continue
+
+            # Live money: scanner/autotrader only executes news-tagged opps (execute_package also enforces).
+            if not self._paper_mode and live_news_only_execution_active() and not opp.get("_news_driven"):
+                self._record_skip("live_news_only")
+                if self.dlog:
+                    self.dlog.log_opportunity_skip(opp_title, "live_news_only",
                                                    volume=opp_volume, strategy=opp_strategy)
                 continue
 

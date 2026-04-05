@@ -571,6 +571,10 @@ class NewsScanner:
             # Fallback if news_driven not yet in STRATEGY_TYPES
             pkg = create_package(f"News: {title[:60]}", "pure_prediction")
 
+        # Always tag news sleeve so live mode (news-only opens) accepts this package even if
+        # strategy_type fell back to pure_prediction.
+        pkg["_news_driven"] = True
+
         pkg["legs"].append(create_leg(
             platform="polymarket",
             leg_type=leg_type,

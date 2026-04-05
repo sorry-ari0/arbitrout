@@ -14,6 +14,10 @@ Optional:
   PREDICTIT_SESSION
   ANTHROPIC_API_KEY (for AI advisor)
   PAPER_STARTING_BALANCE (default: 10000)
+
+Live policy (real money):
+  By default, only news-based packages may open (strategy_type=news_driven or _news_driven).
+  Set LIVE_TRADE_ALL_STRATEGIES=true to allow every strategy to open live (not recommended).
 """
 import logging
 import os
@@ -67,6 +71,32 @@ def load_env_file(env_path: str | Path | None = None):
 
 def is_paper_mode() -> bool:
     return os.environ.get("PAPER_TRADING", "true").lower() != "false"
+
+
+def live_news_only_execution_active() -> bool:
+    """True when live money is on and the operator has not opted into all strategies."""
+    if is_paper_mode():
+        return False
+    if os.environ.get("LIVE_TRADE_ALL_STRATEGIES", "").lower() in ("1", "true", "yes"):
+        return False
+    return True
+
+
+def live_package_open_allowed(pkg: dict) -> tuple[bool, str]:
+    """Return (allowed, error_message). Paper mode always allows; live respects news-only policy."""
+    if not live_news_only_execution_active():
+        return True, ""
+    if pkg.get("strategy_type") == "news_driven":
+        return True, ""
+    if pkg.get("_news_driven"):
+        return True, ""
+    return False, (
+        "Live trading is restricted to news-based packages only "
+        "(strategy_type=news_driven or _news_driven). "
+        f"Refusing open for strategy_type={pkg.get('strategy_type')!r}. "
+        "Use PAPER_TRADING=true to simulate other strategies, or set "
+        "LIVE_TRADE_ALL_STRATEGIES=true to allow all live opens (not recommended)."
+    )
 
 def get_paper_balance() -> float:
     try: return float(os.environ.get("PAPER_STARTING_BALANCE", "10000"))
@@ -125,4 +155,5 @@ def get_safe_config() -> dict:
         "platforms": platforms,
         "ai_enabled": has_any_ai_provider(),
         "live_issues": validate_live_config() if not is_paper_mode() else {},
+        "live_news_only_opens": live_news_only_execution_active() if not is_paper_mode() else None,
     }
