@@ -182,6 +182,9 @@ def main() -> int:
     entries = load_entries(args.journal, days=args.days)
     metrics = compute_metrics(entries)
     metrics["rolling_window_days"] = args.days
+    metrics["snapshot_generated_at_utc"] = datetime.now(timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
     jp = args.journal.resolve()
     try:
         metrics["source_journal"] = str(jp.relative_to(ROOT)).replace("\\", "/")

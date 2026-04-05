@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "source_journal": "src/data/positions/trade_journal_paper.json",
+  "rolling_window_days": null,
+  "trade_count": 58,
+  "win_count": 28,
+  "loss_count": 21,
+  "win_rate": 0.4828,
+  "total_pnl_usd": -7.1957,
+  "total_fees_usd": 62.8211,
+  "gross_before_fees_usd": 55.6254,
+  "fee_to_gross_ratio": 1.1294,
+  "fee_anomaly_count": 20,
+  "milestones": {
+    "portfolio_fee_to_gross_below_1": false,
+    "pure_prediction_fee_to_gross_below_0_5": false
+  },
+  "last_close_at": "2026-04-05T01:21:33Z",
+  "by_strategy": {
+    "cross_platform_arb": {
+      "n": 4,
+      "pnl": -9.4315,
+      "fees": 7.2006,
+      "gross": -2.2309,
+      "wins": 0,
+      "win_rate": 0.0
+    },
+    "multi_outcome_arb": {
+      "n": 9,
+      "pnl": -1.8727,
+      "fees": 0.1854,
+      "gross": -1.6873,
+      "wins": 1,
+      "win_rate": 0.1111
+    },
+    "news_driven": {
+      "n": 5,
+      "pnl": 59.3689,
+      "fees": 0.0,
+      "gross": 59.3689,
+      "wins": 5,
+      "win_rate": 1.0
+    },
+    "portfolio_no": {
+      "n": 6,
+      "pnl": 17.2644,
+      "fees": 0.0,
+      "gross": 17.2644,
+      "wins": 4,
+      "win_rate": 0.6667
+    },
+    "pure_prediction": {
+      "n": 33,
+      "pnl": -39.3014,
+      "fees": 55.3992,
+      "gross": 16.0978,
+      "wins": 18,
+      "win_rate": 0.5455
+    },
+    "synthetic_derivative": {
+      "n": 1,
+      "pnl": -33.2234,
+      "fees": 0.0359,
+      "gross": -33.1875,
+      "wins": 0,
+      "win_rate": 0.0
+    }
+  },
+  "guards": {
+    "pure_prediction_pnl_usd": -39.3014,
+    "pure_prediction_fee_to_gross": 3.4414,
+    "news_driven_pnl_usd": 59.3689,
+    "cross_platform_arb_win_rate": 0.0
+  },
+  "snapshot_generated_at_utc": "2026-04-05T07:29:08Z"
+}
