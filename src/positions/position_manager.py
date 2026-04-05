@@ -29,6 +29,16 @@ def _is_execution_result_like(result) -> bool:
     )
 
 
+def journal_fee_model_for_executor(executor) -> str:
+    """Tag persisted on journal closes — distinguishes paper maker-0% vs taker sim vs live."""
+    if executor is None:
+        return "unknown"
+    tag_fn = getattr(executor, "journal_fee_model_tag", None)
+    if callable(tag_fn):
+        return tag_fn()
+    return "live"
+
+
 def create_package(name: str, strategy_type: str) -> dict:
     """Create a new derivative package dict with all required fields."""
     if strategy_type not in STRATEGY_TYPES:
@@ -498,7 +508,8 @@ class PositionManager:
                 return await self._place_limit_sell(pkg_id, leg_id, trigger, timeout=timeout)
             return await self._exit_leg_locked(pkg_id, leg_id, trigger)
 
-    async def _exit_leg_locked(self, pkg_id: str, leg_id: str, trigger: str = "manual") -> dict:
+    async def _exit_leg_locked(self, pkg_id: str, leg_id: str, trigger: str = "manual",
+                               after_limit_attempt: bool = False) -> dict:
         pkg = self.packages.get(pkg_id)
         if not pkg:
             return {"success": False, "error": "Package not found"}
@@ -523,7 +534,9 @@ class PositionManager:
             leg["exit_quantity"] = result.filled_quantity
             leg["sell_fees"] = result.fees
             leg["exit_trigger"] = trigger
-            leg["exit_order_type"] = "maker_direct"
+            exit_kind = "fok_fallback" if after_limit_attempt else "fok_direct"
+            leg["exit_order_type"] = exit_kind
+            leg["fee_model"] = journal_fee_model_for_executor(executor)
             # exit_value = gross proceeds from the sell (before fees deducted)
             leg["exit_value"] = round(result.filled_quantity * result.filled_price, 4)
             # current_value tracks net (after fees) for P&L display
@@ -532,7 +545,8 @@ class PositionManager:
                 "action": "sell", "leg_id": leg_id, "platform": leg["platform"],
                 "tx_id": result.tx_id, "price": result.filled_price,
                 "fees": result.fees, "trigger": trigger,
-                "exit_order_type": "maker_direct", "timestamp": time.time(),
+                "exit_order_type": exit_kind, "fee_model": leg["fee_model"],
+                "timestamp": time.time(),
             })
             if all(l["status"] in ("closed", "advisory") for l in pkg["legs"]):
                 pkg["status"] = STATUS_CLOSED
@@ -575,17 +589,17 @@ class PositionManager:
         # Using mid directly — the executor handles spread-edge placement.
         mid = leg.get("current_price", 0)
         if mid <= 0:
-            return await self._exit_leg_locked(pkg_id, leg_id, trigger)
+            return await self._exit_leg_locked(pkg_id, leg_id, trigger, after_limit_attempt=True)
         limit_price = round(mid, 4)
         if limit_price <= 0:
-            return await self._exit_leg_locked(pkg_id, leg_id, trigger)
+            return await self._exit_leg_locked(pkg_id, leg_id, trigger, after_limit_attempt=True)
 
         # Place limit order (same call for paper or real executor)
         result = await executor.sell_limit(leg["asset_id"], leg["quantity"], limit_price)
 
         if not result.success:
             logger.warning("Limit sell failed for %s, falling back to FOK: %s", leg_id, result.error)
-            return await self._exit_leg_locked(pkg_id, leg_id, trigger)
+            return await self._exit_leg_locked(pkg_id, leg_id, trigger, after_limit_attempt=True)
 
         # Record pending order
         if "_pending_limit_orders" not in pkg:
@@ -703,7 +717,7 @@ class PositionManager:
                 if not pkg["_pending_limit_orders"]:
                     del pkg["_pending_limit_orders"]
                 logger.warning("Limit order %s cancelled/lost for %s, falling back to FOK", order_id, leg_id)
-                return await self._exit_leg_locked(pkg_id, leg_id, pending["trigger"])
+                return await self._exit_leg_locked(pkg_id, leg_id, pending["trigger"], after_limit_attempt=True)
 
             elif time.time() - pending["placed_at"] > pending.get("timeout", 60):
                 await executor.cancel_order(order_id)
@@ -711,7 +725,7 @@ class PositionManager:
                 if not pkg["_pending_limit_orders"]:
                     del pkg["_pending_limit_orders"]
                 logger.info("Limit order timed out for %s, falling back to FOK", leg_id)
-                return await self._exit_leg_locked(pkg_id, leg_id, pending["trigger"])
+                return await self._exit_leg_locked(pkg_id, leg_id, pending["trigger"], after_limit_attempt=True)
 
             else:
                 return {"pending": True, "order_id": order_id}
@@ -726,12 +740,15 @@ class PositionManager:
         leg["sell_fees"] = fees
         leg["exit_trigger"] = trigger
         leg["exit_order_type"] = exit_order_type
+        ex = self.executors.get(leg.get("platform", ""))
+        leg["fee_model"] = journal_fee_model_for_executor(ex)
         leg["exit_value"] = round(fill_qty * fill_price, 4)
         leg["current_value"] = round(fill_qty * fill_price - fees, 4)
         pkg["execution_log"].append({
             "action": "sell", "leg_id": leg["leg_id"], "platform": leg["platform"],
             "tx_id": None, "price": fill_price, "fees": fees,
             "trigger": trigger, "exit_order_type": exit_order_type,
+            "fee_model": leg["fee_model"],
             "timestamp": time.time(),
         })
         if all(l["status"] in ("closed", "advisory") for l in pkg["legs"]):

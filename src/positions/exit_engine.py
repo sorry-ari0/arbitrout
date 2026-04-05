@@ -8,6 +8,8 @@ import logging
 import time
 from datetime import datetime, date, timedelta
 
+from positions.position_manager import journal_fee_model_for_executor
+
 logger = logging.getLogger("positions.exit_engine")
 
 # ── AI exit policy ───────────────────────────────────────────────────────────
@@ -522,6 +524,8 @@ class ExitEngine:
                     leg["sell_fees"] = fill.get("fee", 0.0)
                     leg["exit_trigger"] = trigger
                     leg["exit_order_type"] = "bracket_maker"
+                    _ex = self.pm.executors.get(leg.get("platform", ""))
+                    leg["fee_model"] = journal_fee_model_for_executor(_ex)
                     leg["exit_value"] = round(fill["quantity"] * fill["price"], 4)
                     leg["current_value"] = round(fill["quantity"] * fill["price"] - fill.get("fee", 0.0), 4)
                     pkg["execution_log"].append({
@@ -529,6 +533,7 @@ class ExitEngine:
                         "platform": leg["platform"], "tx_id": fill["order_id"],
                         "price": fill["price"], "fees": fill.get("fee", 0.0),
                         "trigger": trigger, "exit_order_type": "bracket_maker",
+                        "fee_model": leg["fee_model"],
                         "timestamp": time.time(),
                     })
                     logger.info("Bracket %s filled for %s/%s @ %.4f (0%% maker fee)",

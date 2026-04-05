@@ -107,6 +107,10 @@ class PaperExecutor:
         self.order_type = "maker" if use_limit_orders else "taker"
         self.fee_rates = {"maker": self.buy_fee_rate}
 
+    def journal_fee_model_tag(self) -> str:
+        """Stable tag for trade journal rows — which fee simulation applies to fills."""
+        return "paper_maker_zero" if self.use_limit_orders else "paper_taker_sim"
+
     async def buy(self, asset_id: str, amount_usd: float, fallback_price: float = 0) -> ExecutionResult:
         _t0 = time.time()
         if amount_usd > self.balance:

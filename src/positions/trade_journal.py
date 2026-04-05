@@ -111,6 +111,7 @@ class TradeJournal:
                 "leg_pnl_pct": round(leg_pnl / cost * 100, 2) if cost > 0 else 0,
                 "status": leg.get("status"),
                 "exit_order_type": leg.get("exit_order_type", "fok_direct"),
+                "fee_model": leg.get("fee_model", "unknown"),
             })
 
         total_cost = pkg.get("total_cost", 0)
@@ -119,6 +120,9 @@ class TradeJournal:
         current_value = sum(ld["exit_value"] for ld in legs_detail)
         # P&L after all fees
         pnl = current_value - total_cost - total_fees
+
+        fee_models = {ld["fee_model"] for ld in legs_detail if ld.get("fee_model") and ld["fee_model"] != "unknown"}
+        package_fee_model = next(iter(fee_models)) if len(fee_models) == 1 else ("mixed" if len(fee_models) > 1 else "unknown")
 
         entry = {
             "id": f"journal_{uuid.uuid4().hex[:8]}",
@@ -138,6 +142,7 @@ class TradeJournal:
             "outcome": "win" if pnl > 0.001 else ("loss" if pnl < -0.001 else "flat"),
             "exit_trigger": exit_trigger,
             "exit_order_type": pkg.get("legs", [{}])[0].get("exit_order_type", "fok_direct"),
+            "fee_model": package_fee_model,
             "legs": legs_detail,
             "exit_rules": pkg.get("exit_rules", []),
             "execution_log": pkg.get("execution_log", []),
