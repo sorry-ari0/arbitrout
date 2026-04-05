@@ -1,8 +1,9 @@
 """AI advisor — multi-provider LLM review of exit proposals.
 
-Provider chain: Groq → Gemini → OpenRouter → Anthropic → auto-execute fallback.
-Uses whichever provider has an API key set. All calls use httpx for consistency.
-Rate limited to max_calls_per_min across all providers.
+Provider chain: Groq → Gemini → OpenRouter → Anthropic (live), then optional Ollama
+(Gemma, etc.) last when OLLAMA_API_KEY is set — used after cloud keys are missing or
+each cloud call fails. Auto-execute fallback if every provider fails.
+All calls use httpx for consistency. Rate limited to max_calls_per_min across providers.
 """
 import asyncio
 import logging
@@ -12,6 +13,8 @@ import re
 import time
 
 import httpx
+
+from positions.llm_ollama import ollama_openai_provider_config, with_ollama_last
 
 logger = logging.getLogger("positions.ai_advisor")
 
@@ -88,17 +91,21 @@ class AIAdvisor:
     @property
     def is_available(self) -> bool:
         """Check if any AI provider has a key set."""
+        if ollama_openai_provider_config():
+            return True
         providers = PAPER_PROVIDERS if self._paper_mode else LIVE_PROVIDERS
         return any(os.environ.get(p["env_var"], "") for p in providers)
 
     def _get_available_providers(self) -> list[dict]:
-        """Return providers that have API keys configured, in priority order.
-        Live: Anthropic → Groq → Gemini → OpenRouter
-        Paper: Groq → Gemini → OpenRouter (skip Anthropic to save costs)
+        """Return providers that have API keys configured, in try order.
+        Live: Anthropic → Groq → Gemini → OpenRouter → Ollama (if OLLAMA_API_KEY set)
+        Paper: Groq → Gemini → OpenRouter → Ollama (if set; skip Anthropic)
         Skips providers temporarily disabled due to 402/payment errors.
         """
         now = time.time()
-        providers = PAPER_PROVIDERS if self._paper_mode else LIVE_PROVIDERS
+        providers = with_ollama_last(
+            PAPER_PROVIDERS if self._paper_mode else LIVE_PROVIDERS
+        )
         available = []
         for p in providers:
             if not os.environ.get(p["env_var"], ""):
@@ -459,7 +466,7 @@ Do NOT include reasoning, just verdict lines grouped by package."""
     async def review_proposals(self, pkg: dict, proposals: list[dict]) -> dict:
         """Review exit proposals via LLM chain. Returns verdicts dict.
 
-        Tries providers in order: Groq → Gemini → OpenRouter → Anthropic.
+        Tries providers in order (see _get_available_providers); Ollama last if enabled.
         Returns empty dict if all fail (caller falls back to auto-execute).
         """
         providers = self._get_available_providers()
