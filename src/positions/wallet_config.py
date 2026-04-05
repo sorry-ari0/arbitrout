@@ -25,6 +25,9 @@ Paper journal → live vertical pause:
   JOURNAL_HEALTH_LOOKBACK_DAYS (default 2), JOURNAL_HEALTH_MIN_CLOSES (default 1),
   JOURNAL_HEALTH_CACHE_SEC (default 60), JOURNAL_HEALTH_DISABLE=true to turn off,
   TRADE_JOURNAL_PAPER_PATH to override journal file path.
+
+Journal release line on each close (active_release.note):
+  PR_NUMBER or GITHUB_PR, IMAGE_TAG/DOCKER_TAG, RELEASE_NOTE — see positions/code_version.py
 """
 import logging
 import os

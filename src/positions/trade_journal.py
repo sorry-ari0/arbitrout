@@ -11,6 +11,8 @@ import time
 import uuid
 from pathlib import Path
 
+from positions.code_version import get_journal_active_release
+
 logger = logging.getLogger("positions.trade_journal")
 
 
@@ -154,6 +156,7 @@ class TradeJournal:
             "created_at": pkg.get("created_at"),
             "closed_at": closed_at,
             "_code_version": "v2-fee-fix",
+            "active_release": get_journal_active_release(),
             "news_sleeve": bool(
                 pkg.get("_news_driven") or pkg.get("strategy_type") == "news_driven"
             ),

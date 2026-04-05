@@ -342,6 +342,9 @@ class TestJournalPhaseTagging:
             entry = journal.record_close(pkg, exit_trigger="target_hit")
 
             assert entry["_code_version"] == "v2-fee-fix"
+            assert "active_release" in entry
+            assert isinstance(entry["active_release"], dict)
+            assert "note" in entry["active_release"]
 
     def test_code_version_persists_to_disk(self):
         """_code_version should survive save/reload."""

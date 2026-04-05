@@ -61,6 +61,8 @@ class TestJournal:
             assert entry["outcome"] == "win"
             assert entry["exit_trigger"] == "target_hit"
             assert entry["mode"] == "paper"  # tx_id starts with "paper_"
+            assert "active_release" in entry
+            assert "note" in entry["active_release"]
             assert "hold_duration_hours" in entry
             assert "closed_at" in entry
             assert len(entry["legs"]) == 1
