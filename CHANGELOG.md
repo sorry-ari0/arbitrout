@@ -4,6 +4,10 @@ Notable changes to **arbitrout** are listed here. Format follows [Keep a Changel
 
 ## [Unreleased]
 
+### Added
+
+- **NASA EONET** (`src/positions/eonet_client.py`): fetch open natural events from [EONET API v3](https://eonet.gsfc.nasa.gov/) and blend conservative precipitation adjustments into NWS forecasts in `WeatherScanner` when hazards are near the city and forecast date. Toggle with `EONET_WEATHER_ENABLED`. Unit tests in `tests/test_eonet_client.py`.
+
 ## [2026-04-05]
 
 ### Added

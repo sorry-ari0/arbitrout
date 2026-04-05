@@ -7,8 +7,9 @@ Edge: NWS forecasts are more accurate than market pricing, especially 1-3 days o
 Strategy:
   1. Fetch Kalshi weather markets (temperature brackets, precipitation yes/no)
   2. Fetch NWS point forecast for each city
-  3. Compare forecast to market brackets
-  4. If forecast strongly favors one bracket, generate opportunity
+  3. Optionally merge NASA EONET open events near the city/date (storms, floods, etc.)
+  4. Compare forecast to market brackets
+  5. If forecast strongly favors one bracket, generate opportunity
 """
 import asyncio
 import logging
@@ -19,6 +20,13 @@ try:
     import httpx
 except ImportError:
     httpx = None
+
+from positions.eonet_client import (
+    eonet_enabled,
+    fetch_open_events,
+    filter_relevant_events,
+    precip_adjustment_bp,
+)
 
 logger = logging.getLogger("positions.weather_scanner")
 
@@ -68,6 +76,12 @@ class WeatherScanner:
         opportunities = []
         try:
             async with httpx.AsyncClient(timeout=15, headers=self._headers) as client:
+                eonet_events: list[dict] = []
+                if eonet_enabled():
+                    eonet_events = await fetch_open_events(client, days=14)
+                    if eonet_events:
+                        logger.info("Weather scanner: loaded %d open EONET events", len(eonet_events))
+
                 # Fetch Kalshi weather markets
                 weather_markets = await self._fetch_weather_markets(client)
                 if not weather_markets:
@@ -83,6 +97,8 @@ class WeatherScanner:
                     forecast = await self._get_nws_forecast(client, city, target_date)
                     if not forecast:
                         continue
+
+                    forecast = self._merge_eonet_forecast(forecast, city, target_date, eonet_events)
 
                     opp = self._evaluate_opportunity(city, target_date, markets, forecast)
                     if opp:
@@ -268,6 +284,54 @@ class WeatherScanner:
 
         return None
 
+    def _merge_eonet_forecast(
+        self,
+        forecast: dict,
+        city: str,
+        target_date: str,
+        eonet_events: list[dict],
+    ) -> dict:
+        """Blend NASA EONET hazard context into NWS precip (see https://eonet.gsfc.nasa.gov/)."""
+        if not eonet_events or not eonet_enabled():
+            out = dict(forecast)
+            out.setdefault("eonet", {"active": False})
+            return out
+
+        coords = CITY_COORDINATES.get(city)
+        if not coords:
+            return dict(forecast)
+
+        relevant = filter_relevant_events(
+            eonet_events, coords["lon"], coords["lat"], target_date
+        )
+        if not relevant:
+            out = dict(forecast)
+            out["eonet"] = {"active": False, "nearby": 0}
+            return out
+
+        delta_bp, summary = precip_adjustment_bp(relevant)
+        out = dict(forecast)
+        pc = float(out.get("precip_chance") or 0)
+        new_pc = max(0.0, min(95.0, pc + delta_bp))
+        out["precip_chance"] = new_pc
+        out["eonet"] = {
+            "active": True,
+            "precip_adjust_bp": delta_bp,
+            "precip_nws": round(pc, 1),
+            "events": summary[:10],
+        }
+        if delta_bp != 0:
+            logger.info(
+                "EONET adjust %s %s: precip %.1f%% → %.1f%% (%d nearby events, %+d bp)",
+                city,
+                target_date,
+                pc,
+                new_pc,
+                len(summary),
+                delta_bp,
+            )
+        return out
+
     def _evaluate_opportunity(self, city: str, target_date: str,
                               markets: list[dict], forecast: dict) -> dict | None:
         """Compare NWS forecast to market brackets and generate opportunity if mispriced.
@@ -367,6 +431,8 @@ class WeatherScanner:
             "expiry": target_date,
             "volume": int(float(best_market.get("volume", 0) or 0)),
         }
+        if forecast.get("eonet"):
+            opp["eonet"] = forecast["eonet"]
 
         logger.info("Weather opportunity: %s %s | edge=%.1f%% | side=%s | price=%.2f",
                      city.title(), target_date, abs(best_edge) * 100, best_side, entry_price)
