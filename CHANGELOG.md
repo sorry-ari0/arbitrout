@@ -9,6 +9,12 @@ Notable changes to **arbitrout** are listed here. Format follows [Keep a Changel
 ### Added
 
 - **Local LLM backup:** `src/positions/llm_ollama.py` — optional Ollama (OpenAI-compatible chat, e.g. Gemma 4) tried **after** Groq / Gemini / OpenRouter / Anthropic in `AIAdvisor` and `NewsAI` when `OLLAMA_API_KEY` is set. Documented in `src/.env.example`.
+- **`tools/journal_kelly_bucket_analysis.py`** — paper journal summary by `side_price` bucket and before/after cutoff (Kelly regime analysis).
+
+### Changed
+
+- **Auto trader (pure prediction Kelly):** shrink assumed edge toward market price via `KELLY_EDGE_SHRINK` (default `0.35`, env override). Skip opens when Kelly fraction is zero after shrink (`kelly_no_edge_after_shrink`). Same shrink applied to `_kelly_size` when `implied_prob` is set.
+- **Position manager:** when `_use_limit_orders` is true, entry uses **`buy_limit` only** at leg `entry_price` (0% maker path); no `buy_and_confirm` / `buy` fallback. Executors without `buy_limit` fail closed with a clear error. Documented in `src/.env.example` (`KELLY_EDGE_SHRINK`).
 
 ## [2026-04-03]
 

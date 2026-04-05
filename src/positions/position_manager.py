@@ -10,6 +10,8 @@ from pathlib import Path
 from positions.journal_vertical_health import live_journal_allows_package_open
 from positions.wallet_config import live_package_open_allowed
 
+from execution.base_executor import ExecutionResult
+
 logger = logging.getLogger("positions.manager")
 
 STATUS_OPEN = "open"
@@ -476,9 +478,60 @@ class PositionManager:
         return None  # Success — caller finalizes
 
     async def _submit_entry_order(self, executor, leg: dict, use_limit: bool, max_price: float):
-        """Submit an entry order using the best available executor method."""
+        """Submit an entry order using the best available executor method.
+
+        When use_limit is True (normal packages: _use_limit_orders), only a resting
+        GTC buy_limit is used — Polymarket-style 0% maker fee. No buy_and_confirm /
+        market-style buy fallback (avoids taker-fee paths in paper sim and live).
+        """
         asset_id = leg["asset_id"]
         amount_usd = leg["cost"]
+        buy_limit = getattr(executor, "buy_limit", None)
+
+        if use_limit:
+            if not callable(buy_limit):
+                return ExecutionResult(
+                    False,
+                    None,
+                    0,
+                    0,
+                    0,
+                    "maker_limit_only: executor has no buy_limit (0% fee entry requires resting limit)",
+                )
+            entry_px = float(leg.get("entry_price") or 0)
+            if entry_px <= 0:
+                return ExecutionResult(
+                    False,
+                    None,
+                    0,
+                    0,
+                    0,
+                    "maker_limit_only: missing entry_price on leg",
+                )
+            if max_price > 0 and entry_px > max_price:
+                return ExecutionResult(
+                    False,
+                    None,
+                    0,
+                    0,
+                    0,
+                    f"Slippage guard: entry {entry_px:.4f} exceeds max {max_price:.4f}",
+                )
+            result = await buy_limit(
+                asset_id=asset_id,
+                amount_usd=amount_usd,
+                price=entry_px,
+            )
+            if _is_execution_result_like(result):
+                return result
+            return ExecutionResult(
+                False,
+                None,
+                0,
+                0,
+                0,
+                "buy_limit returned invalid result",
+            )
 
         buy_and_confirm = getattr(executor, "buy_and_confirm", None)
         if callable(buy_and_confirm):
@@ -490,8 +543,7 @@ class PositionManager:
             if _is_execution_result_like(result):
                 return result
 
-        buy_limit = getattr(executor, "buy_limit", None)
-        if use_limit and callable(buy_limit):
+        if callable(buy_limit):
             result = await buy_limit(
                 asset_id=asset_id,
                 amount_usd=amount_usd,
@@ -503,7 +555,7 @@ class PositionManager:
         buy = getattr(executor, "buy", None)
         if callable(buy):
             buy_kwargs = {"asset_id": asset_id, "amount_usd": amount_usd}
-            if hasattr(executor, 'real'):
+            if hasattr(executor, "real"):
                 buy_kwargs["fallback_price"] = leg["entry_price"]
             result = await buy(**buy_kwargs)
             if _is_execution_result_like(result):
