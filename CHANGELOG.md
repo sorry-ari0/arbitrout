@@ -4,6 +4,12 @@ Notable changes to **arbitrout** are listed here. Format follows [Keep a Changel
 
 ## [Unreleased]
 
+## [2026-04-05]
+
+### Added
+
+- **Local LLM backup:** `src/positions/llm_ollama.py` — optional Ollama (OpenAI-compatible chat, e.g. Gemma 4) tried **after** Groq / Gemini / OpenRouter / Anthropic in `AIAdvisor` and `NewsAI` when `OLLAMA_API_KEY` is set. Documented in `src/.env.example`.
+
 ## [2026-04-03]
 
 ### Added
