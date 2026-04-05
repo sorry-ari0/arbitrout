@@ -1,6 +1,7 @@
 """News AI — multi-provider LLM analysis of news headlines for trading signals.
 
-Provider chain: Groq → Gemini → OpenRouter (paper), Anthropic → Groq → Gemini → OpenRouter (live).
+Provider chain: Groq → Gemini → OpenRouter (paper), Anthropic → … (live), then Ollama
+last when OLLAMA_API_KEY is set (backup after cloud keys missing or failures).
 Uses NEWS_*_API_KEY env vars with fallback to base API key vars.
 Rate limited independently from exit advisor (max_calls_per_min).
 """
@@ -10,6 +11,8 @@ import re
 import time
 
 import httpx
+
+from positions.llm_ollama import ollama_openai_provider_config, with_ollama_last
 
 logger = logging.getLogger("positions.news_ai")
 
@@ -100,15 +103,19 @@ class NewsAI:
     @property
     def is_available(self) -> bool:
         """Check if any AI provider has a key set."""
+        if ollama_openai_provider_config():
+            return True
         providers = NEWS_PAPER_PROVIDERS if self._paper_mode else NEWS_LIVE_PROVIDERS
         return any(_resolve_api_key(p) for p in providers)
 
     def _get_available_providers(self) -> list[dict]:
-        """Return providers that have API keys configured, in priority order.
-        Live: Anthropic → Groq → Gemini → OpenRouter
-        Paper: Groq → Gemini → OpenRouter (skip Anthropic to save costs)
+        """Return providers that have API keys configured, in try order.
+        Live: Anthropic → Groq → Gemini → OpenRouter → Ollama (if OLLAMA_API_KEY set)
+        Paper: Groq → Gemini → OpenRouter → Ollama (if set)
         """
-        providers = NEWS_PAPER_PROVIDERS if self._paper_mode else NEWS_LIVE_PROVIDERS
+        providers = with_ollama_last(
+            NEWS_PAPER_PROVIDERS if self._paper_mode else NEWS_LIVE_PROVIDERS
+        )
         return [p for p in providers if _resolve_api_key(p)]
 
     async def _get_http(self) -> httpx.AsyncClient:
