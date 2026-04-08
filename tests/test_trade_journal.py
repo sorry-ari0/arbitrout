@@ -131,6 +131,19 @@ class TestJournal:
             assert entry["closed_at"] == 1_700_007_200
             assert entry["hold_duration_hours"] == 2.0
 
+    def test_record_close_preserves_insider_flags(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = TradeJournal(Path(tmp))
+            pkg = _make_closed_package("Insider Trade", "pure_prediction", 100.0, 115.0)
+            pkg["insider_signal"] = {"has_signal": True, "signal_strength": 0.8}
+            pkg["_insider_driven"] = True
+
+            entry = journal.record_close(pkg, exit_trigger="target_hit")
+
+            assert entry["insider_sleeve"] is True
+            assert entry["insider_signal"] is True
+            assert entry["_insider_driven"] is True
+
     def test_get_recent(self):
         """get_recent returns entries sorted by closed_at descending."""
         with tempfile.TemporaryDirectory() as tmp:

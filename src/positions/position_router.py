@@ -81,6 +81,11 @@ def init_position_system(pm, exit_engine=None, ai_advisor=None, trade_journal=No
     _trade_journal = trade_journal
     _auto_trader = auto_trader
     _insider_tracker = insider_tracker
+    if _pm is not None:
+        try:
+            _pm.insider_tracker = insider_tracker
+        except Exception:
+            pass
     _btc_sniper = btc_sniper
     _market_maker = market_maker
     _news_scanner = news_scanner

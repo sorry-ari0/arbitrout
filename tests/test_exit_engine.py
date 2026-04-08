@@ -48,6 +48,74 @@ class TestHeuristics:
         assert time_triggers[0]["safety_override"] is False
         assert time_triggers[0]["action"] == "review"
 
+    def test_multi_outcome_partial_loser_does_not_trigger_market_resolved(self):
+        """A single 0c loser in a mutually-exclusive YES basket is not package resolution."""
+        pkg = create_package("MO", "multi_outcome_arb")
+        pkg["legs"] = [
+            {
+                "leg_id": "L1",
+                "platform": "polymarket",
+                "type": "prediction_yes",
+                "asset_id": "cid1:YES",
+                "entry_price": 0.30,
+                "current_price": 0.01,
+                "quantity": 10,
+                "cost": 3.0,
+                "status": "open",
+            },
+            {
+                "leg_id": "L2",
+                "platform": "polymarket",
+                "type": "prediction_yes",
+                "asset_id": "cid2:YES",
+                "entry_price": 0.40,
+                "current_price": 0.55,
+                "quantity": 10,
+                "cost": 4.0,
+                "status": "open",
+            },
+        ]
+        pkg["total_cost"] = 7.0
+        pkg["current_value"] = 5.6
+        pkg["peak_value"] = 7.0
+        triggers = evaluate_heuristics(pkg)
+        assert not any(t["name"] == "market_resolved" for t in triggers)
+
+    def test_multi_outcome_winner_triggers_market_resolved(self):
+        """A visible 1c winner means the mutually-exclusive basket is resolved."""
+        pkg = create_package("MO", "multi_outcome_arb")
+        pkg["legs"] = [
+            {
+                "leg_id": "L1",
+                "platform": "polymarket",
+                "type": "prediction_yes",
+                "asset_id": "cid1:YES",
+                "entry_price": 0.30,
+                "current_price": 0.99,
+                "quantity": 10,
+                "cost": 3.0,
+                "status": "open",
+            },
+            {
+                "leg_id": "L2",
+                "platform": "polymarket",
+                "type": "prediction_yes",
+                "asset_id": "cid2:YES",
+                "entry_price": 0.40,
+                "current_price": 0.01,
+                "quantity": 10,
+                "cost": 4.0,
+                "status": "open",
+            },
+        ]
+        pkg["total_cost"] = 7.0
+        pkg["current_value"] = 10.0
+        pkg["peak_value"] = 10.0
+        triggers = evaluate_heuristics(pkg)
+        resolved = [t for t in triggers if t["name"] == "market_resolved"]
+        assert len(resolved) == 1
+        assert resolved[0]["safety_override"] is True
+
     # ── Minimum hold period tests ──────────────────────────────────────────
 
     def test_min_hold_suppresses_trailing_stop(self):

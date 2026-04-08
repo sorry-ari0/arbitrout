@@ -1,5 +1,6 @@
 """Tests for position manager."""
 import json, pytest, asyncio
+from unittest.mock import MagicMock
 from positions.position_manager import (
     PositionManager, create_package, create_leg, create_exit_rule,
     STATUS_OPEN, STATUS_CLOSED,
@@ -42,3 +43,37 @@ class TestPnL:
         l["current_price"] = 0.70; l["current_value"] = l["quantity"] * 0.70
         manager.update_pnl(p["id"])
         assert manager.get_package(p["id"])["itm_status"] == "ITM"
+
+
+class TestInsiderResolutionFeedback:
+    def test_record_insider_resolutions_infers_binary_outcomes(self, manager):
+        tracker = MagicMock()
+        manager.insider_tracker = tracker
+        pkg = {
+            "legs": [
+                {
+                    "platform": "polymarket",
+                    "asset_id": "cid_yes:YES",
+                    "exit_price": 1.0,
+                    "status": "closed",
+                },
+                {
+                    "platform": "polymarket",
+                    "asset_id": "cid_no:NO",
+                    "exit_price": 0.0,
+                    "status": "closed",
+                },
+                {
+                    "platform": "kalshi",
+                    "asset_id": "ignored:YES",
+                    "exit_price": 1.0,
+                    "status": "closed",
+                },
+            ]
+        }
+
+        manager._record_insider_resolutions(pkg)
+
+        tracker.record_resolution.assert_any_call("cid_yes", "YES")
+        tracker.record_resolution.assert_any_call("cid_no", "YES")
+        assert tracker.record_resolution.call_count == 2

@@ -557,6 +557,7 @@ async def lifespan(app: FastAPI):
             insider = InsiderTracker(data_dir=DATA_DIR / "positions")
             insider.start()
             app.state.insider_tracker = insider # Expose InsiderTracker via app.state
+            pm.insider_tracker = insider
             # Kalshi anonymous whale tracker — feeds cross-platform convergence signals
             kalshi_adapter = None
             if _ARBITRAGE_AVAILABLE:

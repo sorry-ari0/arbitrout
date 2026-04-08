@@ -183,6 +183,75 @@ class TestTradeablePlatformFilter:
         assert "Skipping arb on non-tradeable platform" not in caplog.text
 
 
+class TestCrossArbPrecheck:
+    def _make_trader(self):
+        from positions.auto_trader import AutoTrader
+        pm = _make_mock_pm()
+        pm.executors = {
+            "polymarket": _stub_paper_executor(),
+            "predictit": _stub_paper_executor(),
+            "kalshi": _stub_paper_executor(),
+        }
+        return AutoTrader(pm), pm
+
+    @pytest.mark.asyncio
+    async def test_rejects_gross_positive_but_fee_negative_predictit_pair(self):
+        trader, pm = self._make_trader()
+        pm.executors["polymarket"].get_current_price = AsyncMock(return_value=0.40)
+        pm.executors["predictit"].get_current_price = AsyncMock(return_value=0.55)
+        opp = {
+            "buy_yes_platform": "polymarket",
+            "buy_no_platform": "predictit",
+            "buy_yes_market_id": "poly-1",
+            "buy_no_market_id": "pi-1",
+            "matched_event": {
+                "canonical_title": "Will BTC exceed $100k?",
+                "category": "crypto",
+                "expiry": "2026-12-31",
+                "markets": [
+                    {"platform": "polymarket", "market_id": "poly-1"},
+                    {"platform": "predictit", "market_id": "pi-1"},
+                ],
+            },
+            "volume": 1000,
+        }
+
+        ok, reason = await trader._precheck_cross_platform_arb(opp)
+
+        assert ok is False
+        assert reason == "cross_arb_requote_edge_gone"
+
+    @pytest.mark.asyncio
+    async def test_accepts_net_positive_pair_and_updates_prices(self):
+        trader, pm = self._make_trader()
+        pm.executors["polymarket"].get_current_price = AsyncMock(return_value=0.35)
+        pm.executors["kalshi"].get_current_price = AsyncMock(return_value=0.55)
+        opp = {
+            "buy_yes_platform": "polymarket",
+            "buy_no_platform": "kalshi",
+            "buy_yes_market_id": "poly-1",
+            "buy_no_market_id": "kal-1",
+            "matched_event": {
+                "canonical_title": "Will BTC exceed $100k?",
+                "category": "crypto",
+                "expiry": "2026-12-31",
+                "markets": [
+                    {"platform": "polymarket", "market_id": "poly-1"},
+                    {"platform": "kalshi", "market_id": "kal-1"},
+                ],
+            },
+            "volume": 1000,
+        }
+
+        ok, reason = await trader._precheck_cross_platform_arb(opp)
+
+        assert ok is True
+        assert reason == ""
+        assert opp["buy_yes_price"] == 0.35
+        assert opp["buy_no_price"] == 0.55
+        assert opp["profit_pct"] > opp["net_profit_pct"]
+
+
 class TestReferenceScanners:
     def test_theta_opportunity_converts_to_directional_trade(self):
         from positions.auto_trader import AutoTrader

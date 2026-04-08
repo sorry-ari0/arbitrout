@@ -60,6 +60,17 @@ CROSS_ARB_MAX_QUOTE_AGE_SEC = 90.0
 CROSS_ARB_MIN_EDGE_REQUOTE_PCT = 2.5   # (1 - yes - no) * 100 after fresh mids
 CROSS_PLATFORM_KELLY_GATE_MIN_CLOSES = 4
 CROSS_PLATFORM_KELLY_CAP_UNTIL_WIN = 0.12  # max Kelly fraction when 0 wins in sample
+_CROSS_ARB_ENTRY_FEE_RATE = {
+    "polymarket": 0.0,
+    "kalshi": 0.01,
+    "predictit": 0.0,
+    "limitless": 0.01,
+    "robinhood": 0.0,
+    "coinbase_spot": 0.006,
+    "kraken": 0.0026,
+}
+_PREDICTIT_PROFIT_TAX = 0.10
+_PREDICTIT_WITHDRAWAL_FEE = 0.05
 
 # Cap concurrent directional packages (scanner pure_prediction path).
 MAX_CONCURRENT_PURE_PREDICTION = 14
@@ -260,6 +271,28 @@ class AutoTrader:
         nid = (opp.get("buy_no_market_id") or "").lower()
         return bool(yid and nid and yid in cluster and nid in cluster)
 
+    @staticmethod
+    def _fresh_cross_arb_net_edge_pct(opp: dict, yes_price: float, no_price: float) -> float:
+        """Recompute fee-adjusted resolution edge from fresh quotes."""
+        yes_platform = opp.get("buy_yes_platform", "")
+        no_platform = opp.get("buy_no_platform", "")
+        yes_fee = yes_price * _CROSS_ARB_ENTRY_FEE_RATE.get(yes_platform, 0.0)
+        no_fee = no_price * _CROSS_ARB_ENTRY_FEE_RATE.get(no_platform, 0.0)
+        total_cost = yes_price + no_price + yes_fee + no_fee
+
+        yes_payout = 1.0
+        if yes_platform == "predictit":
+            after_tax = 1.0 - _PREDICTIT_PROFIT_TAX * (1.0 - yes_price)
+            yes_payout = after_tax * (1.0 - _PREDICTIT_WITHDRAWAL_FEE)
+
+        no_payout = 1.0
+        if no_platform == "predictit":
+            after_tax = 1.0 - _PREDICTIT_PROFIT_TAX * (1.0 - no_price)
+            no_payout = after_tax * (1.0 - _PREDICTIT_WITHDRAWAL_FEE)
+
+        worst_profit = min(yes_payout, no_payout) - total_cost
+        return worst_profit * 100.0
+
     async def _precheck_cross_platform_arb(self, opp: dict) -> tuple[bool, str]:
         """Re-quote both legs; enforce scan freshness and post-requote edge."""
         if not self._arb_legs_in_matched_cluster(opp):
@@ -288,14 +321,16 @@ class AutoTrader:
             return False, "cross_arb_requote_failed"
         if py < 0.01 or pn < 0.01:
             return False, "cross_arb_requote_zero"
-        edge_pct = (1.0 - py - pn) * 100.0
-        if edge_pct < CROSS_ARB_MIN_EDGE_REQUOTE_PCT:
+        gross_edge_pct = (1.0 - py - pn) * 100.0
+        net_edge_pct = self._fresh_cross_arb_net_edge_pct(opp, py, pn)
+        if net_edge_pct < CROSS_ARB_MIN_EDGE_REQUOTE_PCT:
             return False, "cross_arb_requote_edge_gone"
 
         opp["buy_yes_price"] = round(py, 4)
         opp["buy_no_price"] = round(pn, 4)
-        opp["profit_pct"] = round(edge_pct, 2)
-        opp["net_profit_pct"] = round(edge_pct, 2)
+        opp["profit_pct"] = round(gross_edge_pct, 2)
+        opp["net_profit_pct"] = round(net_edge_pct, 2)
+        opp["cross_arb_requote_gross_pct"] = round(gross_edge_pct, 2)
         return True, ""
 
     def set_political_analyzer(self, analyzer):

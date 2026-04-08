@@ -270,11 +270,21 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
     resolved_legs = [l for l in open_legs
                      if l.get("current_price", 0.5) >= 0.99 or l.get("current_price", 0.5) <= 0.01]
     if resolved_legs:
-        leg_ids = [l["leg_id"] for l in resolved_legs]
-        prices = [f"${l.get('current_price', 0):.4f}" for l in resolved_legs]
-        triggers.append({"trigger_id": T_MARKET_RESOLVED, "name": "market_resolved",
-            "details": f"{len(resolved_legs)} leg(s) resolved: {', '.join(leg_ids)} at {', '.join(prices)}",
-            "action": "immediate_exit", "safety_override": True})
+        should_trigger_market_resolved = True
+        if strategy == "multi_outcome_arb":
+            # For mutually-exclusive YES baskets, one losing leg at ~0 is not
+            # enough to settle the package. Wait until a winner is visible or all
+            # legs are already at binary boundaries so journaling uses true
+            # resolution prices instead of stale midpoints.
+            has_winner = any(l.get("current_price", 0.5) >= 0.99 for l in open_legs)
+            all_binary = len(resolved_legs) == len(open_legs)
+            should_trigger_market_resolved = has_winner or all_binary
+        if should_trigger_market_resolved:
+            leg_ids = [l["leg_id"] for l in resolved_legs]
+            prices = [f"${l.get('current_price', 0):.4f}" for l in resolved_legs]
+            triggers.append({"trigger_id": T_MARKET_RESOLVED, "name": "market_resolved",
+                "details": f"{len(resolved_legs)} leg(s) resolved: {', '.join(leg_ids)} at {', '.join(prices)}",
+                "action": "immediate_exit", "safety_override": True})
 
     # ── 20: Longshot Decay ────────────────────────────────────────────────
     # Research (favorite-longshot bias): contracts bought <$0.30 decay faster

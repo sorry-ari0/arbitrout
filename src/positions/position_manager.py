@@ -111,9 +111,40 @@ class PositionManager:
         self.packages: dict[str, dict] = {}
         self.alerts: list[dict] = []  # pending escalation alerts
         self.trade_journal = trade_journal
+        self.insider_tracker = None
         self._lock = asyncio.Lock()
         self._bracket_manager = bracket_manager
         self._load()
+
+    def _record_insider_resolutions(self, pkg: dict):
+        """Feed resolved Polymarket outcomes back into InsiderTracker accuracy stats."""
+        tracker = getattr(self, "insider_tracker", None)
+        if tracker is None or not hasattr(tracker, "record_resolution"):
+            return
+
+        resolved_by_cid: dict[str, str] = {}
+        for leg in pkg.get("legs", []):
+            if leg.get("platform") != "polymarket":
+                continue
+            asset_id = str(leg.get("asset_id", ""))
+            if ":" not in asset_id:
+                continue
+            condition_id, side = asset_id.rsplit(":", 1)
+            if not condition_id or side not in ("YES", "NO"):
+                continue
+            price = leg.get("exit_price", leg.get("current_price", leg.get("entry_price", 0)))
+            if price is None:
+                continue
+            if price >= 0.99:
+                resolved_by_cid[condition_id] = side
+            elif price <= 0.01:
+                resolved_by_cid[condition_id] = "NO" if side == "YES" else "YES"
+
+        for condition_id, outcome in resolved_by_cid.items():
+            try:
+                tracker.record_resolution(condition_id, outcome)
+            except Exception as exc:
+                logger.warning("Failed insider resolution update for %s: %s", condition_id, exc)
 
     @property
     def _positions_filename(self) -> str:
@@ -623,6 +654,7 @@ class PositionManager:
                 ), 4)
                 if not pkg.get("_journal_recorded") and self.trade_journal:
                     try:
+                        self._record_insider_resolutions(pkg)
                         self.trade_journal.record_close(pkg, exit_trigger=trigger)
                         pkg["_journal_recorded"] = True
                     except Exception as e:
@@ -825,6 +857,7 @@ class PositionManager:
             ), 4)
             if not pkg.get("_journal_recorded") and self.trade_journal:
                 try:
+                    self._record_insider_resolutions(pkg)
                     self.trade_journal.record_close(pkg, exit_trigger=trigger)
                     pkg["_journal_recorded"] = True
                 except Exception as e:
