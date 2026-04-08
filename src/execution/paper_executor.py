@@ -300,6 +300,14 @@ class PaperExecutor:
         callers (exit engine) should keep the last known real price."""
         return await self.real.get_current_price(asset_id)
 
+    async def get_executable_price(self, asset_id: str, side: str = "buy",
+                                   amount_usd: float = 0.0) -> float:
+        """Delegate executable quote lookup to the wrapped real executor when available."""
+        getter = getattr(self.real, "get_executable_price", None)
+        if getter:
+            return await getter(asset_id, side=side, amount_usd=amount_usd)
+        return await self.get_current_price(asset_id)
+
     def is_configured(self) -> bool: return True
 
     def set_journal(self, journal):

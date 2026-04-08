@@ -4,6 +4,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import pytest
+from execution.fee_model import compute_cross_platform_net_edge_pct, predictit_payout_after_fees
 from execution.paper_executor import get_taker_fee_rate
 
 
@@ -48,6 +49,21 @@ class TestGetTakerFeeRate:
         """Finance markets use the same current curve as politics."""
         assert abs(get_taker_fee_rate("finance", 0.50) - 0.01) < 1e-6
         assert get_taker_fee_rate("weather", 0.50) == 0.0
+
+
+class TestSharedFeeModel:
+    def test_predictit_payout_after_fees(self):
+        payout = predictit_payout_after_fees(0.55)
+        assert payout < 1.0
+        assert payout > 0.90
+
+    def test_cross_platform_net_edge_respects_predictit_drag(self):
+        gross = (1.0 - 0.40 - 0.55) * 100.0
+        net = compute_cross_platform_net_edge_pct(
+            "polymarket", 0.40, "predictit", 0.55, "crypto", "crypto"
+        )
+        assert gross > 0
+        assert net < 0
 
 
 import asyncio

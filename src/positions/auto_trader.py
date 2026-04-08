@@ -19,6 +19,7 @@ try:
 except ImportError:
     httpx = None
 
+from execution.fee_model import compute_cross_platform_net_edge_pct
 from positions.journal_vertical_health import live_non_news_opportunity_should_pause
 from positions.wallet_config import live_news_only_execution_active
 
@@ -60,17 +61,6 @@ CROSS_ARB_MAX_QUOTE_AGE_SEC = 90.0
 CROSS_ARB_MIN_EDGE_REQUOTE_PCT = 2.5   # (1 - yes - no) * 100 after fresh mids
 CROSS_PLATFORM_KELLY_GATE_MIN_CLOSES = 4
 CROSS_PLATFORM_KELLY_CAP_UNTIL_WIN = 0.12  # max Kelly fraction when 0 wins in sample
-_CROSS_ARB_ENTRY_FEE_RATE = {
-    "polymarket": 0.0,
-    "kalshi": 0.01,
-    "predictit": 0.0,
-    "limitless": 0.01,
-    "robinhood": 0.0,
-    "coinbase_spot": 0.006,
-    "kraken": 0.0026,
-}
-_PREDICTIT_PROFIT_TAX = 0.10
-_PREDICTIT_WITHDRAWAL_FEE = 0.05
 
 # Cap concurrent directional packages (scanner pure_prediction path).
 MAX_CONCURRENT_PURE_PREDICTION = 14
@@ -98,6 +88,11 @@ REGIME_SIZE_REDUCTION = 0.50 # Multiply position sizes by this during bad regime
 # Shrink assumed edge toward the market-implied probability (Baker–McHale style).
 # 1.0 = full legacy edge bonus; 0.0 = no assumed edge (Kelly → 0 for directional).
 KELLY_EDGE_SHRINK = float(os.environ.get("KELLY_EDGE_SHRINK", "0.35"))
+KELLY_DIRECTIONAL_UNCERTAINTY = float(os.environ.get("KELLY_DIRECTIONAL_UNCERTAINTY", "0.03"))
+DIRECTIONAL_MAX_BANKROLL_FRACTION = float(os.environ.get("DIRECTIONAL_MAX_BANKROLL_FRACTION", "0.0075"))
+DIRECTIONAL_MAX_BANKROLL_FRACTION_HIGH_CONVICTION = float(
+    os.environ.get("DIRECTIONAL_MAX_BANKROLL_FRACTION_HIGH_CONVICTION", "0.0125")
+)
 
 # ── Kelly sizing defaults for non-prediction trade types ──────────────────────
 # Research: Half Kelly = 75% of full Kelly growth with 50% less drawdown
@@ -273,25 +268,59 @@ class AutoTrader:
 
     @staticmethod
     def _fresh_cross_arb_net_edge_pct(opp: dict, yes_price: float, no_price: float) -> float:
-        """Recompute fee-adjusted resolution edge from fresh quotes."""
-        yes_platform = opp.get("buy_yes_platform", "")
-        no_platform = opp.get("buy_no_platform", "")
-        yes_fee = yes_price * _CROSS_ARB_ENTRY_FEE_RATE.get(yes_platform, 0.0)
-        no_fee = no_price * _CROSS_ARB_ENTRY_FEE_RATE.get(no_platform, 0.0)
-        total_cost = yes_price + no_price + yes_fee + no_fee
+        """Recompute fee-adjusted resolution edge from fresh executable quotes."""
+        matched = opp.get("matched_event", {})
+        category = matched.get("category", "")
+        return compute_cross_platform_net_edge_pct(
+            opp.get("buy_yes_platform", ""),
+            yes_price,
+            opp.get("buy_no_platform", ""),
+            no_price,
+            yes_category=category,
+            no_category=category,
+        )
 
-        yes_payout = 1.0
-        if yes_platform == "predictit":
-            after_tax = 1.0 - _PREDICTIT_PROFIT_TAX * (1.0 - yes_price)
-            yes_payout = after_tax * (1.0 - _PREDICTIT_WITHDRAWAL_FEE)
+    @staticmethod
+    async def _get_executable_quote(executor, asset_id: str, amount_usd: float) -> tuple[float, str]:
+        getter = None
+        if hasattr(executor, "__dict__"):
+            getter = executor.__dict__.get("get_executable_price")
+        if getter is None:
+            cls_getter = getattr(type(executor), "get_executable_price", None)
+            if cls_getter is not None:
+                getter = getattr(executor, "get_executable_price")
+        if getter:
+            return float(await getter(asset_id, side="buy", amount_usd=amount_usd)), "executable"
+        return float(await executor.get_current_price(asset_id)), "midpoint"
 
-        no_payout = 1.0
-        if no_platform == "predictit":
-            after_tax = 1.0 - _PREDICTIT_PROFIT_TAX * (1.0 - no_price)
-            no_payout = after_tax * (1.0 - _PREDICTIT_WITHDRAWAL_FEE)
+    @staticmethod
+    def _binary_kelly_fraction(implied_prob: float, estimated_prob: float) -> float:
+        if implied_prob <= 0 or implied_prob >= 1:
+            return 0.0
+        b = (1.0 - implied_prob) / implied_prob
+        if b <= 0:
+            return 0.0
+        return max(0.0, (b * estimated_prob - (1.0 - estimated_prob)) / b)
 
-        worst_profit = min(yes_payout, no_payout) - total_cost
-        return worst_profit * 100.0
+    @staticmethod
+    def _directional_uncertainty_margin(implied_prob: float) -> float:
+        if implied_prob >= 0.80 or implied_prob <= 0.20:
+            return max(0.01, KELLY_DIRECTIONAL_UNCERTAINTY * 0.5)
+        if implied_prob >= 0.65 or implied_prob <= 0.35:
+            return KELLY_DIRECTIONAL_UNCERTAINTY
+        return KELLY_DIRECTIONAL_UNCERTAINTY * 1.25
+
+    def _risk_capped_directional_fraction(self, implied_prob: float, estimated_prob: float,
+                                          base_fraction: float,
+                                          high_conviction: bool = False) -> float:
+        """Stress the probability estimate and cap bankroll-at-risk per directional bet."""
+        stressed_prob = max(0.01, estimated_prob - self._directional_uncertainty_margin(implied_prob))
+        stressed_full = self._binary_kelly_fraction(implied_prob, stressed_prob)
+        risk_cap = (
+            DIRECTIONAL_MAX_BANKROLL_FRACTION_HIGH_CONVICTION
+            if high_conviction else DIRECTIONAL_MAX_BANKROLL_FRACTION
+        )
+        return min(max(0.0, stressed_full * base_fraction), risk_cap)
 
     async def _precheck_cross_platform_arb(self, opp: dict) -> tuple[bool, str]:
         """Re-quote both legs; enforce scan freshness and post-requote edge."""
@@ -314,8 +343,9 @@ class AutoTrader:
         aid_yes = f"{yes_id}:YES"
         aid_no = f"{no_id}:NO"
         try:
-            py = float(await yes_ex.get_current_price(aid_yes))
-            pn = float(await no_ex.get_current_price(aid_no))
+            quote_notional = max(self._min_trade_size, min(self._max_trade_size, self._total_bankroll * 0.02))
+            py, yes_quote_source = await self._get_executable_quote(yes_ex, aid_yes, quote_notional)
+            pn, no_quote_source = await self._get_executable_quote(no_ex, aid_no, quote_notional)
         except Exception as e:
             logger.warning("Cross-arb re-quote failed: %s", e)
             return False, "cross_arb_requote_failed"
@@ -331,6 +361,8 @@ class AutoTrader:
         opp["profit_pct"] = round(gross_edge_pct, 2)
         opp["net_profit_pct"] = round(net_edge_pct, 2)
         opp["cross_arb_requote_gross_pct"] = round(gross_edge_pct, 2)
+        opp["cross_arb_quote_source_yes"] = yes_quote_source
+        opp["cross_arb_quote_source_no"] = no_quote_source
         return True, ""
 
     def set_political_analyzer(self, analyzer):
@@ -468,13 +500,14 @@ class AutoTrader:
         if implied_prob > 0:
             p_cap = min(0.95, implied_prob + edge)
             p_true = implied_prob + KELLY_EDGE_SHRINK * (p_cap - implied_prob)
-            b = (1.0 - implied_prob) / implied_prob if implied_prob > 0 else 1.0
-            kelly_full = (b * p_true - (1.0 - p_true)) / b if b > 0 else 0
+            high_conviction = strategy in ("weather_forecast",)
+            kelly_sized = self._risk_capped_directional_fraction(
+                implied_prob, p_true, frac, high_conviction=high_conviction
+            )
         else:
             # No implied probability — use edge directly
             kelly_full = edge
-
-        kelly_sized = max(0.0, kelly_full * frac)
+            kelly_sized = max(0.0, kelly_full * frac)
         sized = round(min(self._max_trade_size, remaining_budget * kelly_sized), 2)
         # Bad regime (5+ consecutive losses): skip entirely instead of limping
         # in with min-size bets that waste concurrent slots and can't produce
@@ -1986,8 +2019,6 @@ class AutoTrader:
                     edge_bonus = 0.01  # Less confident on longshots
 
                 p_true = min(0.95, side_price + edge_bonus * KELLY_EDGE_SHRINK)
-                net_odds = (1.0 - side_price) / side_price if side_price > 0 else 1.0
-                kelly_full = (net_odds * p_true - (1.0 - p_true)) / net_odds if net_odds > 0 else 0
                 # Variable Kelly fraction: conservative on longshots, standard on favorites
                 if side_price <= 0.30:
                     kelly_frac = 0.125  # 1/8 Kelly for longshots (high uncertainty)
@@ -1995,7 +2026,10 @@ class AutoTrader:
                     kelly_frac = 0.25   # 1/4 Kelly for favorites (more confident)
                 else:
                     kelly_frac = 0.20   # 1/5 Kelly for mid-range
-                kelly_quarter = max(0.0, kelly_full * kelly_frac)
+                high_conviction = bool(opp.get("insider_signal")) or side_price >= 0.85
+                kelly_quarter = self._risk_capped_directional_fraction(
+                    side_price, p_true, kelly_frac, high_conviction=high_conviction
+                )
 
                 if kelly_quarter <= 0.0:
                     self._record_skip("kelly_no_edge_after_shrink")

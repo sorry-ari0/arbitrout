@@ -72,9 +72,32 @@ T_POLITICAL_EVENT_RESOLVED = 21  # Contract in cluster settled → evaluate all 
 
 # Category: Staleness (22)
 T_MARKET_RESOLVED = 22           # SAFETY: Any leg at 0.99+/0.01- = market resolved, auto-exit
+T_INSIDER_EXIT = 23              # Recent conviction-trader exit against our side
 
 
-def evaluate_heuristics(pkg: dict) -> list[dict]:
+def _matching_insider_exit_alerts(pkg: dict, insider_tracker) -> list[dict]:
+    """Return recent insider exits that match the package's held direction."""
+    if not insider_tracker:
+        return []
+    bet_side = (pkg.get("_bet_side", "") or "").upper()
+    if bet_side not in ("YES", "NO"):
+        return []
+    condition_ids = set()
+    for leg in pkg.get("legs", []):
+        if leg.get("platform") != "polymarket":
+            continue
+        asset_id = leg.get("asset_id", "")
+        if asset_id:
+            condition_ids.add(asset_id.split(":")[0])
+    matching = []
+    for cid in condition_ids:
+        for alert in insider_tracker.get_exit_signals(cid):
+            if (alert.get("direction", "") or "").upper() == bet_side:
+                matching.append(alert)
+    return matching
+
+
+def evaluate_heuristics(pkg: dict, insider_tracker=None) -> list[dict]:
     """Evaluate all 22 heuristic triggers against a package. Returns list of fired triggers."""
     triggers: list[dict] = []
     strategy = pkg.get("strategy_type", "")
@@ -322,6 +345,13 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
                     "details": f"{len(resolved_legs)}/{len(open_legs)} legs resolved ({', '.join(resolved_ids)}). Remaining legs still open.",
                     "action": "review", "safety_override": False})
 
+    insider_exits = _matching_insider_exit_alerts(pkg, insider_tracker)
+    if insider_exits:
+        usernames = [a.get("username") or a.get("wallet", "")[:8] for a in insider_exits[:3]]
+        triggers.append({"trigger_id": T_INSIDER_EXIT, "name": "insider_exit",
+            "details": f"{len(insider_exits)} conviction-trader exit alert(s) against {pkg.get('_bet_side', '?')}: {', '.join(usernames)}",
+            "action": "review", "safety_override": False})
+
     # ── Minimum hold period enforcement ────────────────────────────────────
     # Suppress non-safety, non-mechanical triggers during the hold period.
     # Safety overrides and target_hit still fire during min-hold.
@@ -329,7 +359,7 @@ def evaluate_heuristics(pkg: dict) -> list[dict]:
     if min_hold_until and time.time() < min_hold_until:
         triggers = [t for t in triggers if (
             t.get("safety_override") or
-            t["name"] in ("target_hit", "political_event_resolved")
+            t["name"] in ("target_hit", "political_event_resolved", "insider_exit")
         )]
 
     return triggers
@@ -626,7 +656,7 @@ class ExitEngine:
             if pkg.get("_exiting"):
                 continue
 
-            triggers = evaluate_heuristics(pkg)
+            triggers = evaluate_heuristics(pkg, insider_tracker=getattr(self.pm, "insider_tracker", None))
             if not triggers:
                 continue
 
@@ -844,6 +874,9 @@ class ExitEngine:
                         use_limit=True)
             elif trigger["name"] in ("correlation_break", "time_decay", "negative_drift",
                                        "platform_error", "longshot_decay"):
+                self.pm.add_alert(pkg["id"], trigger["trigger_id"], trigger["name"],
+                    {"details": trigger["details"], "action": trigger["action"]})
+            elif trigger["name"] == "insider_exit":
                 self.pm.add_alert(pkg["id"], trigger["trigger_id"], trigger["name"],
                     {"details": trigger["details"], "action": trigger["action"]})
             else:
