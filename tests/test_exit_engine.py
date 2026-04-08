@@ -116,6 +116,66 @@ class TestHeuristics:
         assert len(resolved) == 1
         assert resolved[0]["safety_override"] is True
 
+    def test_matching_insider_exit_triggers_review(self):
+        pkg = create_package("INS", "pure_prediction")
+        pkg["_bet_side"] = "YES"
+        pkg["legs"] = [
+            {
+                "leg_id": "L1",
+                "platform": "polymarket",
+                "type": "prediction_yes",
+                "asset_id": "cid1:YES",
+                "entry_price": 0.60,
+                "current_price": 0.58,
+                "quantity": 10,
+                "cost": 6.0,
+                "status": "open",
+            }
+        ]
+        pkg["total_cost"] = 6.0
+        pkg["current_value"] = 5.8
+        pkg["peak_value"] = 6.0
+        tracker = type("Tracker", (), {
+            "get_exit_signals": staticmethod(lambda cid: [{
+                "condition_id": cid,
+                "direction": "YES",
+                "username": "edge_wallet",
+            }]),
+        })()
+        triggers = evaluate_heuristics(pkg, insider_tracker=tracker)
+        insider = [t for t in triggers if t["name"] == "insider_exit"]
+        assert len(insider) == 1
+        assert insider[0]["action"] == "review"
+
+    def test_opposite_side_insider_exit_does_not_trigger_review(self):
+        pkg = create_package("INS", "pure_prediction")
+        pkg["_bet_side"] = "NO"
+        pkg["legs"] = [
+            {
+                "leg_id": "L1",
+                "platform": "polymarket",
+                "type": "prediction_no",
+                "asset_id": "cid1:NO",
+                "entry_price": 0.42,
+                "current_price": 0.40,
+                "quantity": 10,
+                "cost": 4.2,
+                "status": "open",
+            }
+        ]
+        pkg["total_cost"] = 4.2
+        pkg["current_value"] = 4.0
+        pkg["peak_value"] = 4.2
+        tracker = type("Tracker", (), {
+            "get_exit_signals": staticmethod(lambda cid: [{
+                "condition_id": cid,
+                "direction": "YES",
+                "username": "edge_wallet",
+            }]),
+        })()
+        triggers = evaluate_heuristics(pkg, insider_tracker=tracker)
+        assert not any(t["name"] == "insider_exit" for t in triggers)
+
     # ── Minimum hold period tests ──────────────────────────────────────────
 
     def test_min_hold_suppresses_trailing_stop(self):

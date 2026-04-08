@@ -339,6 +339,36 @@ class KalshiExecutor(BaseExecutor):
             logger.warning("Kalshi get_current_price failed for %s: %s", asset_id, e)
             return 0.0
 
+    async def get_executable_price(self, asset_id: str, side: str = "buy",
+                                   amount_usd: float = 0.0) -> float:
+        """Prefer explicit top-of-book fields when the market payload exposes them."""
+        try:
+            ticker = asset_id.split(":")[0] if ":" in asset_id else asset_id
+            _, outcome = self._parse_asset_id(asset_id)
+            client = self._get_client()
+            result = await self._run_sync(client.get_market, ticker)
+            market = result.market if hasattr(result, "market") else result
+
+            if outcome == "no":
+                if side.lower() == "sell":
+                    bid = getattr(market, "no_bid", None)
+                    if bid is not None:
+                        return float(bid) / 100
+                ask = getattr(market, "no_ask", None)
+                if ask is not None:
+                    return float(ask) / 100
+            else:
+                if side.lower() == "sell":
+                    bid = getattr(market, "yes_bid", None)
+                    if bid is not None:
+                        return float(bid) / 100
+                ask = getattr(market, "yes_ask", None)
+                if ask is not None:
+                    return float(ask) / 100
+        except Exception as e:
+            logger.debug("Kalshi executable quote fallback for %s: %s", asset_id, e)
+        return await self.get_current_price(asset_id)
+
     async def close(self):
         """Clean up SDK client."""
         if self._client is not None:

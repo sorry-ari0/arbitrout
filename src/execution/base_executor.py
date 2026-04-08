@@ -40,6 +40,14 @@ class BaseExecutor(ABC):
     @abstractmethod
     def is_configured(self) -> bool: ...
 
+    async def get_executable_price(self, asset_id: str, side: str = "buy",
+                                   amount_usd: float = 0.0) -> float:
+        """Return a conservative executable quote when the platform exposes one.
+
+        Default: fall back to the current scalar price.
+        """
+        return await self.get_current_price(asset_id)
+
     # --- Optional limit order methods (override for 0% maker fees) ---
 
     async def buy_limit(self, asset_id: str, amount_usd: float, price: float) -> ExecutionResult:

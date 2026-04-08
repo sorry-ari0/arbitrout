@@ -251,6 +251,39 @@ class TestCrossArbPrecheck:
         assert opp["buy_no_price"] == 0.55
         assert opp["profit_pct"] > opp["net_profit_pct"]
 
+    @pytest.mark.asyncio
+    async def test_prefers_executable_quotes_when_available(self):
+        trader, pm = self._make_trader()
+        pm.executors["polymarket"].get_current_price = AsyncMock(return_value=0.35)
+        pm.executors["kalshi"].get_current_price = AsyncMock(return_value=0.52)
+        pm.executors["polymarket"].get_executable_price = AsyncMock(return_value=0.36)
+        pm.executors["kalshi"].get_executable_price = AsyncMock(return_value=0.53)
+        opp = {
+            "buy_yes_platform": "polymarket",
+            "buy_no_platform": "kalshi",
+            "buy_yes_market_id": "poly-1",
+            "buy_no_market_id": "kal-1",
+            "matched_event": {
+                "canonical_title": "Will BTC exceed $100k?",
+                "category": "crypto",
+                "expiry": "2026-12-31",
+                "markets": [
+                    {"platform": "polymarket", "market_id": "poly-1"},
+                    {"platform": "kalshi", "market_id": "kal-1"},
+                ],
+            },
+            "volume": 1000,
+        }
+
+        ok, reason = await trader._precheck_cross_platform_arb(opp)
+
+        assert ok is True
+        assert reason == ""
+        assert opp["buy_yes_price"] == 0.36
+        assert opp["buy_no_price"] == 0.53
+        assert opp["cross_arb_quote_source_yes"] == "executable"
+        assert opp["cross_arb_quote_source_no"] == "executable"
+
 
 class TestReferenceScanners:
     def test_theta_opportunity_converts_to_directional_trade(self):
@@ -673,6 +706,27 @@ class TestKellySizing:
         assert KELLY_FRACTION_BY_STRATEGY["multi_outcome_arb"] == 0.50
         assert KELLY_FRACTION_BY_STRATEGY["portfolio_no"] == 0.50
         assert KELLY_FRACTION_BY_STRATEGY["cross_platform_arb"] == 0.50
+
+    def test_directional_fraction_is_capped_by_risk_budget(self):
+        from positions.auto_trader import AutoTrader, DIRECTIONAL_MAX_BANKROLL_FRACTION
+        pm = _make_mock_pm()
+        trader = AutoTrader(pm)
+        frac = trader._risk_capped_directional_fraction(0.60, 0.68, 0.25)
+        assert frac <= DIRECTIONAL_MAX_BANKROLL_FRACTION
+
+    def test_high_conviction_directional_fraction_gets_higher_cap(self):
+        from positions.auto_trader import (
+            AutoTrader,
+            DIRECTIONAL_MAX_BANKROLL_FRACTION,
+            DIRECTIONAL_MAX_BANKROLL_FRACTION_HIGH_CONVICTION,
+        )
+        pm = _make_mock_pm()
+        trader = AutoTrader(pm)
+        base = trader._risk_capped_directional_fraction(0.85, 0.93, 0.25, high_conviction=False)
+        boosted = trader._risk_capped_directional_fraction(0.85, 0.93, 0.25, high_conviction=True)
+        assert base <= DIRECTIONAL_MAX_BANKROLL_FRACTION
+        assert boosted <= DIRECTIONAL_MAX_BANKROLL_FRACTION_HIGH_CONVICTION
+        assert boosted >= base
 
 
 class TestRegimeDetection:

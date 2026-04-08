@@ -17,7 +17,12 @@ from adapters.models import NormalizedEvent, MatchedEvent, ArbitrageOpportunity
 from adapters.registry import AdapterRegistry
 from event_matcher import match_events, _extract_crypto
 from arbitrage_history import save_opportunity_history, save_market_history # NEW: Import market history saver
-from execution.paper_executor import get_taker_fee_rate as get_polymarket_taker_fee_rate
+from execution.fee_model import (
+    DEFAULT_ENTRY_FEE_RATE,
+    PLATFORM_ENTRY_FEE_RATES,
+    compute_binary_leg_payout,
+    get_platform_entry_fee_rate,
+)
 
 logger = logging.getLogger("arbitrage_engine")
 
@@ -27,21 +32,8 @@ DATA_DIR = Path(__file__).parent / "data" / "arbitrage"
 # ============================================================
 # PLATFORM FEE RATES (for opportunity filtering)
 # ============================================================
-# Entry fees: maker (GTC limit orders) for Polymarket (0%), taker for others
-_TAKER_FEES = {
-    "polymarket": 0.0,      # 0% maker fee (all orders use GTC limit)
-    "kalshi": 0.01,
-    "predictit": 0.0,       # No entry fee; profit taxed at resolution
-    "limitless": 0.01,
-    "robinhood": 0.0,
-    "coinbase_spot": 0.006,
-    "kraken": 0.0026,
-    "manifold": 0.0,        # NEW: Manifold markets are fee-free for trading, funds are converted to mana
-    "metaculus": 0.0,       # NEW: Metaculus is community-driven, no direct trading fees
-}
-_DEFAULT_TAKER_FEE = 0.0
-_PREDICTIT_PROFIT_TAX = 0.10  # 10% of profits at contract resolution
-_PREDICTIT_WITHDRAWAL_FEE = 0.05  # 5% of withdrawal amount
+_TAKER_FEES = PLATFORM_ENTRY_FEE_RATES
+_DEFAULT_TAKER_FEE = DEFAULT_ENTRY_FEE_RATE
 _MIN_ACTIONABLE_LEG_PRICE = 0.01
 
 
@@ -57,10 +49,8 @@ def _leg_is_actionable(event: NormalizedEvent, side: str) -> bool:
 
 def _event_taker_fee_rate(event: NormalizedEvent, side: str) -> float:
     """Return the modeled taker fee rate for a given market leg."""
-    if event.platform == "polymarket":
-        price = event.yes_price if side == "yes" else event.no_price
-        return get_polymarket_taker_fee_rate(event.category, price)
-    return _TAKER_FEES.get(event.platform, _DEFAULT_TAKER_FEE)
+    price = event.yes_price if side == "yes" else event.no_price
+    return get_platform_entry_fee_rate(event.platform, price, event.category)
 
 
 def _compute_fee_adjusted_profit(
@@ -89,14 +79,8 @@ def _compute_fee_adjusted_profit(
     total_cost = yes_price + no_price + yes_fee + no_fee
 
     # Resolution payouts — PredictIt takes 10% of profits + 5% of withdrawal
-    yes_payout = 1.0
-    if yes_platform == "predictit":
-        after_tax = 1.0 - _PREDICTIT_PROFIT_TAX * (1.0 - yes_price)
-        yes_payout = after_tax * (1.0 - _PREDICTIT_WITHDRAWAL_FEE)
-    no_payout = 1.0
-    if no_platform == "predictit":
-        after_tax = 1.0 - _PREDICTIT_PROFIT_TAX * (1.0 - no_price)
-        no_payout = after_tax * (1.0 - _PREDICTIT_WITHDRAWAL_FEE)
+    yes_payout = compute_binary_leg_payout(yes_platform, yes_price)
+    no_payout = compute_binary_leg_payout(no_platform, no_price)
 
     # Guaranteed profit = worst-case scenario
     worst_payout = min(yes_payout, no_payout)
