@@ -160,6 +160,11 @@ class TradeJournal:
             "news_sleeve": bool(
                 pkg.get("_news_driven") or pkg.get("strategy_type") == "news_driven"
             ),
+            "insider_sleeve": bool(
+                pkg.get("_insider_driven") or pkg.get("insider_signal")
+            ),
+            "insider_signal": bool(pkg.get("insider_signal")),
+            "_insider_driven": bool(pkg.get("_insider_driven")),
         }
 
         self.entries.append(entry)

@@ -7,6 +7,13 @@ Notable changes to **arbitrout** are listed here. Format follows [Keep a Changel
 ### Added
 
 - **NASA EONET** (`src/positions/eonet_client.py`): fetch open natural events from [EONET API v3](https://eonet.gsfc.nasa.gov/) and blend conservative precipitation adjustments into NWS forecasts in `WeatherScanner` when hazards are near the city and forecast date. Toggle with `EONET_WEATHER_ENABLED`. Unit tests in `tests/test_eonet_client.py`.
+- Spec: `docs/specs/2026-04-08-journal-audit-followups.md` for audited follow-up fixes covering structural-arb settlement, insider feedback wiring, and fee-aware cross-arb gating.
+
+### Changed
+
+- **Exit engine:** `multi_outcome_arb` no longer force-exits on a single losing leg hitting ~0; package-level `market_resolved` now waits for a visible winner or fully binary legs to avoid stale-mid settlement journaling.
+- **Auto trader:** cross-platform arb re-quote gate now recomputes fee-adjusted net edge and rejects gross-positive / net-negative spreads after fresh quotes.
+- **Position manager / trade journal:** closing Polymarket legs now feed resolved outcomes back into `InsiderTracker`, and journal rows preserve insider-backed sleeve flags for later audit slices.
 
 ## [2026-04-05]
 
