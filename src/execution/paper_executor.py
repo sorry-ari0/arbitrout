@@ -310,6 +310,12 @@ class PaperExecutor:
 
     def is_configured(self) -> bool: return True
 
+    def get_quote_stats(self) -> dict:
+        getter = getattr(self.real, "get_quote_stats", None)
+        if getter:
+            return getter()
+        return {}
+
     def set_journal(self, journal):
         """Set trade journal reference for persistent PnL tracking across restarts."""
         self._journal = journal

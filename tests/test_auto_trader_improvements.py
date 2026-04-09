@@ -1059,6 +1059,52 @@ class TestWhaleConvergence:
             assert strength_with >= strength_no
             assert sig_with_conv["has_convergence"] is True
 
+    def test_stale_scan_suppresses_insider_signal(self):
+        from positions.insider_tracker import InsiderTracker, STALE_SIGNAL_MAX_AGE_SEC
+        from pathlib import Path
+        import tempfile, time as t
+        with tempfile.TemporaryDirectory() as d:
+            tracker = InsiderTracker(Path(d))
+            tracker._last_scan = t.time() - STALE_SIGNAL_MAX_AGE_SEC - 1
+            tracker._insider_positions = {
+                "cid_stale": [
+                    {"wallet": "w1", "outcome": "YES", "current_value": 5000, "title": "Stale"},
+                ]
+            }
+            sig = tracker.get_insider_signal("cid_stale")
+            assert sig["has_signal"] is False
+            assert sig["suppressed_reason"] == "stale_scan"
+
+
+class TestInsiderFollow:
+    def test_strong_insider_signal_sets_follow_side(self):
+        from positions.auto_trader import AutoTrader
+        pm = _make_mock_pm()
+        trader = AutoTrader(pm)
+        side = trader._strong_insider_follow_side({
+            "has_signal": True,
+            "net_direction": "YES",
+            "conviction_count": 2,
+            "signal_strength": 0.8,
+            "has_insider_exits": False,
+            "insiders": [{"timestamp": datetime.now().timestamp()}],
+        })
+        assert side == "YES"
+
+    def test_weak_insider_signal_does_not_follow(self):
+        from positions.auto_trader import AutoTrader
+        pm = _make_mock_pm()
+        trader = AutoTrader(pm)
+        side = trader._strong_insider_follow_side({
+            "has_signal": True,
+            "net_direction": "YES",
+            "conviction_count": 0,
+            "signal_strength": 0.4,
+            "has_insider_exits": False,
+            "insiders": [{"timestamp": datetime.now().timestamp()}],
+        })
+        assert side == ""
+
 
 class TestNewsThresholds:
     """Relaxed news scanner thresholds."""
