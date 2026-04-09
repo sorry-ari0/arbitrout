@@ -36,6 +36,8 @@ LEADERBOARD_SIZE = 100       # Top 100 traders per category to monitor
 SCAN_INTERVAL = 900          # 15 minutes between full scans
 CACHE_TTL = 600              # Cache insider data for 10 minutes
 CONVERGENCE_THRESHOLD = 3    # 3+ wallets entering same market = convergence signal
+STALE_SIGNAL_MAX_AGE_SEC = SCAN_INTERVAL * 2
+RECENT_ACTIVITY_LOOKBACK_SEC = SCAN_INTERVAL * 2
 
 # Leaderboard categories — expanded to cover politics/economics specialists
 LEADERBOARD_CATEGORIES = ["OVERALL", "CRYPTO", "POLITICS", "ECONOMICS", "FINANCE"]
@@ -113,6 +115,8 @@ class InsiderTracker:
         self._task = None
         self._running = False
         self._scan_count: int = 0  # For tiered polling rotation
+        self._recent_wallet_deltas: dict[tuple[str, str], dict] = {}
+        self._stale_signal_suppressions: int = 0
 
         # Auto-promotion tracking: wallet -> consecutive scan count
         self._consecutive_scans: dict[str, int] = {}
@@ -185,6 +189,7 @@ class InsiderTracker:
                 self._consecutive_scans = data.get("consecutive_scans", {})
                 self._whale_trades = data.get("whale_trades", {})
                 self._empty_scan_count = data.get("empty_scan_count", {})
+                self._stale_signal_suppressions = data.get("stale_signal_suppressions", 0)
                 logger.info("Loaded %d tracked insiders from cache", len(self._flagged_wallets))
             except (json.JSONDecodeError, OSError) as e:
                 logger.warning("Failed to load insider cache: %s", e)
@@ -204,6 +209,7 @@ class InsiderTracker:
             "consecutive_scans": self._consecutive_scans,
             "whale_trades": self._whale_trades,
             "empty_scan_count": self._empty_scan_count,
+            "stale_signal_suppressions": self._stale_signal_suppressions,
             "saved_at": time.time(),
         }
         with open(tmp, "w", encoding="utf-8") as f:
@@ -265,6 +271,7 @@ class InsiderTracker:
 
         # Prune stale whale trades (older than 1 hour)
         self._prune_whale_trades()
+        self._prune_recent_deltas()
 
         self._last_scan = time.time()
         self._save_cache()
@@ -508,6 +515,7 @@ class InsiderTracker:
             polled_wallets.add(wallet)
             positions_found = 0
             try:
+                await self._fetch_wallet_trade_deltas(client, wallet)
                 r = await client.get(f"{DATA_API}/positions", params={
                     "user": wallet,
                     "sizeThreshold": str(MIN_POSITION_SIZE),
@@ -532,6 +540,7 @@ class InsiderTracker:
                         positions_found += 1
                         if cid not in self._insider_positions:
                             self._insider_positions[cid] = []
+                        delta = self._recent_wallet_deltas.get((wallet, cid), {})
 
                         self._insider_positions[cid].append({
                             "wallet": wallet,
@@ -547,6 +556,9 @@ class InsiderTracker:
                             "cash_pnl": float(pos.get("cashPnl", 0) or 0),
                             "pct_pnl": float(pos.get("percentPnl", 0) or 0),
                             "title": pos.get("title", ""),
+                            "timestamp": float(delta.get("timestamp", 0) or 0),
+                            "last_action": delta.get("action", ""),
+                            "delta_source": delta.get("source", "snapshot"),
                         })
             except Exception as e:
                 logger.warning("Position fetch failed for %s: %s", wallet[:10], e)
@@ -562,6 +574,110 @@ class InsiderTracker:
                      len(tier2) if self._scan_count % 2 == 0 else 0,
                      len(tier3) if self._scan_count % 4 == 0 else 0,
                      len(self._insider_positions))
+
+    @staticmethod
+    def _parse_event_timestamp(ts, default_now: float) -> float:
+        if isinstance(ts, (int, float)):
+            return float(ts)
+        if isinstance(ts, str):
+            try:
+                return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+            except Exception:
+                return default_now
+        return default_now
+
+    @staticmethod
+    def _normalize_trade_direction(action: str, outcome: str) -> str:
+        action = (action or "").upper()
+        outcome = (outcome or "").upper()
+        if "YES" in outcome:
+            return "YES" if action == "BUY" else "NO"
+        if "NO" in outcome:
+            return "NO" if action == "BUY" else "YES"
+        return outcome if outcome in ("YES", "NO") else "NONE"
+
+    def _record_wallet_delta(self, wallet: str, condition_id: str, *, timestamp: float,
+                             action: str, outcome: str, usd_value: float,
+                             source: str):
+        key = (wallet, condition_id)
+        prev = self._recent_wallet_deltas.get(key)
+        direction = self._normalize_trade_direction(action, outcome)
+        payload = {
+            "wallet": wallet,
+            "condition_id": condition_id,
+            "timestamp": timestamp,
+            "action": action,
+            "outcome": outcome,
+            "direction": direction,
+            "usd_value": round(usd_value, 2),
+            "source": source,
+        }
+        if not prev or timestamp >= prev.get("timestamp", 0):
+            self._recent_wallet_deltas[key] = payload
+
+    async def _fetch_wallet_trade_deltas(self, client: "httpx.AsyncClient", wallet: str):
+        """Use activity/trades as the fresh-trade detector, then reconcile with positions."""
+        now = time.time()
+        endpoints = [
+            ("activity", f"{DATA_API}/activity", {"user": wallet, "limit": "50"}),
+            ("trades", f"{DATA_API}/trades", {"user": wallet, "limit": "50"}),
+        ]
+        for source, url, params in endpoints:
+            try:
+                r = await client.get(url, params=params)
+                if r.status_code != 200:
+                    continue
+                data = r.json()
+                if not isinstance(data, list):
+                    data = data.get(source, data.get("data", []))
+                for item in data:
+                    cid = (
+                        item.get("conditionId")
+                        or item.get("market")
+                        or item.get("marketId")
+                        or ""
+                    )
+                    if not cid:
+                        continue
+                    ts = self._parse_event_timestamp(
+                        item.get("timestamp")
+                        or item.get("createdAt")
+                        or item.get("created_at")
+                        or item.get("time"),
+                        now,
+                    )
+                    if now - ts > RECENT_ACTIVITY_LOOKBACK_SEC:
+                        continue
+                    action = (
+                        item.get("side")
+                        or item.get("action")
+                        or item.get("verb")
+                        or item.get("type")
+                        or ""
+                    ).upper()
+                    if action not in ("BUY", "SELL"):
+                        action = "BUY"
+                    outcome = (item.get("outcome") or item.get("asset") or "").upper()
+                    size = float(item.get("size", item.get("amount", item.get("value", 0))) or 0)
+                    price = float(item.get("price", item.get("avgPrice", 0)) or 0)
+                    usd_value = size * price if price > 0 else size
+                    self._record_wallet_delta(
+                        wallet,
+                        str(cid),
+                        timestamp=ts,
+                        action=action,
+                        outcome=outcome,
+                        usd_value=usd_value,
+                        source=source,
+                    )
+            except Exception as e:
+                logger.debug("Wallet delta fetch failed for %s via %s: %s", wallet[:10], source, e)
+
+    def _prune_recent_deltas(self):
+        cutoff = time.time() - RECENT_ACTIVITY_LOOKBACK_SEC
+        for key in list(self._recent_wallet_deltas):
+            if self._recent_wallet_deltas[key].get("timestamp", 0) <= cutoff:
+                del self._recent_wallet_deltas[key]
 
     # ================================================================
     # TASK 6: WHALE TRADE SCANNING + MARKET HOLDERS
@@ -930,6 +1046,25 @@ class InsiderTracker:
         """
         positions = self._insider_positions.get(condition_id, [])
         whale_trades = self._whale_trades.get(condition_id, [])
+        scan_age = time.time() - float(self._last_scan or 0)
+        if self._last_scan and scan_age > STALE_SIGNAL_MAX_AGE_SEC:
+            self._stale_signal_suppressions += 1
+            return {
+                "has_signal": False,
+                "insider_count": 0,
+                "suspicious_count": 0,
+                "net_direction": "NONE",
+                "total_insider_value": 0,
+                "signal_strength": 0,
+                "has_convergence": False,
+                "convergence_wallets": 0,
+                "whale_trade_count": 0,
+                "whale_trade_direction": "NONE",
+                "has_insider_exits": False,
+                "insiders": [],
+                "suppressed_reason": "stale_scan",
+                "stale_scan_age_sec": round(scan_age, 1),
+            }
 
         if not positions and not whale_trades:
             return {
@@ -1071,6 +1206,10 @@ class InsiderTracker:
             "whale_trade_count": whale_trade_count,
             "whale_trade_direction": whale_direction,
             "has_insider_exits": has_insider_exits,
+            "fresh_delta_count": sum(
+                1 for p in positions
+                if p.get("timestamp", 0) and time.time() - p.get("timestamp", 0) <= RECENT_ACTIVITY_LOOKBACK_SEC
+            ),
             "insiders": [p for p in positions
                          if self._flagged_wallets.get(p.get("wallet", ""), {}).get("wallet_type") != "market_maker"],
         }
@@ -1241,6 +1380,8 @@ class InsiderTracker:
             "total_movement_alerts": len(self._movement_alerts),
             "auto_triggered_alerts": len([a for a in self._movement_alerts if a.get("auto_triggered")]),
             "exit_alerts": len([a for a in self._movement_alerts if a.get("type") == "insider_exit"]),
+            "stale_signal_suppressions": self._stale_signal_suppressions,
+            "recent_wallet_deltas": len(self._recent_wallet_deltas),
             "last_scan": self._last_scan,
             "last_scan_ago_min": round((time.time() - self._last_scan) / 60, 1) if self._last_scan else None,
             "leaderboard_categories": LEADERBOARD_CATEGORIES,

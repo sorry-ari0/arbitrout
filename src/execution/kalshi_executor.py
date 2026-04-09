@@ -15,6 +15,11 @@ import logging
 import os
 import uuid
 
+try:
+    import httpx
+except ImportError:
+    httpx = None
+
 from .base_executor import BaseExecutor, ExecutionResult, BalanceResult, PositionInfo
 
 logger = logging.getLogger("execution.kalshi")
@@ -31,6 +36,11 @@ class KalshiExecutor(BaseExecutor):
         self._rsa_key_inline = os.environ.get("KALSHI_RSA_PRIVATE_KEY", "")
         self._demo = os.environ.get("KALSHI_DEMO", "true").lower() == "true"
         self._client = None
+        self._executable_quote_source_counts = {
+            "market_fields": 0,
+            "orderbook_derived": 0,
+            "midpoint_fallback": 0,
+        }
 
     def is_configured(self) -> bool:
         return bool(self._api_key and (self._rsa_key_path or self._rsa_key_inline))
@@ -94,6 +104,50 @@ class KalshiExecutor(BaseExecutor):
             ticker, side = asset_id.rsplit(":", 1)
             return ticker, side.lower()
         return asset_id, "yes"
+
+    def _record_quote_source(self, source: str):
+        self._executable_quote_source_counts[source] = self._executable_quote_source_counts.get(source, 0) + 1
+
+    @staticmethod
+    def _field_price(value, *, dollars: bool) -> float:
+        price = float(value)
+        return price if dollars else price / 100.0
+
+    async def _fetch_public_orderbook(self, ticker: str) -> dict:
+        if not httpx:
+            return {}
+        host = DEMO_HOST if self._demo else PROD_HOST
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{host}/markets/{ticker}/orderbook")
+            if resp.status_code != 200:
+                return {}
+            data = resp.json()
+            return data.get("orderbook_fp", data.get("orderbook", {}))
+
+    @staticmethod
+    def _best_bid(levels) -> float:
+        best = 0.0
+        for level in levels or []:
+            if isinstance(level, dict):
+                price = float(level.get("price", 0) or 0)
+            else:
+                price = float(level[0] if len(level) >= 1 else 0)
+            best = max(best, price)
+        return best
+
+    async def _orderbook_executable_price(self, ticker: str, outcome: str, side: str) -> float:
+        book = await self._fetch_public_orderbook(ticker)
+        yes_bids = book.get("yes_dollars", book.get("yes", []))
+        no_bids = book.get("no_dollars", book.get("no", []))
+        if outcome == "yes":
+            if side.lower() == "sell":
+                return self._best_bid(yes_bids)
+            opposite = self._best_bid(no_bids)
+            return max(0.0, round(1.0 - opposite, 4)) if opposite > 0 else 0.0
+        if side.lower() == "sell":
+            return self._best_bid(no_bids)
+        opposite = self._best_bid(yes_bids)
+        return max(0.0, round(1.0 - opposite, 4)) if opposite > 0 else 0.0
 
     async def buy(self, asset_id: str, amount_usd: float) -> ExecutionResult:
         """Place a limit buy order on Kalshi (maker, 0% fee)."""
@@ -341,7 +395,7 @@ class KalshiExecutor(BaseExecutor):
 
     async def get_executable_price(self, asset_id: str, side: str = "buy",
                                    amount_usd: float = 0.0) -> float:
-        """Prefer explicit top-of-book fields when the market payload exposes them."""
+        """Prefer fixed-point market fields, then derive from the public orderbook."""
         try:
             ticker = asset_id.split(":")[0] if ":" in asset_id else asset_id
             _, outcome = self._parse_asset_id(asset_id)
@@ -351,23 +405,56 @@ class KalshiExecutor(BaseExecutor):
 
             if outcome == "no":
                 if side.lower() == "sell":
+                    bid = getattr(market, "no_bid_dollars", None)
+                    if bid is not None:
+                        self._record_quote_source("market_fields")
+                        return self._field_price(bid, dollars=True)
                     bid = getattr(market, "no_bid", None)
                     if bid is not None:
-                        return float(bid) / 100
+                        self._record_quote_source("market_fields")
+                        return self._field_price(bid, dollars=False)
+                ask = getattr(market, "no_ask_dollars", None)
+                if ask is not None:
+                    self._record_quote_source("market_fields")
+                    return self._field_price(ask, dollars=True)
                 ask = getattr(market, "no_ask", None)
                 if ask is not None:
-                    return float(ask) / 100
+                    self._record_quote_source("market_fields")
+                    return self._field_price(ask, dollars=False)
             else:
                 if side.lower() == "sell":
+                    bid = getattr(market, "yes_bid_dollars", None)
+                    if bid is not None:
+                        self._record_quote_source("market_fields")
+                        return self._field_price(bid, dollars=True)
                     bid = getattr(market, "yes_bid", None)
                     if bid is not None:
-                        return float(bid) / 100
+                        self._record_quote_source("market_fields")
+                        return self._field_price(bid, dollars=False)
+                ask = getattr(market, "yes_ask_dollars", None)
+                if ask is not None:
+                    self._record_quote_source("market_fields")
+                    return self._field_price(ask, dollars=True)
                 ask = getattr(market, "yes_ask", None)
                 if ask is not None:
-                    return float(ask) / 100
+                    self._record_quote_source("market_fields")
+                    return self._field_price(ask, dollars=False)
         except Exception as e:
             logger.debug("Kalshi executable quote fallback for %s: %s", asset_id, e)
+        try:
+            ticker = asset_id.split(":")[0] if ":" in asset_id else asset_id
+            _, outcome = self._parse_asset_id(asset_id)
+            orderbook_price = await self._orderbook_executable_price(ticker, outcome, side)
+            if orderbook_price > 0:
+                self._record_quote_source("orderbook_derived")
+                return orderbook_price
+        except Exception as e:
+            logger.debug("Kalshi orderbook-derived quote fallback for %s: %s", asset_id, e)
+        self._record_quote_source("midpoint_fallback")
         return await self.get_current_price(asset_id)
+
+    def get_quote_stats(self) -> dict:
+        return dict(self._executable_quote_source_counts)
 
     async def close(self):
         """Clean up SDK client."""

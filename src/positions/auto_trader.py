@@ -62,6 +62,14 @@ CROSS_ARB_MIN_EDGE_REQUOTE_PCT = 2.5   # (1 - yes - no) * 100 after fresh mids
 CROSS_PLATFORM_KELLY_GATE_MIN_CLOSES = 4
 CROSS_PLATFORM_KELLY_CAP_UNTIL_WIN = 0.12  # max Kelly fraction when 0 wins in sample
 
+# Strong insider-follow entry gate.
+# These trades still use the same maker-only limit-order execution path, but
+# the insider direction becomes the explicit side-selection input instead of a
+# generic score boost.
+INSIDER_FOLLOW_MIN_SIGNAL_STRENGTH = 0.60
+INSIDER_FOLLOW_MIN_CONVICTION_COUNT = 1
+INSIDER_FOLLOW_MAX_SIGNAL_AGE_SEC = 2 * 900  # 2 tracker scan windows
+
 # Cap concurrent directional packages (scanner pure_prediction path).
 MAX_CONCURRENT_PURE_PREDICTION = 14
 
@@ -206,6 +214,9 @@ class AutoTrader:
         self._daily_trade_date = ""
         self._session_start_time = time.time()  # Tracks server start for daily limit
         self._scan_event = asyncio.Event()  # Fired by arb scanner after each scan
+        self._insider_opens_by_day: dict[str, int] = {}
+        self._directional_opens_above_base_cap = 0
+        self._directional_opens_above_allowed_cap = 0
         # News scanner integration — thread-safe queue
         self._news_lock = asyncio.Lock()
         self._news_opportunities: list[dict] = []
@@ -321,6 +332,10 @@ class AutoTrader:
             if high_conviction else DIRECTIONAL_MAX_BANKROLL_FRACTION
         )
         return min(max(0.0, stressed_full * base_fraction), risk_cap)
+
+    @staticmethod
+    def _current_day_bucket() -> str:
+        return datetime.utcnow().strftime("%Y-%m-%d")
 
     async def _precheck_cross_platform_arb(self, opp: dict) -> tuple[bool, str]:
         """Re-quote both legs; enforce scan freshness and post-requote edge."""
@@ -440,6 +455,35 @@ class AutoTrader:
             if age_seconds < max_age:
                 return multiplier
         return 0.1
+
+    @staticmethod
+    def _strong_insider_follow_side(insider_signal: dict | None) -> str:
+        """Return YES/NO when insider flow is strong enough to follow directionally."""
+        if not insider_signal or not insider_signal.get("has_signal"):
+            return ""
+        direction = (insider_signal.get("net_direction") or "").upper()
+        if direction not in ("YES", "NO"):
+            return ""
+        if int(insider_signal.get("conviction_count", 0) or 0) < INSIDER_FOLLOW_MIN_CONVICTION_COUNT:
+            return ""
+        if float(insider_signal.get("signal_strength", 0) or 0) < INSIDER_FOLLOW_MIN_SIGNAL_STRENGTH:
+            return ""
+        recent_ts = 0.0
+        for insider in insider_signal.get("insiders", []) or []:
+            try:
+                recent_ts = max(recent_ts, float(
+                    insider.get("timestamp")
+                    or insider.get("updated_at")
+                    or insider.get("created_at")
+                    or 0
+                ))
+            except (TypeError, ValueError):
+                continue
+        if recent_ts > 0 and (time.time() - recent_ts) > INSIDER_FOLLOW_MAX_SIGNAL_AGE_SEC:
+            return ""
+        if insider_signal.get("has_insider_exits"):
+            return ""
+        return direction
 
     def _update_regime(self):
         """Check trade journal for consecutive loss streak and adjust regime penalty.
@@ -1071,6 +1115,11 @@ class AutoTrader:
                         score *= insider_mult
                     opp["insider_signal"] = insider_signal
                     opp["_insider_driven"] = conviction_count > 0
+                    follow_side = self._strong_insider_follow_side(insider_signal)
+                    if follow_side:
+                        opp["preferred_side"] = follow_side
+                        opp["_insider_follow"] = True
+                        opp["_insider_follow_side"] = follow_side
 
             # Cross-platform whale convergence: if both Polymarket insiders AND
             # Kalshi anonymous whales are active on the same event, boost/suppress
@@ -1850,6 +1899,11 @@ class AutoTrader:
                 pkg["_news_driven"] = True
             if opp.get("insider_signal"):
                 pkg["insider_signal"] = opp["insider_signal"]
+            if opp.get("_insider_driven"):
+                pkg["_insider_driven"] = True
+            if opp.get("_insider_follow"):
+                pkg["_insider_follow"] = True
+                pkg["_insider_follow_side"] = opp.get("_insider_follow_side", "")
 
             if is_cross_platform or is_synthetic:
                 # Kelly size for arb/synthetic strategies
@@ -2168,6 +2222,20 @@ class AutoTrader:
                             directional_non_news_remaining = max(0.0, directional_non_news_remaining - trade_size)
                     if strategy == "pure_prediction" and not is_news and not opp.get("insider_signal"):
                         pure_prediction_opens_cycle += 1
+                    if strategy in ("pure_prediction", "weather_forecast", "political_synthetic", "crypto_synthetic"):
+                        base_cap = self._total_bankroll * DIRECTIONAL_MAX_BANKROLL_FRACTION
+                        high_conviction_open = bool(opp.get("_insider_follow")) or entry_price >= 0.85
+                        allowed_cap = self._total_bankroll * (
+                            DIRECTIONAL_MAX_BANKROLL_FRACTION_HIGH_CONVICTION
+                            if high_conviction_open else DIRECTIONAL_MAX_BANKROLL_FRACTION
+                        )
+                        if trade_size > base_cap + 1e-9:
+                            self._directional_opens_above_base_cap += 1
+                        if trade_size > allowed_cap + 1e-9:
+                            self._directional_opens_above_allowed_cap += 1
+                    if opp.get("_insider_driven") or opp.get("_insider_follow"):
+                        day = self._current_day_bucket()
+                        self._insider_opens_by_day[day] = self._insider_opens_by_day.get(day, 0) + 1
                     total_exposure += trade_size
                     # Hard stop if exposure cap reached mid-cycle
                     if total_exposure >= self._max_total_exposure:
@@ -2698,6 +2766,28 @@ class AutoTrader:
 
     def get_stats(self) -> dict:
         open_pkgs = self.pm.list_packages("open")
+        insider_pnl = 0.0
+        non_insider_pnl = 0.0
+        if self.pm.trade_journal:
+            for e in self.pm.trade_journal.entries:
+                pnl = float(e.get("pnl", 0) or 0)
+                if e.get("insider_sleeve"):
+                    insider_pnl += pnl
+                else:
+                    non_insider_pnl += pnl
+        tracker_stats = {}
+        if self.insider_tracker and hasattr(self.insider_tracker, "get_stats"):
+            try:
+                tracker_stats = self.insider_tracker.get_stats()
+            except Exception:
+                tracker_stats = {}
+        kalshi_quote_stats = {}
+        kalshi_ex = self.pm.executors.get("kalshi") if self.pm else None
+        if kalshi_ex and hasattr(kalshi_ex, "get_quote_stats"):
+            try:
+                kalshi_quote_stats = kalshi_ex.get_quote_stats()
+            except Exception:
+                kalshi_quote_stats = {}
         return {
             "running": self._running,
             "trades_opened": self._trades_opened,
@@ -2708,5 +2798,13 @@ class AutoTrader:
             "scan_interval_sec": self.interval,
             "trades_today": self._daily_trade_count,
             "max_trades_per_day": MAX_NEW_TRADES_PER_DAY,
+            "cross_arb_requote_edge_gone_count": self._skip_reasons.get("cross_arb_requote_edge_gone", 0),
+            "directional_opens_above_base_cap": self._directional_opens_above_base_cap,
+            "directional_opens_above_allowed_cap": self._directional_opens_above_allowed_cap,
+            "insider_driven_opens_by_day": dict(sorted(self._insider_opens_by_day.items())),
+            "insider_sleeve_pnl_usd": round(insider_pnl, 2),
+            "non_insider_sleeve_pnl_usd": round(non_insider_pnl, 2),
+            "stale_signal_suppressions": tracker_stats.get("stale_signal_suppressions", 0),
+            "kalshi_executable_quote_sources": kalshi_quote_stats,
             "skip_reasons": dict(sorted(self._skip_reasons.items(), key=lambda x: x[1], reverse=True)),
         }

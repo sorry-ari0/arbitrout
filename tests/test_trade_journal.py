@@ -137,12 +137,16 @@ class TestJournal:
             pkg = _make_closed_package("Insider Trade", "pure_prediction", 100.0, 115.0)
             pkg["insider_signal"] = {"has_signal": True, "signal_strength": 0.8}
             pkg["_insider_driven"] = True
+            pkg["_insider_follow"] = True
+            pkg["_insider_follow_side"] = "YES"
 
             entry = journal.record_close(pkg, exit_trigger="target_hit")
 
             assert entry["insider_sleeve"] is True
             assert entry["insider_signal"] is True
             assert entry["_insider_driven"] is True
+            assert entry["insider_follow_entry"] is True
+            assert entry["insider_follow_side"] == "YES"
 
     def test_get_recent(self):
         """get_recent returns entries sorted by closed_at descending."""

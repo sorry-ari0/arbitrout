@@ -165,6 +165,8 @@ class TradeJournal:
             ),
             "insider_signal": bool(pkg.get("insider_signal")),
             "_insider_driven": bool(pkg.get("_insider_driven")),
+            "insider_follow_entry": bool(pkg.get("_insider_follow")),
+            "insider_follow_side": pkg.get("_insider_follow_side", ""),
         }
 
         self.entries.append(entry)
