@@ -393,8 +393,8 @@ class KalshiExecutor(BaseExecutor):
             logger.warning("Kalshi get_current_price failed for %s: %s", asset_id, e)
             return 0.0
 
-    async def get_executable_price(self, asset_id: str, side: str = "buy",
-                                   amount_usd: float = 0.0) -> float:
+    async def get_executable_quote(self, asset_id: str, side: str = "buy",
+                                   amount_usd: float = 0.0) -> dict:
         """Prefer fixed-point market fields, then derive from the public orderbook."""
         try:
             ticker = asset_id.split(":")[0] if ":" in asset_id else asset_id
@@ -408,37 +408,45 @@ class KalshiExecutor(BaseExecutor):
                     bid = getattr(market, "no_bid_dollars", None)
                     if bid is not None:
                         self._record_quote_source("market_fields")
-                        return self._field_price(bid, dollars=True)
+                        return {"price": self._field_price(bid, dollars=True), "source": "market_fields",
+                                "depth_sufficient": True, "is_midpoint_fallback": False}
                     bid = getattr(market, "no_bid", None)
                     if bid is not None:
                         self._record_quote_source("market_fields")
-                        return self._field_price(bid, dollars=False)
+                        return {"price": self._field_price(bid, dollars=False), "source": "market_fields",
+                                "depth_sufficient": True, "is_midpoint_fallback": False}
                 ask = getattr(market, "no_ask_dollars", None)
                 if ask is not None:
                     self._record_quote_source("market_fields")
-                    return self._field_price(ask, dollars=True)
+                    return {"price": self._field_price(ask, dollars=True), "source": "market_fields",
+                            "depth_sufficient": True, "is_midpoint_fallback": False}
                 ask = getattr(market, "no_ask", None)
                 if ask is not None:
                     self._record_quote_source("market_fields")
-                    return self._field_price(ask, dollars=False)
+                    return {"price": self._field_price(ask, dollars=False), "source": "market_fields",
+                            "depth_sufficient": True, "is_midpoint_fallback": False}
             else:
                 if side.lower() == "sell":
                     bid = getattr(market, "yes_bid_dollars", None)
                     if bid is not None:
                         self._record_quote_source("market_fields")
-                        return self._field_price(bid, dollars=True)
+                        return {"price": self._field_price(bid, dollars=True), "source": "market_fields",
+                                "depth_sufficient": True, "is_midpoint_fallback": False}
                     bid = getattr(market, "yes_bid", None)
                     if bid is not None:
                         self._record_quote_source("market_fields")
-                        return self._field_price(bid, dollars=False)
+                        return {"price": self._field_price(bid, dollars=False), "source": "market_fields",
+                                "depth_sufficient": True, "is_midpoint_fallback": False}
                 ask = getattr(market, "yes_ask_dollars", None)
                 if ask is not None:
                     self._record_quote_source("market_fields")
-                    return self._field_price(ask, dollars=True)
+                    return {"price": self._field_price(ask, dollars=True), "source": "market_fields",
+                            "depth_sufficient": True, "is_midpoint_fallback": False}
                 ask = getattr(market, "yes_ask", None)
                 if ask is not None:
                     self._record_quote_source("market_fields")
-                    return self._field_price(ask, dollars=False)
+                    return {"price": self._field_price(ask, dollars=False), "source": "market_fields",
+                            "depth_sufficient": True, "is_midpoint_fallback": False}
         except Exception as e:
             logger.debug("Kalshi executable quote fallback for %s: %s", asset_id, e)
         try:
@@ -447,11 +455,19 @@ class KalshiExecutor(BaseExecutor):
             orderbook_price = await self._orderbook_executable_price(ticker, outcome, side)
             if orderbook_price > 0:
                 self._record_quote_source("orderbook_derived")
-                return orderbook_price
+                return {"price": float(orderbook_price), "source": "orderbook_derived",
+                        "depth_sufficient": True, "is_midpoint_fallback": False}
         except Exception as e:
             logger.debug("Kalshi orderbook-derived quote fallback for %s: %s", asset_id, e)
         self._record_quote_source("midpoint_fallback")
-        return await self.get_current_price(asset_id)
+        price = await self.get_current_price(asset_id)
+        return {"price": float(price), "source": "midpoint_fallback",
+                "depth_sufficient": False, "is_midpoint_fallback": True}
+
+    async def get_executable_price(self, asset_id: str, side: str = "buy",
+                                   amount_usd: float = 0.0) -> float:
+        quote = await self.get_executable_quote(asset_id, side=side, amount_usd=amount_usd)
+        return float(quote.get("price", 0.0) or 0.0)
 
     def get_quote_stats(self) -> dict:
         return dict(self._executable_quote_source_counts)

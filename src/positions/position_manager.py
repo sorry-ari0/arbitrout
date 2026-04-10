@@ -11,6 +11,7 @@ from positions.journal_vertical_health import live_journal_allows_package_open
 from positions.wallet_config import live_package_open_allowed
 
 from execution.base_executor import ExecutionResult
+from execution.fee_model import compute_binary_leg_payout
 
 logger = logging.getLogger("positions.manager")
 
@@ -42,6 +43,10 @@ def journal_fee_model_for_executor(executor) -> str:
     if callable(tag_fn):
         return tag_fn()
     return "live"
+
+
+def _is_binary_resolution_price(price: float) -> bool:
+    return price <= 0.001 or price >= 0.999
 
 
 def create_package(name: str, strategy_type: str) -> dict:
@@ -618,19 +623,26 @@ class PositionManager:
         if not executor:
             return {"success": False, "error": f"No executor for {leg['platform']}"}
 
-        # All sells use GTC limit (maker, 0% fee) — executor.sell() on Polymarket is already GTC
-        if hasattr(executor, 'real'):
-            result = await executor.sell(leg["asset_id"], leg["quantity"],
-                                         last_known_price=leg.get("current_price", 0))
+        settlement = await self._maybe_settle_binary_leg(pkg, leg, executor, trigger)
+        if settlement is not None:
+            result = settlement
         else:
-            result = await executor.sell(leg["asset_id"], leg["quantity"])
+            # All sells use GTC limit (maker, 0% fee) — executor.sell() on Polymarket is already GTC
+            if hasattr(executor, 'real'):
+                result = await executor.sell(leg["asset_id"], leg["quantity"],
+                                             last_known_price=leg.get("current_price", 0))
+            else:
+                result = await executor.sell(leg["asset_id"], leg["quantity"])
         if result.success:
             leg["status"] = "closed"
             leg["exit_price"] = result.filled_price
             leg["exit_quantity"] = result.filled_quantity
             leg["sell_fees"] = result.fees
             leg["exit_trigger"] = trigger
-            exit_kind = "fok_fallback" if after_limit_attempt else "fok_direct"
+            exit_kind = (
+                "resolution_settlement" if settlement is not None
+                else ("fok_fallback" if after_limit_attempt else "fok_direct")
+            )
             leg["exit_order_type"] = exit_kind
             leg["fee_model"] = journal_fee_model_for_executor(executor)
             # exit_value = gross proceeds from the sell (before fees deducted)
@@ -666,6 +678,23 @@ class PositionManager:
             return {"success": True, "tx_id": result.tx_id}
         return {"success": False, "error": result.error}
 
+    async def _maybe_settle_binary_leg(self, pkg: dict, leg: dict, executor, trigger: str):
+        """Directly settle resolved paper positions at deterministic payout values."""
+        if trigger not in ("market_resolved", "political_event_resolved"):
+            return None
+        current_price = float(leg.get("current_price", 0.5) or 0.5)
+        if not _is_binary_resolution_price(current_price):
+            return None
+        settle = getattr(executor, "settle_position", None)
+        if not callable(settle):
+            return None
+        settlement_price = 0.0
+        if current_price >= 0.999:
+            settlement_price = compute_binary_leg_payout(
+                leg.get("platform", ""), float(leg.get("entry_price", 0) or 0),
+            )
+        return await settle(leg["asset_id"], leg["quantity"], settlement_price)
+
     async def _place_limit_sell(self, pkg_id: str, leg_id: str, trigger: str,
                                 timeout: int = 60) -> dict:
         """Place a GTC limit sell order. Does NOT finalize the exit — returns pending."""
@@ -680,6 +709,11 @@ class PositionManager:
         executor = self.executors.get(leg["platform"])
         if not executor:
             return {"success": False, "error": f"No executor for {leg['platform']}"}
+
+        if trigger in ("market_resolved", "political_event_resolved") and _is_binary_resolution_price(
+            float(leg.get("current_price", 0.5) or 0.5)
+        ):
+            return await self._exit_leg_locked(pkg_id, leg_id, trigger, after_limit_attempt=False)
 
         # Limit price: current price (maker ask sits at or near the spread)
         # The executor's sell_limit uses GTC which rests as maker for 0% fees.

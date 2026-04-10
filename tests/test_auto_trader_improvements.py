@@ -219,13 +219,17 @@ class TestCrossArbPrecheck:
         ok, reason = await trader._precheck_cross_platform_arb(opp)
 
         assert ok is False
-        assert reason == "cross_arb_requote_edge_gone"
+        assert reason == "cross_arb_unvetted_platform"
 
     @pytest.mark.asyncio
     async def test_accepts_net_positive_pair_and_updates_prices(self):
         trader, pm = self._make_trader()
-        pm.executors["polymarket"].get_current_price = AsyncMock(return_value=0.35)
-        pm.executors["kalshi"].get_current_price = AsyncMock(return_value=0.55)
+        pm.executors["polymarket"].get_executable_quote = AsyncMock(return_value={
+            "price": 0.35, "source": "best_ask", "depth_sufficient": True,
+        })
+        pm.executors["kalshi"].get_executable_quote = AsyncMock(return_value={
+            "price": 0.55, "source": "market_fields", "depth_sufficient": True,
+        })
         opp = {
             "buy_yes_platform": "polymarket",
             "buy_no_platform": "kalshi",
@@ -236,8 +240,8 @@ class TestCrossArbPrecheck:
                 "category": "crypto",
                 "expiry": "2026-12-31",
                 "markets": [
-                    {"platform": "polymarket", "market_id": "poly-1"},
-                    {"platform": "kalshi", "market_id": "kal-1"},
+                    {"platform": "polymarket", "market_id": "poly-1", "expiry": "2026-12-31"},
+                    {"platform": "kalshi", "market_id": "kal-1", "expiry": "2026-12-31"},
                 ],
             },
             "volume": 1000,
@@ -256,8 +260,12 @@ class TestCrossArbPrecheck:
         trader, pm = self._make_trader()
         pm.executors["polymarket"].get_current_price = AsyncMock(return_value=0.35)
         pm.executors["kalshi"].get_current_price = AsyncMock(return_value=0.52)
-        pm.executors["polymarket"].get_executable_price = AsyncMock(return_value=0.36)
-        pm.executors["kalshi"].get_executable_price = AsyncMock(return_value=0.53)
+        pm.executors["polymarket"].get_executable_quote = AsyncMock(return_value={
+            "price": 0.36, "source": "orderbook_vwap", "depth_sufficient": True,
+        })
+        pm.executors["kalshi"].get_executable_quote = AsyncMock(return_value={
+            "price": 0.53, "source": "market_fields", "depth_sufficient": True,
+        })
         opp = {
             "buy_yes_platform": "polymarket",
             "buy_no_platform": "kalshi",
@@ -281,8 +289,39 @@ class TestCrossArbPrecheck:
         assert reason == ""
         assert opp["buy_yes_price"] == 0.36
         assert opp["buy_no_price"] == 0.53
-        assert opp["cross_arb_quote_source_yes"] == "executable"
-        assert opp["cross_arb_quote_source_no"] == "executable"
+        assert opp["cross_arb_quote_source_yes"] == "orderbook_vwap"
+        assert opp["cross_arb_quote_source_no"] == "market_fields"
+
+    @pytest.mark.asyncio
+    async def test_rejects_midpoint_fallback_quotes(self):
+        trader, pm = self._make_trader()
+        pm.executors["polymarket"].get_executable_quote = AsyncMock(return_value={
+            "price": 0.36, "source": "orderbook_vwap", "depth_sufficient": True,
+        })
+        pm.executors["kalshi"].get_executable_quote = AsyncMock(return_value={
+            "price": 0.53, "source": "midpoint_fallback", "depth_sufficient": False,
+        })
+        opp = {
+            "buy_yes_platform": "polymarket",
+            "buy_no_platform": "kalshi",
+            "buy_yes_market_id": "poly-1",
+            "buy_no_market_id": "kal-1",
+            "matched_event": {
+                "canonical_title": "Will BTC exceed $100k?",
+                "category": "crypto",
+                "expiry": "2026-12-31",
+                "markets": [
+                    {"platform": "polymarket", "market_id": "poly-1", "expiry": "2026-12-31"},
+                    {"platform": "kalshi", "market_id": "kal-1", "expiry": "2026-12-31"},
+                ],
+            },
+            "volume": 1000,
+        }
+
+        ok, reason = await trader._precheck_cross_platform_arb(opp)
+
+        assert ok is False
+        assert reason == "cross_arb_midpoint_fallback"
 
 
 class TestReferenceScanners:
@@ -414,6 +453,36 @@ class TestLiquidityGates:
             "buy_yes_price": 0.49,
             "buy_no_platform": "polymarket",
             "buy_no_price": 0.51,
+            "buy_yes_market_id": "btc-100k",
+            "buy_no_market_id": "btc-100k",
+            "profit_pct": 18.0,
+            "net_profit_pct": 18.0,
+            "opportunity_type": "pure_prediction",
+            "expiry": (datetime.now() + timedelta(days=5)).isoformat(),
+            "volume": 5000,
+            "_score": 40.0,
+        }])
+
+        await trader._scan_and_trade()
+
+        pm.execute_package.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_directional_trade_without_validated_edge_is_skipped(self):
+        from positions.auto_trader import AutoTrader
+
+        pm = _make_mock_pm()
+        pm.executors = {"polymarket": _stub_paper_executor()}
+        pm.execute_package = AsyncMock(return_value={"success": True})
+
+        trader = AutoTrader(pm, scanner=None, probability_model=None)
+        trader._scan_polymarket = AsyncMock(return_value=[{
+            "title": "Will BTC exceed $100,000?",
+            "canonical_title": "Will BTC exceed $100,000?",
+            "buy_yes_platform": "polymarket",
+            "buy_yes_price": 0.72,
+            "buy_no_platform": "polymarket",
+            "buy_no_price": 0.28,
             "buy_yes_market_id": "btc-100k",
             "buy_no_market_id": "btc-100k",
             "profit_pct": 18.0,
