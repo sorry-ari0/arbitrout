@@ -38,3 +38,13 @@ class TestPaperSell:
     def test_sell_no_position(self, paper):
         r = _run(paper.sell("BTC", 1.0))
         assert not r.success
+
+
+class TestPaperSettlement:
+    def test_settle_position_credits_balance_without_trade_fee(self, paper):
+        _run(paper.buy("tok:YES", 100.0))
+        pos_qty = paper.positions["tok:YES"]["quantity"]
+        r = _run(paper.settle_position("tok:YES", pos_qty, 1.0))
+        assert r.success
+        b = _run(paper.get_balance())
+        assert b.available == pytest.approx(1000.0 + pos_qty - 100.0)

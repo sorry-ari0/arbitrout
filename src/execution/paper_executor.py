@@ -19,7 +19,7 @@ MAKER_FEE_RATES = {
     "polymarket": 0.0,        # 0% for limit orders
     "kalshi": 0.0,            # 0% (Kalshi has 0% trading fees as of 2026)
     "coinbase_spot": 0.004,   # 0.4% maker
-    "predictit": 0.05,        # 5% on profits (simplified)
+    "predictit": 0.0,         # resolution drag modeled separately at settlement
     "limitless": 0.005,       # ~0.5% estimated
     "opinion_labs": 0.01,     # ~1% estimated
     "robinhood": 0.0,         # 0% (Robinhood is commission-free)
@@ -30,7 +30,7 @@ TAKER_FEE_RATES = {
     "polymarket": 0.02,       # ~2% for market orders
     "kalshi": 0.0,            # 0% (Kalshi has 0% trading fees as of 2026)
     "coinbase_spot": 0.006,   # 0.6% taker
-    "predictit": 0.05,        # 5% on profits
+    "predictit": 0.0,         # resolution drag modeled separately at settlement
     "limitless": 0.01,        # ~1% estimated
     "opinion_labs": 0.02,     # ~2% estimated
     "robinhood": 0.0,         # 0% commission-free
@@ -307,6 +307,45 @@ class PaperExecutor:
         if getter:
             return await getter(asset_id, side=side, amount_usd=amount_usd)
         return await self.get_current_price(asset_id)
+
+    async def get_executable_quote(self, asset_id: str, side: str = "buy",
+                                   amount_usd: float = 0.0) -> dict:
+        getter = getattr(self.real, "get_executable_quote", None)
+        if getter:
+            return await getter(asset_id, side=side, amount_usd=amount_usd)
+        price = await self.get_current_price(asset_id)
+        return {
+            "price": float(price),
+            "source": "current_price",
+            "depth_sufficient": False,
+            "is_midpoint_fallback": True,
+        }
+
+    async def settle_position(self, asset_id: str, quantity: float, settlement_price: float) -> ExecutionResult:
+        """Directly settle a paper position at a deterministic resolution value."""
+        _t0 = time.time()
+        pos = self.positions.get(asset_id)
+        if not pos or pos["quantity"] < quantity * 0.999:
+            return ExecutionResult(False, None, 0, 0, 0, f"No position or insufficient quantity for {asset_id}")
+        if settlement_price < 0:
+            return ExecutionResult(False, None, 0, 0, 0, f"Invalid settlement price for {asset_id}")
+        proceeds = quantity * settlement_price
+        self.balance += proceeds
+        pos["quantity"] -= quantity
+        if pos["quantity"] < 1e-10:
+            del self.positions[asset_id]
+        tx_id = f"paper_{uuid.uuid4().hex[:12]}"
+        self.trade_history.append({
+            "action": "settle",
+            "asset_id": asset_id,
+            "price": settlement_price,
+            "quantity": quantity,
+            "proceeds_usd": proceeds,
+            "fee": 0.0,
+            "tx_id": tx_id,
+        })
+        return ExecutionResult(True, tx_id, settlement_price, quantity, 0.0, None,
+                               execution_ms=int((time.time() - _t0) * 1000))
 
     def is_configured(self) -> bool: return True
 

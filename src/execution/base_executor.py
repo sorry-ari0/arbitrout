@@ -48,6 +48,17 @@ class BaseExecutor(ABC):
         """
         return await self.get_current_price(asset_id)
 
+    async def get_executable_quote(self, asset_id: str, side: str = "buy",
+                                   amount_usd: float = 0.0) -> dict:
+        """Optional richer executable quote metadata for screening."""
+        price = await self.get_current_price(asset_id)
+        return {
+            "price": float(price),
+            "source": "current_price",
+            "depth_sufficient": False,
+            "is_midpoint_fallback": True,
+        }
+
     # --- Optional limit order methods (override for 0% maker fees) ---
 
     async def buy_limit(self, asset_id: str, amount_usd: float, price: float) -> ExecutionResult:

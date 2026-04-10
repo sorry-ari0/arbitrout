@@ -1,6 +1,7 @@
 """Tests for position manager."""
 import json, pytest, asyncio
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, AsyncMock
+from execution.base_executor import ExecutionResult
 from positions.position_manager import (
     PositionManager, create_package, create_leg, create_exit_rule,
     STATUS_OPEN, STATUS_CLOSED,
@@ -77,3 +78,43 @@ class TestInsiderResolutionFeedback:
         tracker.record_resolution.assert_any_call("cid_yes", "YES")
         tracker.record_resolution.assert_any_call("cid_no", "YES")
         assert tracker.record_resolution.call_count == 2
+
+
+class _SettlementExecutor:
+    def __init__(self):
+        self.settle_position = AsyncMock(return_value=ExecutionResult(True, "settled", 1.0, 10.0, 0.0, None))
+        self.sell = AsyncMock(return_value=ExecutionResult(True, "sold", 0.5, 10.0, 0.0, None))
+
+    def journal_fee_model_tag(self):
+        return "paper_maker_zero"
+
+
+@pytest.mark.asyncio
+async def test_market_resolved_uses_direct_settlement_for_paper_binary_leg(tmp_path):
+    pm = PositionManager(data_dir=tmp_path, executors={"predictit": _SettlementExecutor()})
+    pkg = {
+        "id": "pkg1",
+        "name": "Resolved arb",
+        "strategy_type": "cross_platform_arb",
+        "status": "open",
+        "legs": [{
+            "leg_id": "leg1",
+            "platform": "predictit",
+            "asset_id": "pi-1:YES",
+            "status": "open",
+            "quantity": 10.0,
+            "entry_price": 0.6,
+            "current_price": 1.0,
+            "current_value": 10.0,
+        }],
+        "execution_log": [],
+    }
+    pm.packages[pkg["id"]] = pkg
+
+    result = await pm.exit_leg("pkg1", "leg1", trigger="market_resolved")
+
+    assert result["success"] is True
+    ex = pm.executors["predictit"]
+    ex.settle_position.assert_awaited_once()
+    assert ex.settle_position.await_args.args[2] == pytest.approx(0.912)
+    ex.sell.assert_not_awaited()

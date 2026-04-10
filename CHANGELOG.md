@@ -9,6 +9,7 @@ Notable changes to **arbitrout** are listed here. Format follows [Keep a Changel
 - **NASA EONET** (`src/positions/eonet_client.py`): fetch open natural events from [EONET API v3](https://eonet.gsfc.nasa.gov/) and blend conservative precipitation adjustments into NWS forecasts in `WeatherScanner` when hazards are near the city and forecast date. Toggle with `EONET_WEATHER_ENABLED`. Unit tests in `tests/test_eonet_client.py`.
 - Spec: `docs/specs/2026-04-08-journal-audit-followups.md` for audited follow-up fixes covering structural-arb settlement, insider feedback wiring, and fee-aware cross-arb gating.
 - Spec: `docs/specs/2026-04-08-arb-depth-insider-risk-followups.md` for shared fee modeling, executable quote rechecks, insider-exit reviews, and risk-capped directional sizing.
+- Spec: `docs/specs/2026-04-10-true-arb-and-kelly-hardening.md` for validated directional Kelly sizing, vetted true-arb gating, and paper resolution settlement fixes.
 
 ### Changed
 
@@ -18,6 +19,8 @@ Notable changes to **arbitrout** are listed here. Format follows [Keep a Changel
 - **Execution / arb screening:** fee-model math is now centralized in `src/execution/fee_model.py`, and cross-platform arb rechecks prefer executor-provided executable quotes over scalar midpoint-only prices.
 - **Exit engine:** recent conviction-trader exits from `InsiderTracker` now emit `insider_exit` review triggers when they match the package bet direction.
 - **Auto trader sizing:** directional Kelly sizing now uses a stressed-probability helper plus explicit bankroll-at-risk caps for speculative entries.
+- **Auto trader / execution:** `pure_prediction` sizing now requires validated directional edge inputs instead of a favorite-bonus heuristic, and `cross_platform_arb` is now restricted to vetted executable-quote pairs with no midpoint fallback or dust legs.
+- **Position manager / paper executor:** resolved binary paper legs now settle directly from snapped resolution payout values, so hold-to-resolution packages no longer depend on stale live quote mechanics during closeout.
 
 ## [2026-04-05]
 

@@ -199,6 +199,27 @@ class PolymarketExecutor(BaseExecutor):
             return 0.0
         return notional / filled
 
+    @classmethod
+    def _estimate_book_fill(cls, levels, shares_needed: float, descending: bool = False) -> tuple[float, bool]:
+        ordered = sorted(levels or [], key=cls._book_level_price, reverse=descending)
+        remaining = max(0.0, shares_needed)
+        notional = 0.0
+        filled = 0.0
+        for level in ordered:
+            price = cls._book_level_price(level)
+            size = cls._book_level_size(level)
+            if price <= 0 or size <= 0:
+                continue
+            take = size if remaining <= 0 else min(size, remaining)
+            notional += take * price
+            filled += take
+            remaining -= take
+            if remaining <= 1e-9:
+                break
+        if filled <= 0:
+            return 0.0, False
+        return notional / filled, remaining <= 1e-9
+
     async def _get_tick_size(self, token_id: str) -> float:
         """Get the minimum tick size for a market. Default 0.01 if lookup fails."""
         try:
@@ -215,14 +236,20 @@ class PolymarketExecutor(BaseExecutor):
             return parts[0], parts[1].upper()
         return asset_id, "YES"
 
-    async def get_executable_price(self, asset_id: str, side: str = "buy",
-                                   amount_usd: float = 0.0) -> float:
-        """Estimate a top-of-book or shallow-depth executable quote for screening."""
+    async def get_executable_quote(self, asset_id: str, side: str = "buy",
+                                   amount_usd: float = 0.0) -> dict:
+        """Estimate an executable quote plus minimal screening metadata."""
         try:
             condition_id, token_side = self._parse_asset_id(asset_id)
             token_id = await self._resolve_token_id(condition_id, token_side)
             if not token_id:
-                return await self.get_current_price(asset_id)
+                price = await self.get_current_price(asset_id)
+                return {
+                    "price": float(price),
+                    "source": "midpoint_fallback",
+                    "depth_sufficient": False,
+                    "is_midpoint_fallback": True,
+                }
             clob = self._get_clob()
             book = await self._run_sync(clob.get_order_book, token_id)
             if side.lower() == "sell":
@@ -230,26 +257,57 @@ class PolymarketExecutor(BaseExecutor):
                 if amount_usd > 0:
                     ref_price = await self.get_current_price(asset_id)
                     shares = amount_usd / max(ref_price, 0.01)
-                    vwap = self._estimate_book_vwap(levels, shares, descending=True)
+                    vwap, filled = self._estimate_book_fill(levels, shares, descending=True)
                     if vwap > 0:
-                        return vwap
+                        return {
+                            "price": float(vwap),
+                            "source": "orderbook_vwap",
+                            "depth_sufficient": bool(filled),
+                            "is_midpoint_fallback": False,
+                        }
                 best_bid, _ = await self._get_best_bid_ask(token_id)
                 if best_bid > 0:
-                    return best_bid
+                    return {
+                        "price": float(best_bid),
+                        "source": "best_bid",
+                        "depth_sufficient": True,
+                        "is_midpoint_fallback": False,
+                    }
             else:
                 levels = getattr(book, "asks", []) or []
                 if amount_usd > 0:
                     ref_price = await self.get_current_price(asset_id)
                     shares = amount_usd / max(ref_price, 0.01)
-                    vwap = self._estimate_book_vwap(levels, shares, descending=False)
+                    vwap, filled = self._estimate_book_fill(levels, shares, descending=False)
                     if vwap > 0:
-                        return vwap
+                        return {
+                            "price": float(vwap),
+                            "source": "orderbook_vwap",
+                            "depth_sufficient": bool(filled),
+                            "is_midpoint_fallback": False,
+                        }
                 _, best_ask = await self._get_best_bid_ask(token_id)
                 if best_ask > 0:
-                    return best_ask
+                    return {
+                        "price": float(best_ask),
+                        "source": "best_ask",
+                        "depth_sufficient": True,
+                        "is_midpoint_fallback": False,
+                    }
         except Exception as e:
             logger.debug("Polymarket executable quote fallback for %s: %s", asset_id, e)
-        return await self.get_current_price(asset_id)
+        price = await self.get_current_price(asset_id)
+        return {
+            "price": float(price),
+            "source": "midpoint_fallback",
+            "depth_sufficient": False,
+            "is_midpoint_fallback": True,
+        }
+
+    async def get_executable_price(self, asset_id: str, side: str = "buy",
+                                   amount_usd: float = 0.0) -> float:
+        quote = await self.get_executable_quote(asset_id, side=side, amount_usd=amount_usd)
+        return float(quote.get("price", 0.0) or 0.0)
 
     async def buy(self, asset_id: str, amount_usd: float,
                   max_price: float = 0) -> ExecutionResult:

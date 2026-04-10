@@ -61,6 +61,9 @@ CROSS_ARB_MAX_QUOTE_AGE_SEC = 90.0
 CROSS_ARB_MIN_EDGE_REQUOTE_PCT = 2.5   # (1 - yes - no) * 100 after fresh mids
 CROSS_PLATFORM_KELLY_GATE_MIN_CLOSES = 4
 CROSS_PLATFORM_KELLY_CAP_UNTIL_WIN = 0.12  # max Kelly fraction when 0 wins in sample
+CROSS_ARB_TRUE_EDGE_BUFFER_PCT = 4.0
+CROSS_ARB_MIN_LEG_PRICE = 0.02
+CROSS_ARB_VETTED_PLATFORMS = frozenset({"polymarket", "kalshi"})
 
 # Strong insider-follow entry gate.
 # These trades still use the same maker-only limit-order execution path, but
@@ -292,7 +295,22 @@ class AutoTrader:
         )
 
     @staticmethod
-    async def _get_executable_quote(executor, asset_id: str, amount_usd: float) -> tuple[float, str]:
+    async def _get_executable_quote(executor, asset_id: str, amount_usd: float) -> tuple[float, str, bool]:
+        quote_getter = None
+        if hasattr(executor, "__dict__"):
+            quote_getter = executor.__dict__.get("get_executable_quote")
+        if quote_getter is None:
+            cls_quote_getter = getattr(type(executor), "get_executable_quote", None)
+            if cls_quote_getter is not None:
+                quote_getter = getattr(executor, "get_executable_quote")
+        if callable(quote_getter):
+            quote = await quote_getter(asset_id, side="buy", amount_usd=amount_usd)
+            if isinstance(quote, dict):
+                return (
+                    float(quote.get("price", 0.0) or 0.0),
+                    str(quote.get("source", "unknown") or "unknown"),
+                    bool(quote.get("depth_sufficient", False)),
+                )
         getter = None
         if hasattr(executor, "__dict__"):
             getter = executor.__dict__.get("get_executable_price")
@@ -301,8 +319,8 @@ class AutoTrader:
             if cls_getter is not None:
                 getter = getattr(executor, "get_executable_price")
         if getter:
-            return float(await getter(asset_id, side="buy", amount_usd=amount_usd)), "executable"
-        return float(await executor.get_current_price(asset_id)), "midpoint"
+            return float(await getter(asset_id, side="buy", amount_usd=amount_usd)), "executable", True
+        return float(await executor.get_current_price(asset_id)), "midpoint_fallback", False
 
     @staticmethod
     def _binary_kelly_fraction(implied_prob: float, estimated_prob: float) -> float:
@@ -337,10 +355,72 @@ class AutoTrader:
     def _current_day_bucket() -> str:
         return datetime.utcnow().strftime("%Y-%m-%d")
 
+    @staticmethod
+    def _selected_market_meta(opp: dict, platform: str, market_id: str) -> dict | None:
+        matched = opp.get("matched_event", {}) or {}
+        for market in matched.get("markets", []) or []:
+            if (market.get("platform") or "") != platform:
+                continue
+            mid = (market.get("market_id") or market.get("event_id") or "").lower()
+            if mid and market_id and mid == market_id.lower():
+                return market
+        return None
+
+    @classmethod
+    def _cross_arb_expiry_compatible(cls, opp: dict) -> bool:
+        yes_meta = cls._selected_market_meta(
+            opp, opp.get("buy_yes_platform", ""), opp.get("buy_yes_market_id", ""),
+        )
+        no_meta = cls._selected_market_meta(
+            opp, opp.get("buy_no_platform", ""), opp.get("buy_no_market_id", ""),
+        )
+        yes_expiry = (yes_meta or {}).get("expiry") or ""
+        no_expiry = (no_meta or {}).get("expiry") or ""
+        if not yes_expiry or not no_expiry or "ongoing" in (yes_expiry, no_expiry):
+            return True
+        try:
+            y = datetime.strptime(yes_expiry[:10], "%Y-%m-%d")
+            n = datetime.strptime(no_expiry[:10], "%Y-%m-%d")
+        except (TypeError, ValueError):
+            return True
+        return abs((y - n).days) <= 1
+
+    @staticmethod
+    def _validated_directional_estimate(opp: dict, side: str, implied_prob: float) -> tuple[float, str]:
+        calibration = opp.get("calibration_signal") or {}
+        if calibration:
+            calibrated_yes = calibration.get("calibrated_yes")
+            if isinstance(calibrated_yes, (int, float)):
+                prob = float(calibrated_yes if side == "YES" else 1.0 - calibrated_yes)
+                return min(0.99, max(0.01, prob)), "calibration"
+
+        if opp.get("_insider_follow") and opp.get("_insider_follow_side") == side:
+            signal = opp.get("insider_signal") or {}
+            strength = float(signal.get("signal_strength", 0) or 0)
+            bonus = min(0.03, 0.01 + max(0.0, strength - INSIDER_FOLLOW_MIN_SIGNAL_STRENGTH) * 0.05)
+            return min(0.99, max(0.01, implied_prob + bonus)), "insider_follow"
+
+        if opp.get("_reference_backed") and opp.get("preferred_side") == side:
+            reference_edge_pct = float(
+                opp.get("model_gap_pct")
+                or opp.get("expected_edge_pct")
+                or opp.get("guaranteed_profit_pct")
+                or 0
+            )
+            bonus = min(0.03, max(0.01, reference_edge_pct / 400.0))
+            return min(0.99, max(0.01, implied_prob + bonus)), "reference"
+
+        return 0.0, ""
+
     async def _precheck_cross_platform_arb(self, opp: dict) -> tuple[bool, str]:
         """Re-quote both legs; enforce scan freshness and post-requote edge."""
         if not self._arb_legs_in_matched_cluster(opp):
             return False, "cross_arb_cluster_mismatch"
+        platforms = {opp.get("buy_yes_platform", ""), opp.get("buy_no_platform", "")}
+        if not platforms.issubset(CROSS_ARB_VETTED_PLATFORMS):
+            return False, "cross_arb_unvetted_platform"
+        if not self._cross_arb_expiry_compatible(opp):
+            return False, "cross_arb_expiry_mismatch"
         if self.scanner:
             last_scan = float(getattr(self.scanner, "_last_scan_time", 0) or 0)
             if last_scan > 0 and (time.time() - last_scan) > CROSS_ARB_MAX_QUOTE_AGE_SEC:
@@ -359,16 +439,21 @@ class AutoTrader:
         aid_no = f"{no_id}:NO"
         try:
             quote_notional = max(self._min_trade_size, min(self._max_trade_size, self._total_bankroll * 0.02))
-            py, yes_quote_source = await self._get_executable_quote(yes_ex, aid_yes, quote_notional)
-            pn, no_quote_source = await self._get_executable_quote(no_ex, aid_no, quote_notional)
+            py, yes_quote_source, yes_depth_ok = await self._get_executable_quote(yes_ex, aid_yes, quote_notional)
+            pn, no_quote_source, no_depth_ok = await self._get_executable_quote(no_ex, aid_no, quote_notional)
         except Exception as e:
             logger.warning("Cross-arb re-quote failed: %s", e)
             return False, "cross_arb_requote_failed"
-        if py < 0.01 or pn < 0.01:
-            return False, "cross_arb_requote_zero"
+        if py < CROSS_ARB_MIN_LEG_PRICE or pn < CROSS_ARB_MIN_LEG_PRICE:
+            return False, "cross_arb_dust_leg"
+        if yes_quote_source == "midpoint_fallback" or no_quote_source == "midpoint_fallback":
+            return False, "cross_arb_midpoint_fallback"
+        if not yes_depth_ok or not no_depth_ok:
+            return False, "cross_arb_insufficient_depth"
         gross_edge_pct = (1.0 - py - pn) * 100.0
         net_edge_pct = self._fresh_cross_arb_net_edge_pct(opp, py, pn)
-        if net_edge_pct < CROSS_ARB_MIN_EDGE_REQUOTE_PCT:
+        required_edge_pct = max(CROSS_ARB_MIN_EDGE_REQUOTE_PCT, CROSS_ARB_TRUE_EDGE_BUFFER_PCT)
+        if net_edge_pct < required_edge_pct:
             return False, "cross_arb_requote_edge_gone"
 
         opp["buy_yes_price"] = round(py, 4)
@@ -2057,22 +2142,19 @@ class AutoTrader:
                                                        volume=opp_volume, strategy=opp_strategy)
                     continue
 
-                # Quarter Kelly position sizing (research-validated: retains 56% of
-                # max growth rate, ~3% chance of halving bankroll)
-                #
-                # Kelly f* = (b * p_true - (1 - p_true)) / b
-                # where b = net odds = (1 - market_price) / market_price
-                #       p_true = shrunk toward side_price from (side_price + edge_bonus)
-                #
-                # Edge bonus (theoretical max tilt): +5% favorites, +2% mid, +1% longshots;
-                # KELLY_EDGE_SHRINK scales it toward the market (reduces phantom edge).
-                edge_bonus = 0.02  # Base 2% edge assumption (we select favorable markets)
-                if side_price >= 0.70:
-                    edge_bonus = 0.05  # Favorite-longshot bias gives us more edge
-                elif side_price <= 0.30:
-                    edge_bonus = 0.01  # Less confident on longshots
+                # Quarter Kelly position sizing must come from a validated
+                # probability estimate, not a favorite bonus heuristic.
+                p_true, edge_source = self._validated_directional_estimate(opp, side, side_price)
+                if edge_source == "":
+                    self._record_skip("no_validated_edge")
+                    if self.dlog:
+                        self.dlog.log_opportunity_skip(
+                            opp_title, "no_validated_edge",
+                            side=side, price=round(side_price, 4),
+                            volume=opp_volume, strategy=opp_strategy,
+                        )
+                    continue
 
-                p_true = min(0.95, side_price + edge_bonus * KELLY_EDGE_SHRINK)
                 # Variable Kelly fraction: conservative on longshots, standard on favorites
                 if side_price <= 0.30:
                     kelly_frac = 0.125  # 1/8 Kelly for longshots (high uncertainty)
@@ -2080,7 +2162,7 @@ class AutoTrader:
                     kelly_frac = 0.25   # 1/4 Kelly for favorites (more confident)
                 else:
                     kelly_frac = 0.20   # 1/5 Kelly for mid-range
-                high_conviction = bool(opp.get("insider_signal")) or side_price >= 0.85
+                high_conviction = edge_source in {"insider_follow", "reference"} or bool(opp.get("_news_driven"))
                 kelly_quarter = self._risk_capped_directional_fraction(
                     side_price, p_true, kelly_frac, high_conviction=high_conviction
                 )
