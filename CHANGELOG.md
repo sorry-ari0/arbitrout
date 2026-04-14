@@ -13,6 +13,7 @@ Notable changes to **arbitrout** are listed here. Format follows [Keep a Changel
 - Spec: `docs/specs/2026-04-08-journal-audit-followups.md` for audited follow-up fixes covering structural-arb settlement, insider feedback wiring, and fee-aware cross-arb gating.
 - Spec: `docs/specs/2026-04-08-arb-depth-insider-risk-followups.md` for shared fee modeling, executable quote rechecks, insider-exit reviews, and risk-capped directional sizing.
 - Spec: `docs/specs/2026-04-10-true-arb-and-kelly-hardening.md` for validated directional Kelly sizing, vetted true-arb gating, and paper resolution settlement fixes.
+- Spec: `docs/specs/2026-04-13-qwen3-4b-reasoning-agent.md` for adding a `qwen3:4b`-backed `reasoning` agent in OpenClaw alongside `main` (`llama-agent`) for analytical/post-mortem/spec-drafting tasks. Includes warm tool-calling benchmark (llama-agent 1.7s/call vs qwen3:4b 7.4s/call), VRAM swap budgeting, deny-list, phased rollout, and rollback path.
 
 ### Changed
 
