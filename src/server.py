@@ -278,14 +278,14 @@ def _migrate_legacy_packages(pm):
         pkg["_hold_to_resolution"] = True
         pkg["_use_limit_orders"] = True
 
-        # Adjust exit rules for realistic ceilings on high-entry NO contracts
+        # Adjust exit rules for realistic ceilings on high-entry NO contracts.
+        # stop_loss and trailing_stop rules are force-deactivated on any legacy
+        # package — they are PERMANENTLY BANNED. See bracket_manager / exit_engine.
         for rule in pkg.get("exit_rules", []):
             if rule["type"] == "target_profit":
                 rule["params"]["target_pct"] = 10  # was 25%, realistic for >$0.85 NO
-            elif rule["type"] == "stop_loss":
-                rule["params"]["stop_pct"] = -60  # was -40%, avoid premature exit
-            elif rule["type"] == "trailing_stop":
-                rule["active"] = False  # trailing stops wrong for binary instruments
+            elif rule["type"] in ("stop_loss", "trailing_stop"):
+                rule["active"] = False
 
         pkg["updated_at"] = time.time()
         migrated += 1

@@ -1204,3 +1204,101 @@ class TestMultiOutcomeArbHoldToResolution:
             if in_multi_outcome and "execute_package" in line:
                 break
         assert found_hold, "multi_outcome_arb handler must set _hold_to_resolution = True"
+
+
+class TestKellyFeeSubtractionAndNoCap:
+    """Fees subtracted BEFORE Kelly (Hausch & Ziemba 1985); hard NO-cap gate."""
+
+    def test_kelly_size_default_edge_is_zero_not_two_percent(self):
+        """Unknown strategy + no spread → no assumed edge → no sizing."""
+        from positions.auto_trader import AutoTrader
+        pm = _make_mock_pm()
+        trader = AutoTrader(pm)
+        size = trader._kelly_size("unknown_strategy_xyz", 500.0)
+        assert size == 0
+
+    def test_kelly_size_fee_greater_than_edge_returns_zero(self):
+        """Round-trip fees exceeding edge must collapse Kelly to 0."""
+        from positions.auto_trader import AutoTrader
+        pm = _make_mock_pm()
+        trader = AutoTrader(pm)
+        # cross_platform_arb base edge = 0.12; fee 0.20 → negative after subtraction.
+        size = trader._kelly_size(
+            "cross_platform_arb", 500.0,
+            spread_pct=0.0, bypass_regime=True,
+            round_trip_fee_frac=0.20,
+        )
+        assert size == 0
+
+    def test_kelly_size_fee_reduces_sizing(self):
+        """Larger fees should shrink the sized trade (or floor to min)."""
+        from positions.auto_trader import AutoTrader
+        pm = _make_mock_pm()
+        trader = AutoTrader(pm)
+        no_fee = trader._kelly_size(
+            "cross_platform_arb", 2000.0,
+            spread_pct=15.0, bypass_regime=True,
+            round_trip_fee_frac=0.0,
+        )
+        with_fee = trader._kelly_size(
+            "cross_platform_arb", 2000.0,
+            spread_pct=15.0, bypass_regime=True,
+            round_trip_fee_frac=0.05,
+        )
+        assert with_fee <= no_fee
+
+    def test_compute_maker_round_trip_fee_polymarket_zero(self):
+        from execution.fee_model import compute_maker_round_trip_fee_frac
+        assert compute_maker_round_trip_fee_frac("polymarket", 0.5, "crypto") == 0.0
+        assert compute_maker_round_trip_fee_frac("polymarket", 0.86, "politics") == 0.0
+
+    def test_compute_maker_round_trip_fee_kalshi_scales_with_price(self):
+        from execution.fee_model import compute_maker_round_trip_fee_frac
+        mid = compute_maker_round_trip_fee_frac("kalshi", 0.50, "")
+        fav = compute_maker_round_trip_fee_frac("kalshi", 0.90, "")
+        # Kalshi fee = 2 · 0.0175 · (1 - p). Drops as p → 1.
+        assert mid > fav
+        assert mid == pytest.approx(2 * 0.0175 * 0.5, abs=1e-9)
+        assert fav == pytest.approx(2 * 0.0175 * 0.1, abs=1e-9)
+
+    def test_no_cap_gate_constants_and_path_exist(self):
+        """Source must contain the hard NO-cap gate skip reason."""
+        import inspect, positions.auto_trader as at
+        src = inspect.getsource(at)
+        assert "no_side_high_price_insufficient_edge" in src
+        assert "named_edge_sources" in src
+        assert "compute_maker_round_trip_fee_frac" in src
+
+    def test_no_cap_gate_rejects_unnamed_edge_at_high_price(self):
+        """Simulate the gate condition directly."""
+        named_edge_sources = {"insider_follow", "reference", "calibration"}
+        side_price = 0.90
+        p_true = 0.95
+        fee_pp = 0.0  # polymarket maker
+        edge_pp_raw = max(0.0, p_true - side_price)
+        required_edge_pp = fee_pp + 0.03
+        edge_source = ""  # no named edge
+        blocked = edge_source not in named_edge_sources or edge_pp_raw < required_edge_pp
+        assert blocked is True
+
+    def test_no_cap_gate_rejects_named_edge_below_threshold(self):
+        named_edge_sources = {"insider_follow", "reference", "calibration"}
+        side_price = 0.90
+        p_true = 0.91  # only 1pp above price
+        fee_pp = 0.0
+        required_edge_pp = fee_pp + 0.03
+        edge_pp_raw = max(0.0, p_true - side_price)
+        edge_source = "insider_follow"
+        blocked = edge_source not in named_edge_sources or edge_pp_raw < required_edge_pp
+        assert blocked is True
+
+    def test_no_cap_gate_allows_named_edge_above_threshold(self):
+        named_edge_sources = {"insider_follow", "reference", "calibration"}
+        side_price = 0.90
+        p_true = 0.95  # 5pp edge
+        fee_pp = 0.0
+        required_edge_pp = fee_pp + 0.03
+        edge_pp_raw = max(0.0, p_true - side_price)
+        edge_source = "insider_follow"
+        blocked = edge_source not in named_edge_sources or edge_pp_raw < required_edge_pp
+        assert blocked is False

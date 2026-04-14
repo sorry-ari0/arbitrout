@@ -19,7 +19,10 @@ try:
 except ImportError:
     httpx = None
 
-from execution.fee_model import compute_cross_platform_net_edge_pct
+from execution.fee_model import (
+    compute_cross_platform_net_edge_pct,
+    compute_maker_round_trip_fee_frac,
+)
 from positions.journal_vertical_health import live_non_news_opportunity_should_pause
 from positions.wallet_config import live_news_only_execution_active
 
@@ -602,13 +605,20 @@ class AutoTrader:
 
     def _kelly_size(self, strategy: str, remaining_budget: float,
                     implied_prob: float = 0.0, spread_pct: float = 0.0,
-                    bypass_regime: bool = False) -> float:
+                    bypass_regime: bool = False,
+                    round_trip_fee_frac: float = 0.0) -> float:
         """Calculate Kelly-optimal position size for any strategy type.
 
         Research: Half Kelly = 75% growth with 50% less drawdown.
         Returns sized trade amount capped at self._max_trade_size, floored at self._min_trade_size.
+
+        Fees are subtracted from edge BEFORE Kelly per Hausch & Ziemba (1985),
+        Management Science 31(4):381–394. Post-Kelly fee haircuts undersize fees.
         """
-        edge = KELLY_EDGE_BY_STRATEGY.get(strategy, 0.02)
+        # No hardcoded assumed-edge fallback — Whelan's Kalshi data shows the prior
+        # on unvalidated directional bets is NEGATIVE, not +2%. Require a real edge
+        # (spread_pct or a strategy that has a grounded entry in KELLY_EDGE_BY_STRATEGY).
+        edge = KELLY_EDGE_BY_STRATEGY.get(strategy, 0.0)
         frac = KELLY_FRACTION_BY_STRATEGY.get(strategy, 0.25)
         if strategy == "cross_platform_arb" and self.pm.trade_journal:
             xs = [
@@ -623,6 +633,11 @@ class AutoTrader:
         # For strategies with known spread, use actual spread as edge estimate
         if spread_pct > 0:
             edge = max(edge, spread_pct / 100.0)
+
+        # Subtract round-trip fees from edge BEFORE Kelly (Hausch & Ziemba 1985).
+        edge = edge - max(0.0, round_trip_fee_frac)
+        if edge <= 0:
+            return 0
 
         # Kelly: f* = edge / odds, simplified for binary: f* = 2*p - 1 where p = 0.5 + edge/2
         # More precisely: f* = (b*p - q) / b where b = net odds
@@ -1715,9 +1730,11 @@ class AutoTrader:
                     continue
 
                 # Kelly-sized trade (Quarter Kelly — NWS data edge)
+                _weather_fee = compute_maker_round_trip_fee_frac("kalshi", entry_price, "weather")
                 trade_size = self._kelly_size("weather_forecast", _dir_cap,
                                               implied_prob=entry_price,
-                                              spread_pct=opp.get("edge", 0) * 100)
+                                              spread_pct=opp.get("edge", 0) * 100,
+                                              round_trip_fee_frac=_weather_fee)
                 if trade_size <= 0:
                     continue
 
@@ -1994,9 +2011,20 @@ class AutoTrader:
                 # Kelly size for arb/synthetic strategies
                 # Cross-platform arb uses reserved arb budget; synthetics use directional budget
                 _strategy_budget = arb_budget if is_cross_platform else _dir_cap
+                # Weighted round-trip maker fee across both legs (stake-weighted).
+                # For matched-qty arbs, buy_yes_price + buy_no_price ≈ 1 so this
+                # reduces to py·fee_y + pn·fee_n.
+                _cat_for_fees = self._detect_category(opp_title)
+                _yes_fee = compute_maker_round_trip_fee_frac(buy_yes_platform, buy_yes_price, _cat_for_fees)
+                _no_fee = compute_maker_round_trip_fee_frac(buy_no_platform, buy_no_price, _cat_for_fees)
+                _pair_total = (buy_yes_price + buy_no_price) or 1.0
+                _multi_leg_fee = (
+                    buy_yes_price * _yes_fee + buy_no_price * _no_fee
+                ) / _pair_total
                 trade_size = self._kelly_size(strategy, _strategy_budget,
                                               spread_pct=spread_pct,
-                                              bypass_regime=is_cross_platform)
+                                              bypass_regime=is_cross_platform,
+                                              round_trip_fee_frac=_multi_leg_fee)
                 if trade_size <= 0:
                     continue
                 # Multi-leg trade: cross-platform arb OR synthetic derivative
@@ -2155,6 +2183,41 @@ class AutoTrader:
                         )
                     continue
 
+                # Round-trip maker fees as a fraction of stake for this leg's platform.
+                # Convert to probability points (× price) so it can be subtracted from edge.
+                leg_platform = buy_yes_platform if side == "YES" else buy_no_platform
+                leg_category = self._detect_category(opp_title)
+                fee_frac = compute_maker_round_trip_fee_frac(
+                    leg_platform, side_price, leg_category
+                )
+                fee_pp = fee_frac * side_price
+
+                # Hard cap: NO-side entries at p_implied > 0.85 require a NAMED edge
+                # (insider / reference / calibration) exceeding round_trip_fee + 3%.
+                # Whelan 2026 (Kalshi favorite-longshot paper): the prior on this
+                # side is negative; a hardcoded +2% assumed edge has no empirical basis.
+                if leg_type == "prediction_no" and side_price > 0.85:
+                    edge_pp_raw = max(0.0, p_true - side_price)
+                    required_edge_pp = fee_pp + 0.03
+                    named_edge_sources = {"insider_follow", "reference", "calibration"}
+                    if edge_source not in named_edge_sources or edge_pp_raw < required_edge_pp:
+                        self._record_skip("no_side_high_price_insufficient_edge")
+                        if self.dlog:
+                            self.dlog.log_opportunity_skip(
+                                opp_title, "no_side_high_price_insufficient_edge",
+                                side=side, price=round(side_price, 4),
+                                edge_pp=round(edge_pp_raw, 4),
+                                required_pp=round(required_edge_pp, 4),
+                                edge_source=edge_source or "",
+                                volume=opp_volume, strategy=opp_strategy,
+                            )
+                        continue
+
+                # Subtract fees from p_true BEFORE Kelly (Hausch & Ziemba 1985).
+                # Floor at side_price so fee drag can never flip the sign of the edge
+                # into a "bet against yourself" position size.
+                p_true_fee_adj = max(side_price, p_true - fee_pp)
+
                 # Variable Kelly fraction: conservative on longshots, standard on favorites
                 if side_price <= 0.30:
                     kelly_frac = 0.125  # 1/8 Kelly for longshots (high uncertainty)
@@ -2164,7 +2227,7 @@ class AutoTrader:
                     kelly_frac = 0.20   # 1/5 Kelly for mid-range
                 high_conviction = edge_source in {"insider_follow", "reference"} or bool(opp.get("_news_driven"))
                 kelly_quarter = self._risk_capped_directional_fraction(
-                    side_price, p_true, kelly_frac, high_conviction=high_conviction
+                    side_price, p_true_fee_adj, kelly_frac, high_conviction=high_conviction
                 )
 
                 if kelly_quarter <= 0.0:

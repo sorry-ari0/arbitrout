@@ -204,10 +204,13 @@ Do NOT include trigger numbers, parentheses, reasoning lines, or any text other 
     # Extract trigger name from wrapped formats like "Trigger #5 (new_ath)"
     _WRAPPED_KEY_RE = re.compile(r"Trigger\s*#\d+\s*\((\w+)\)", re.IGNORECASE)
 
-    # Valid trigger names — only these are accepted as verdict keys
+    # Valid trigger names — only these are accepted as verdict keys.
+    # NOTE: `stop_loss` and `trailing_stop` are PERMANENTLY BANNED and MUST NOT
+    # be added back here. Even parsing them is disallowed so hallucinated AI
+    # verdicts can never reach any downstream execution path.
     _KNOWN_TRIGGERS = {
-        "target_hit", "trailing_stop", "partial_profit",
-        "stop_loss", "new_ath", "correlation_break",
+        "target_hit", "partial_profit",
+        "new_ath", "correlation_break",
         "spread_inversion", "spread_compression", "volume_dry",
         "time_24h", "time_6h", "time_decay",
         "vol_spike", "vol_crush", "negative_drift",
