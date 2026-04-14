@@ -6,6 +6,9 @@ Notable changes to **arbitrout** are listed here. Format follows [Keep a Changel
 
 ### Added
 
+- **Maker round-trip fee helper** (`src/execution/fee_model.py:compute_maker_round_trip_fee_frac`): returns modeled entry+exit maker fees as a fraction of stake for Polymarket (0%), Kalshi (`2·0.0175·(1−p)`), PredictIt (profit tax + withdrawal drag), and other platforms via `PLATFORM_MAKER_FEE_FRAC_PER_FILL`. Used to pre-subtract fee drag from Kelly edge.
+- **Hard NO-cap gate** (`src/positions/auto_trader.py` directional path): rejects `prediction_no` entries at `side_price > 0.85` unless a NAMED edge source (`insider_follow`, `reference`, `calibration`) exceeds `round_trip_fee + 3%`. Whelan 2026 (Kalshi favorite-longshot bias paper) shows the prior on this side is negative — a hardcoded `+0.02` assumed edge has no empirical basis. Skip reason `no_side_high_price_insufficient_edge`.
+- Tests: `TestKellyFeeSubtractionAndNoCap` in `tests/test_auto_trader_improvements.py` covering default-edge=0 fallback, fee>edge→0, fee shrinks sizing, Kalshi/Polymarket maker fee math, and gate accept/reject scenarios.
 - **NASA EONET** (`src/positions/eonet_client.py`): fetch open natural events from [EONET API v3](https://eonet.gsfc.nasa.gov/) and blend conservative precipitation adjustments into NWS forecasts in `WeatherScanner` when hazards are near the city and forecast date. Toggle with `EONET_WEATHER_ENABLED`. Unit tests in `tests/test_eonet_client.py`.
 - Spec: `docs/specs/2026-04-08-journal-audit-followups.md` for audited follow-up fixes covering structural-arb settlement, insider feedback wiring, and fee-aware cross-arb gating.
 - Spec: `docs/specs/2026-04-08-arb-depth-insider-risk-followups.md` for shared fee modeling, executable quote rechecks, insider-exit reviews, and risk-capped directional sizing.
@@ -21,6 +24,16 @@ Notable changes to **arbitrout** are listed here. Format follows [Keep a Changel
 - **Auto trader sizing:** directional Kelly sizing now uses a stressed-probability helper plus explicit bankroll-at-risk caps for speculative entries.
 - **Auto trader / execution:** `pure_prediction` sizing now requires validated directional edge inputs instead of a favorite-bonus heuristic, and `cross_platform_arb` is now restricted to vetted executable-quote pairs with no midpoint fallback or dust legs.
 - **Position manager / paper executor:** resolved binary paper legs now settle directly from snapped resolution payout values, so hold-to-resolution packages no longer depend on stale live quote mechanics during closeout.
+- **Auto trader Kelly sizing:** `_kelly_size` now subtracts round-trip maker fees from edge BEFORE applying the Kelly fraction (Hausch & Ziemba 1985, *Management Science* 31(4):381–394). Default per-strategy edge fallback dropped from `0.02` to `0.0` — unknown strategies with no spread no longer assume a 2% edge that has no empirical basis. Returns 0 sizing when fees exceed edge. Arb/synthetic and weather call sites pass weighted `round_trip_fee_frac`.
+- **Auto trader directional path:** `p_true` now adjusted downward by `fee_pp = fee_frac × side_price` before `_risk_capped_directional_fraction`, floored at `side_price` so fee drag never flips the edge sign.
+
+### Fixed
+
+- **Stop-loss / trailing-stop full suppression** (regression cleanup):
+  - `src/positions/bracket_manager.py`: `place_brackets` no longer reads `stop_loss` rules or sets `stop_price`; `check_brackets` stop-monitoring path removed (this was the silent leak that re-introduced `auto:trailing_stop` and `ai_approved:stop_loss` entries in the journal); `adjust_stop` and `_compute_trail_price` are now no-ops.
+  - `src/positions/news_scanner.py`: news packages no longer append `stop_loss` or `trailing_stop` exit rules — only `target_profit`.
+  - `src/server.py`: legacy migration force-deactivates `stop_loss` / `trailing_stop` rules instead of adjusting their params.
+  - `src/positions/ai_advisor.py`: `_KNOWN_TRIGGERS` no longer recognizes `stop_loss` or `trailing_stop`, so a hallucinated LLM verdict can never reach a downstream execution path.
 
 ## [2026-04-05]
 

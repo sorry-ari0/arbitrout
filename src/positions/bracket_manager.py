@@ -40,13 +40,13 @@ class BracketManager:
 
         rules = pkg.get("exit_rules", [])
         target_rule = next((r for r in rules if r.get("type") == "target_profit" and r.get("active")), None)
-        stop_rule = next((r for r in rules if r.get("type") == "stop_loss" and r.get("active")), None)
+        # stop_loss rules are PERMANENTLY BANNED — never read, never honored.
+        # Any stop_loss rule in exit_rules is legacy data and must be ignored here.
 
-        if not target_rule and not stop_rule:
-            return {"skipped": True, "reason": "no target or stop rules"}
+        if not target_rule:
+            return {"skipped": True, "reason": "no target rule"}
 
-        target_pct = target_rule["params"].get("target_pct", 25) if target_rule else None
-        stop_pct = stop_rule["params"].get("stop_pct", -40) if stop_rule else None
+        target_pct = target_rule["params"].get("target_pct", 25)
 
         if "_brackets" not in pkg:
             pkg["_brackets"] = {}
@@ -72,23 +72,18 @@ class BracketManager:
                            "peak_price": entry}  # leg-level peak tracking
 
             # Place target order (resting GTC sell on the book)
-            if target_pct is not None:
-                target_price = round(min(entry * (1 + target_pct / 100), MAX_SELL_PRICE), 4)
-                result = await executor.sell_limit(asset_id, qty, target_price)
-                if result.success:
-                    bracket_info["target_order_id"] = result.tx_id
-                    bracket_info["target_price"] = target_price
-                    logger.info("Bracket TARGET placed: %s @ %.4f (order %s)", leg_id, target_price, result.tx_id)
-                else:
-                    logger.warning("Bracket target failed for %s: %s", leg_id, result.error)
+            target_price = round(min(entry * (1 + target_pct / 100), MAX_SELL_PRICE), 4)
+            result = await executor.sell_limit(asset_id, qty, target_price)
+            if result.success:
+                bracket_info["target_order_id"] = result.tx_id
+                bracket_info["target_price"] = target_price
+                logger.info("Bracket TARGET placed: %s @ %.4f (order %s)", leg_id, target_price, result.tx_id)
+            else:
+                logger.warning("Bracket target failed for %s: %s", leg_id, result.error)
 
-            # Set stop level (tracked internally, NOT a resting order)
-            if stop_pct is not None:
-                stop_price = round(max(entry * (1 + stop_pct / 100), MIN_SELL_PRICE), 4)
-                bracket_info["stop_price"] = stop_price
-                logger.info("Bracket STOP level set: %s @ %.4f (monitored)", leg_id, stop_price)
-
-            if "target_order_id" in bracket_info or "stop_price" in bracket_info:
+            # NOTE: stop_price is NEVER set. stop_loss is PERMANENTLY BANNED
+            # (journal EV: every fired stop_loss lost money on binary markets).
+            if "target_order_id" in bracket_info:
                 pkg["_brackets"][leg_id] = bracket_info
 
         return {"success": True, "brackets": len(pkg.get("_brackets", {}))}
@@ -120,26 +115,10 @@ class BracketManager:
             pkg.pop("_brackets", None)
 
     def adjust_stop(self, pkg: dict, leg_id: str, new_stop_price: float) -> dict:
-        """Raise the stop level (rolling trail). No CLOB orders to cancel/replace —
-        stop is tracked internally.
-
-        Only adjusts UPWARD — never lowers the stop.
+        """DISABLED. Trailing stops are PERMANENTLY BANNED. Kept as a no-op for
+        any legacy caller; never writes a stop level into the bracket record.
         """
-        brackets = pkg.get("_brackets", {})
-        info = brackets.get(leg_id)
-        if not info:
-            return {"success": False, "error": "no bracket for leg"}
-
-        current_stop = info.get("stop_price", 0)
-        if new_stop_price <= current_stop:
-            return {"skipped": True, "reason": "new stop not higher than current"}
-
-        new_stop_price = round(max(new_stop_price, MIN_SELL_PRICE), 4)
-        old_stop = info.get("stop_price", 0)
-        info["stop_price"] = new_stop_price
-        info["last_adjusted"] = time.time()
-        logger.debug("Bracket stop adjusted: %s %.4f → %.4f", leg_id, old_stop, new_stop_price)
-        return {"success": True, "new_stop": new_stop_price}
+        return {"skipped": True, "reason": "trailing_stop_permanently_banned"}
 
     def update_peak(self, pkg: dict, leg_id: str, current_price: float):
         """Update leg-level peak price for trail computation."""
@@ -205,36 +184,9 @@ class BracketManager:
                     brackets.pop(leg_id, None)
                     continue
 
-            # Check STOP trigger (price monitor — NOT a resting order)
-            stop_price = info.get("stop_price", 0)
-            if stop_price > 0:
-                # Get current price from the leg
-                leg = next((l for l in pkg.get("legs", []) if l["leg_id"] == leg_id), None)
-                current_price = leg.get("current_price", 0) if leg else 0
-
-                if current_price > 0 and current_price <= stop_price:
-                    # Price dropped to stop level — place limit sell at stop price
-                    logger.info("Stop triggered for %s: price %.4f <= stop %.4f, placing limit sell",
-                                leg_id, current_price, stop_price)
-                    result = await executor.sell_limit(
-                        info["asset_id"], info["quantity"], stop_price)
-                    if result.success:
-                        # Cancel the target order
-                        if target_oid:
-                            try:
-                                await executor.cancel_order(target_oid)
-                            except Exception:
-                                pass
-                        filled.append({
-                            "leg_id": leg_id, "type": "stop",
-                            "order_id": result.tx_id,
-                            "price": stop_price,
-                            "quantity": info.get("quantity", 0),
-                            "fee": 0.0,  # Maker fee
-                        })
-                        brackets.pop(leg_id, None)
-                    else:
-                        logger.warning("Stop sell_limit failed for %s: %s", leg_id, result.error)
+            # Stop monitoring is PERMANENTLY REMOVED. stop_loss is banned —
+            # brackets only track resting GTC target orders. Any stop_price
+            # carried over from legacy data in `info` is intentionally ignored.
 
         if not brackets:
             pkg.pop("_brackets", None)
